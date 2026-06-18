@@ -1,0 +1,11 @@
+name: eeg-viewer-runtime
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pandas
+  - mne
+  - edfio
+  - ffmpeg

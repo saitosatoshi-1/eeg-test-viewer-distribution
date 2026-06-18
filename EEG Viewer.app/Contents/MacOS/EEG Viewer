@@ -1,0 +1,129 @@
+#!/bin/bash
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+
+APP_SUPPORT="/Users/Shared/EEG Viewer"
+FDS_DIR="${APP_SUPPORT}/FDS"
+APP_ROOT="${APP_SUPPORT}/app"
+if [ -d "${APP_ROOT}/FDS" ]; then
+  FDS_DIR="${APP_ROOT}/FDS"
+fi
+RUNTIME_DIR="${HOME}/Library/Application Support/EEG Viewer/runtime"
+PYTHON="${RUNTIME_DIR}/bin/python"
+URL="http://127.0.0.1:8765/"
+HEALTH_URL="http://127.0.0.1:8765/api/health"
+LOG="/tmp/eeg_viewer_app.log"
+STATE_FILE="/tmp/eeg_viewer_app.state"
+LAUNCH_AGENT_DIR="${HOME}/Library/LaunchAgents"
+LAUNCH_AGENT_LABEL="local.eeg.viewer.server"
+LAUNCH_AGENT_PLIST="${LAUNCH_AGENT_DIR}/${LAUNCH_AGENT_LABEL}.plist"
+APP_FINGERPRINT="$(APP_ROOT="${APP_ROOT}" /usr/bin/python3 -c 'import hashlib, os
+from pathlib import Path
+
+root = Path(os.environ["APP_ROOT"])
+digest = hashlib.sha256()
+for rel in ("app.py", "static/index.html", "static/styles.css", "static/app.js"):
+    path = root / rel
+    try:
+        digest.update(rel.encode("utf-8") + b"\0")
+        digest.update(path.read_bytes())
+    except OSError:
+        digest.update(rel.encode("utf-8") + b":missing\0")
+print(digest.hexdigest())' 2>/dev/null || true)"
+
+show_dialog() {
+  /usr/bin/osascript -e "display dialog \"$1\" buttons {\"OK\"} default button \"OK\"" >/dev/null 2>&1 || true
+}
+
+show_start_failure() {
+  show_dialog "EEG Viewer could not start the local server. Please open ${LOG} and send the last lines to support."
+}
+
+if [ ! -x "${PYTHON}" ]; then
+  show_dialog "EEG Viewer runtime is not installed yet. The runtime installer will open in Terminal."
+  /usr/bin/open "${APP_SUPPORT}/Install EEG Viewer Runtime.command"
+  exit 0
+fi
+
+xml_escape() {
+  printf '%s' "$1" | /usr/bin/sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+write_launch_agent() {
+  /bin/mkdir -p "${LAUNCH_AGENT_DIR}"
+  {
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+    printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    printf '%s\n' '<plist version="1.0">'
+    printf '%s\n' '<dict>'
+    printf '%s\n' '  <key>Label</key>'
+    printf '  <string>%s</string>\n' "$(xml_escape "${LAUNCH_AGENT_LABEL}")"
+    printf '%s\n' '  <key>ProgramArguments</key>'
+    printf '%s\n' '  <array>'
+    printf '    <string>%s</string>\n' "$(xml_escape "${PYTHON}")"
+    printf '    <string>%s</string>\n' "$(xml_escape "${APP_ROOT}/app.py")"
+    printf '%s\n' '    <string>--no-browser</string>'
+    printf '%s\n' '    <string>--port</string>'
+    printf '%s\n' '    <string>8765</string>'
+    printf '%s\n' '    <string>--fds-dir</string>'
+    printf '    <string>%s</string>\n' "$(xml_escape "${FDS_DIR}")"
+    printf '%s\n' '  </array>'
+    printf '%s\n' '  <key>WorkingDirectory</key>'
+    printf '  <string>%s</string>\n' "$(xml_escape "${APP_ROOT}")"
+    printf '%s\n' '  <key>StandardOutPath</key>'
+    printf '  <string>%s</string>\n' "$(xml_escape "${LOG}")"
+    printf '%s\n' '  <key>StandardErrorPath</key>'
+    printf '  <string>%s</string>\n' "$(xml_escape "${LOG}")"
+    printf '%s\n' '  <key>EnvironmentVariables</key>'
+    printf '%s\n' '  <dict>'
+    printf '%s\n' '    <key>PYTHONDONTWRITEBYTECODE</key>'
+    printf '%s\n' '    <string>1</string>'
+    printf '%s\n' '  </dict>'
+    printf '%s\n' '  <key>RunAtLoad</key>'
+    printf '%s\n' '  <true/>'
+    printf '%s\n' '</dict>'
+    printf '%s\n' '</plist>'
+  } > "${LAUNCH_AGENT_PLIST}"
+}
+
+start_server() {
+  echo "Starting EEG Viewer from ${APP_ROOT}" >> "${LOG}"
+  write_launch_agent
+  /bin/launchctl bootout "gui/${UID}/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1 || true
+  /bin/launchctl bootstrap "gui/${UID}" "${LAUNCH_AGENT_PLIST}" >> "${LOG}" 2>&1 || true
+  /bin/launchctl kickstart -k "gui/${UID}/${LAUNCH_AGENT_LABEL}" >> "${LOG}" 2>&1 || true
+}
+
+SERVER_OK=0
+HEALTH_PAYLOAD=""
+SERVER_FINGERPRINT=""
+if HEALTH_PAYLOAD="$(/usr/bin/curl -fsS "${HEALTH_URL}" 2>/dev/null)"; then
+  SERVER_OK=1
+  SERVER_FINGERPRINT="$(printf '%s' "${HEALTH_PAYLOAD}" | "${PYTHON}" -c 'import json,sys; print(json.load(sys.stdin).get("appFingerprint",""))' 2>/dev/null || true)"
+fi
+
+if [ "${SERVER_OK}" -eq 1 ] && [ "${SERVER_FINGERPRINT}" != "${APP_FINGERPRINT}" ]; then
+  echo "Restarting EEG Viewer because the running server is not this app build: ${APP_ROOT}" >> "${LOG}"
+  /usr/bin/pkill -f "app.py --no-browser --port 8765" >/dev/null 2>&1 || true
+  sleep 0.5
+  SERVER_OK=0
+fi
+
+if [ "${SERVER_OK}" -eq 0 ]; then
+  start_server
+  for _ in $(seq 1 120); do
+    if /usr/bin/curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+fi
+
+if /usr/bin/curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
+  printf '%s\n' "${APP_FINGERPRINT}" > "${STATE_FILE}"
+else
+  show_start_failure
+  exit 1
+fi
+
+/usr/bin/open "${URL}"

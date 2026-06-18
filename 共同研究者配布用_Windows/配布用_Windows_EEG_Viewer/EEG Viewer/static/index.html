@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EEG Review</title>
+    <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260617-notopo1" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="topbar-column topbar-primary">
+        <label class="nk-select">
+          <span class="select-caption">Sensitivity</span>
+          <select id="sensitivitySelect">
+            <option>5uV</option>
+            <option>7uV</option>
+            <option selected>10uV</option>
+            <option>15uV</option>
+            <option>20uV</option>
+            <option>30uV</option>
+            <option>50uV</option>
+          </select>
+        </label>
+        <label class="nk-select">
+          <span class="select-caption">TC</span>
+          <select id="tcSelect">
+            <option>OFF</option>
+            <option>0.03</option>
+            <option>0.1</option>
+            <option selected>0.3</option>
+            <option>1.0</option>
+            <option>2.0</option>
+          </select>
+        </label>
+        <label class="nk-select">
+          <span class="select-caption">HF</span>
+          <select id="hfSelect">
+            <option value="OFF">OFF</option>
+            <option value="15">15Hz</option>
+            <option value="30">30Hz</option>
+            <option value="60">60Hz</option>
+            <option value="70">70Hz</option>
+            <option value="120" selected>120Hz</option>
+          </select>
+        </label>
+        <label class="nk-select montage-control">
+          <span class="select-caption">Montage</span>
+          <select id="montageSelect">
+            <option value="longitudinal">縦双極誘導</option>
+            <option value="a1a2">単極 (耳朶)</option>
+            <option value="conventional">トレース (耳朶)</option>
+            <option value="conventional_average">トレース (AV)</option>
+            <option value="average">単極 (AV)</option>
+            <option value="cz">単極 (Cz)</option>
+            <option value="transverse">横双極誘導</option>
+            <option value="c3c4">単極 (C3/C4)</option>
+            <option value="laplacian">ラプラシアン</option>
+          </select>
+        </label>
+        <label class="nk-select">
+          <span class="select-caption">AC</span>
+          <select id="acSelect">
+            <option value="OFF">OFF</option>
+            <option value="50" selected>50 Hz</option>
+            <option value="60">60 Hz</option>
+            <option value="50h">50+100 Hz</option>
+            <option value="60h">60+120 Hz</option>
+          </select>
+        </label>
+        <label class="nk-select">
+          <span class="select-caption">Timebase</span>
+          <select id="durationSelect">
+            <option value="1">1s</option>
+            <option value="2">2s</option>
+            <option value="2.5">2.5s</option>
+            <option value="3">3s</option>
+            <option value="4">4s</option>
+            <option value="5">5s</option>
+            <option value="7.5">7.5s</option>
+            <option value="10" selected>10s</option>
+            <option value="12.5">12.5s</option>
+            <option value="15">15s</option>
+            <option value="20">20s</option>
+            <option value="30">30s</option>
+          </select>
+        </label>
+        <label class="nk-select paper-select">
+          <select id="paperSelect">
+            <option>15</option>
+            <option>25</option>
+            <option selected>30</option>
+          </select>
+        </label>
+        <button class="right-panel-switch active" id="rightPanelToggleBtn" type="button" role="switch" aria-checked="true" title="Show or hide event and annotation column"><span class="switch-track"><span class="switch-knob"></span></span><span class="switch-label">Right ON</span></button>
+        <button class="export-button" id="exportViewerJpegBtn" title="Save the current EEG viewer canvas to Desktop as JPEG">JPEG</button>
+        <span class="transport-spacer"></span>
+        <button class="transport-button" id="prevBtn" title="Previous window">◀◀</button>
+        <button class="transport-button" id="stepBackBtn" title="Back 1 second">◀1</button>
+        <button class="transport-button" id="stepForwardBtn" title="Forward 1 second">1▶</button>
+        <button class="transport-button" id="nextBtn" title="Next window">▶▶</button>
+        <div class="file-panel top-file-panel">
+          <div class="file-path-row">
+            <input class="file-path-input" id="filePathInput" placeholder="/path/to/file-or-folder" title="EEG/EDF file or folder path" />
+            <button class="tool-button clear-path-button" id="clearFilePathBtn" title="Clear path">×</button>
+          </div>
+          <div class="file-action-row">
+            <button class="export-button" id="loadFileBtn" title="Open EEG/EDF file or folder">Open</button>
+          </div>
+          <label class="nk-select recent-file-select">
+            <span class="select-caption">Recent</span>
+            <select id="recentFileSelect" title="Recent EEG/EDF files">
+              <option value="">Recent</option>
+            </select>
+          </label>
+        </div>
+        <label class="recording-label" hidden aria-hidden="true">
+          <select id="recordingSelect"></select>
+        </label>
+        <label class="check-label compact-check">
+          <input type="checkbox" id="ecgToggle" checked />
+          ECG
+        </label>
+        <label class="filter-check" title="Regress ECG channel from EEG traces">
+          <input type="checkbox" id="ecgFilterToggle" />
+          ECG filter
+        </label>
+        <div class="readout" id="statusReadout">Loading...</div>
+        </div>
+        <div class="topbar-column topbar-secondary">
+        <div class="research-mode-bar" id="researchModeBar">
+          <div class="research-section research-mode-section" data-research-section="mode">
+            <span class="research-section-title">Mode</span>
+            <div class="research-mode-toggle" role="group" aria-label="Research mode">
+              <button type="button" class="active" data-research-mode="dataset">Cut</button>
+              <button type="button" data-research-mode="test">Test</button>
+            </div>
+          </div>
+          <div class="research-section" data-research-section="dataset">
+            <span class="research-section-title">Output</span>
+            <input class="research-input dataset-path-input" id="researchDatasetPathInput" placeholder="output folder" title="Output folder for cut EDF epochs" />
+            <button class="export-button" id="researchCreateDatasetBtn" type="button" hidden>New</button>
+            <button class="export-button" id="researchLoadDatasetBtn" type="button" hidden>Load</button>
+          </div>
+          <div class="research-section" data-research-section="cut">
+            <span class="research-section-title">Cut</span>
+            <button class="export-button" id="researchCutEpochBtn" type="button">Save Epoch</button>
+          </div>
+          <div class="research-section" data-research-section="output">
+            <span class="research-section-title">Output</span>
+            <button class="export-button" id="researchExportCsvBtn" type="button">CSV</button>
+            <input class="research-input dataset-path-input" id="researchOutputPathInput" placeholder="CSV output folder" title="Output folder for test CSV/results" />
+            <input class="research-input source-root-input" id="researchIedsPresentPathInput" placeholder="IEDs present EDF/folder" title="IEDs-present EDF file or folder" hidden />
+            <input class="research-input source-root-input" id="researchIedsAbsentPathInput" placeholder="IEDs absent EDF/folder" title="IEDs-absent EDF file or folder" hidden />
+          </div>
+          <div class="research-toast hidden" id="researchToast"><span id="researchToastText"></span><button type="button" id="researchUndoBtn">Undo</button></div>        </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="wave-panel">
+          <div class="event-strip" id="eventStrip"></div>
+          <canvas id="waveCanvas" width="1400" height="760"></canvas>
+          <div class="wave-scrollbar-row">
+            <input id="waveScrollbar" class="wave-scrollbar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Waveform time position" disabled />
+          </div>
+          <div class="research-setup-screen" id="researchSetupScreen" hidden>
+            <div class="research-setup-panel">
+              <div class="research-setup-title">テスト設定</div>
+              <div class="research-setup-message" id="researchSetupMessage" role="status" aria-live="polite"></div>
+              <label>回答者名<input id="researchSetupReaderNameInput" placeholder="氏名または識別名" /></label>
+              <label>メール<input id="researchSetupReaderEmailInput" type="email" placeholder="メールアドレス" /></label>
+              <label>所属<input id="researchSetupReaderAffiliationInput" placeholder="所属施設・部署" /></label>
+              <label>職位<select id="researchPositionSelect"><option value="">選択</option><option value="resident">専攻医</option><option value="fellow">フェロー</option><option value="attending">スタッフ</option></select></label>
+              <label>診療科<select id="researchSetupReaderSpecialtySelect"><option value="">選択</option><option value="neurologist">脳神経内科</option><option value="psychiatrist">精神科</option><option value="neurosurgeon">脳神経外科</option><option value="other">その他</option></select></label>
+              <label>専門科目診療年数<input id="researchMedicalYearsInput" type="number" min="0" max="80" step="0.5" placeholder="年数" /></label>
+              <label>てんかん専門医<select id="researchEpilepsySpecialistSelect"><option value="">選択</option><option value="yes">はい</option><option value="no">いいえ</option></select></label>
+              <label>臨床神経生理 EEG専門医<select id="researchClinicalNeurophysEegSpecialistSelect"><option value="">選択</option><option value="yes">はい</option><option value="no">いいえ</option></select></label>
+              <label>月間EEG読影数<input id="researchMonthlyReadsInput" type="number" min="0" max="10000" step="1" placeholder="件/月" /></label>
+              <label>てんかんセンター専従歴<select id="researchEpilepsyCenterTrainingSelect"><option value="">選択</option><option value="yes">あり</option><option value="no">なし</option></select></label>
+              <label>専従期間<input id="researchEpilepsyCenterTrainingDurationInput" placeholder="例: 6か月、2年" /></label>
+              <label>各群の問題数<input id="researchSetupEpochCountInput" type="number" min="1" max="500" value="20" /></label>
+              <button class="export-button" id="researchSetupStartBtn" type="button">開始</button>
+            </div>
+          </div>
+          <div class="research-complete-screen" id="researchCompleteScreen" hidden>
+            <div class="research-complete-panel">
+              <div class="research-complete-title">お疲れ様でした!</div>
+              <div class="research-complete-message" id="researchCompleteMessage">テストが完了しました。</div>
+              <button class="export-button" id="researchCompleteExportCsvBtn" type="button">CSV出力</button>
+            </div>
+          </div>
+          <div class="calibration">
+            <span id="timeReadout">00:00.000 - 00:10.000</span>
+            <span>Major grid 1 s</span>
+            <span id="calReadout">10 uV/mm · TC 0.3s · AC 50 Hz · 30 mm/s</span>
+          </div>
+        </section>
+
+        <div class="column-resize-handle right-panel-resize" data-resize-panel="right" title="Resize annotation column"></div>
+
+        <aside class="side-panel right">
+          <div class="right-tabs" role="tablist" aria-label="Right panel">
+            <button type="button" class="active" data-right-tab="metadata" role="tab">Metadata</button>
+            <button type="button" data-right-tab="annotations" role="tab">Annotations</button>
+            <button type="button" data-right-tab="test" role="tab">Test</button>
+            <button type="button" data-right-tab="answer" role="tab">答え</button>
+          </div>
+
+          <section class="right-tab-panel" data-right-tab-panel="metadata" role="tabpanel">
+            <div class="panel-title">Metadata</div>
+            <dl id="metadataPanel"></dl>
+            <div class="panel-title">Warnings</div>
+            <div id="warningPanel" class="warning-panel"></div>
+          </section>
+
+          <section class="right-tab-panel" data-right-tab-panel="annotations" role="tabpanel" hidden>
+            <details class="event-section" id="eventControls">
+              <summary class="panel-title event-summary">Event</summary>
+              <div class="event-controls">
+                <button id="rangeCancelBtn" disabled>Cancel range</button>
+                <label class="import-label">
+                  Import JSON
+                  <input type="file" id="importJsonInput" accept="application/json" />
+                </label>
+              </div>
+            </details>
+            <div class="annotation-export-row">
+              <button class="export-button" id="exportJsonBtn" title="Export annotations as JSON">Ann JSON</button>
+              <button class="export-button" id="exportCsvBtn" title="Export annotations as CSV">Ann CSV</button>
+            </div>
+            <div class="panel-title annotation-title-row">
+              <span>Annotations</span>
+              <label class="source-annotation-toggle" title="Show annotations embedded in EDF/Nihon Kohden files">
+                <input type="checkbox" id="sourceAnnotationToggle" checked />
+                File Ann
+              </label>
+            </div>
+            <div id="annotationList" class="annotation-list"></div>
+            <div class="annotation-list-resize" id="annotationListResize" title="Resize annotations list"></div>
+          </section>
+
+          <section class="right-tab-panel" data-right-tab-panel="test" role="tabpanel" hidden>
+            <div class="panel-title">Test</div>
+            <div id="rightTestPanel" class="research-right-panel"></div>
+          </section>
+
+          <section class="right-tab-panel" data-right-tab-panel="answer" role="tabpanel" hidden>
+            <div class="panel-title">答え</div>
+            <div id="rightAnswerPanel" class="research-right-panel"></div>
+          </section>
+
+        </aside>
+
+      </main>
+    </div>
+
+    <div id="contextMenu" class="context-menu hidden">
+      <button data-action="point" data-label="spike">spike</button>
+      <button data-action="point" data-label="focal">focal</button>
+      <button data-action="point" data-label="generalized">generalized</button>
+      <button data-action="point" data-label="seizure onset">seizure onset</button>
+      <button data-action="point" data-label="seizure end">seizure end</button>
+      <button data-action="point" data-label="artifact">artifact</button>
+      <button data-action="point" data-label="sleep stage">sleep stage</button>
+      <button data-action="point" data-label="ECG artifact">ECG artifact</button>
+      <button data-action="point" data-label="comment">comment</button>
+      <hr />
+      <button data-action="range-start">Start range here</button>
+      <button data-action="range-end">End range here</button>
+    </div>
+
+    <dialog id="annotationDialog">
+      <form method="dialog">
+        <h2 id="dialogTitle">Annotation</h2>
+        <label>
+          Label
+          <input id="annotationLabel" />
+        </label>
+        <label>
+          Note
+          <textarea id="annotationNote" rows="4"></textarea>
+        </label>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button value="save" id="saveAnnotationBtn">Save</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="/static/app.js?v=20260617-notopo1"></script>
+  </body>
+</html>

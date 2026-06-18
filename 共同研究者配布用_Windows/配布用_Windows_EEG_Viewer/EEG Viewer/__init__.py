@@ -1,0 +1,2 @@
+"""Local EEG viewer package."""
+

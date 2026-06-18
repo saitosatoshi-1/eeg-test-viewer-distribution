@@ -1,0 +1,5 @@
+mne>=1.11
+edfio
+numpy
+scipy
+pandas
