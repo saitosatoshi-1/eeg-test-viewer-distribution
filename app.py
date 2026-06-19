@@ -16,6 +16,7 @@ import sys
 import secrets
 import shlex
 import threading
+import zipfile
 
 sys.dont_write_bytecode = True
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
@@ -84,6 +85,7 @@ RESEARCH_DIR = USER_DATA_DIR / "research"
 RESEARCH_DATASET_DIR = RESEARCH_DIR / "datasets"
 REMOTE_DATASET_CACHE_DIR = RESEARCH_DIR / "remote_cache"
 SUBMITTED_RESULTS_DIR = RESEARCH_DIR / "submitted_results"
+PRIVATE_DATASET_DIR = RESEARCH_DIR / "private_datasets"
 USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
@@ -120,6 +122,7 @@ MUTATING_PATHS = {
     "/api/research/test/response/undo",
     "/api/research/test/export-file",
     "/api/research/test/submit-result",
+    "/api/admin/private-dataset/upload",
     "/api/research/validation/response",
     "/api/research/validation/response/undo",
     "/api/research/validation/export-file",
@@ -2335,6 +2338,108 @@ def remote_research_dataset_dir(url: str) -> Path:
     return RESEARCH_DATASET_DIR / f"remote_{url_cache_key(normalized)[:16]}"
 
 
+def private_dataset_path(value: str) -> Path | None:
+    text = str(value or "").strip()
+    if text.startswith("private:"):
+        dataset_id = safe_research_id(text.split(":", 1)[1])
+        return PRIVATE_DATASET_DIR / dataset_id
+    return None
+
+
+def private_dataset_payload(dataset_dir: Path, dataset_id: str, name: str = "") -> dict[str, Any]:
+    cases: list[dict[str, Any]] = []
+    group_specs = [
+        ("epilepsy", "epileptiform", "IED_PRESENT"),
+        ("no_epilepsy", "non_epileptiform", "IED_ABSENT"),
+    ]
+    for folder_name, label_group, reference_label in group_specs:
+        search_dirs = [dataset_dir / "edf" / folder_name, dataset_dir / folder_name]
+        edf_paths: list[Path] = []
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                edf_paths.extend(sorted(search_dir.glob("*.edf")))
+        for index, edf_path in enumerate(sorted(set(edf_paths)), start=1):
+            case_hash = hashlib.sha1(str(edf_path.relative_to(dataset_dir)).encode("utf-8")).hexdigest()[:8]
+            cases.append({
+                "caseId": f"{dataset_id}_{folder_name}_{index:03d}_{case_hash}",
+                "edfPath": str(edf_path.resolve()),
+                "recordingId": edf_path.stem,
+                "labelGroup": label_group,
+                "referenceLabel": reference_label,
+                "include": True,
+                "phase1Montage": "conventional",
+                "sourceGroup": folder_name,
+                "sourceAnnotation": dataset_id,
+            })
+    if not cases:
+        raise ValueError("Private dataset zip must contain EDF files under epilepsy/ and no_epilepsy/ folders.")
+    return {
+        "datasetId": dataset_id,
+        "name": name or dataset_id,
+        "datasetPath": str(dataset_dir),
+        "createdAt": utc_now_iso(),
+        "settings": {
+            "phase1TotalSampleCount": 20,
+            "phase1Montage": "conventional",
+            "epochDurationSec": 10,
+        },
+        "cases": cases,
+    }
+
+
+def safe_zip_extract(zip_path: Path, target_dir: Path) -> None:
+    target_root = target_dir.resolve()
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            if member.is_dir():
+                continue
+            member_path = target_root / member.filename
+            resolved = member_path.resolve()
+            if not path_is_relative_to(resolved, target_root):
+                raise ValueError(f"Unsafe zip path: {member.filename}")
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as src, resolved.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
+def upload_private_dataset(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_id = safe_research_id(str(payload.get("datasetId") or "private_dataset"))
+    name = str(payload.get("name") or dataset_id).strip()
+    content_b64 = str(payload.get("contentBase64") or "")
+    if not content_b64:
+        raise ValueError("Upload content is empty.")
+    raw = base64.b64decode(content_b64, validate=True)
+    if len(raw) > MAX_EXPORT_POST_BODY_BYTES:
+        raise ValueError("Private dataset upload is too large.")
+    dataset_dir = PRIVATE_DATASET_DIR / dataset_id
+    tmp_dir = PRIVATE_DATASET_DIR / f".{dataset_id}.upload"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = tmp_dir / "dataset.zip"
+    zip_path.write_bytes(raw)
+    extract_dir = tmp_dir / "extract"
+    extract_dir.mkdir()
+    safe_zip_extract(zip_path, extract_dir)
+    if dataset_dir.exists():
+        shutil.rmtree(dataset_dir)
+    dataset_dir.parent.mkdir(parents=True, exist_ok=True)
+    dataset_dir.mkdir()
+    for child in extract_dir.iterdir():
+        shutil.move(str(child), str(dataset_dir / child.name))
+    dataset = private_dataset_payload(dataset_dir, dataset_id, name)
+    json_write(dataset_dir / "dataset.json", dataset)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    return {
+        "ok": True,
+        "datasetId": dataset_id,
+        "datasetPath": f"private:{dataset_id}",
+        "caseCount": len(dataset.get("cases") or []),
+        "epilepsyCount": sum(1 for row in dataset.get("cases") or [] if row.get("labelGroup") == "epileptiform"),
+        "noEpilepsyCount": sum(1 for row in dataset.get("cases") or [] if row.get("labelGroup") == "non_epileptiform"),
+    }
+
+
 def resolve_remote_case_url(dataset_url: str, value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -2370,6 +2475,14 @@ def load_remote_research_dataset(url: str) -> dict[str, Any]:
 
 
 def load_research_dataset(path_value: str | None) -> dict[str, Any]:
+    private_path = private_dataset_path(str(path_value or ""))
+    if private_path is not None:
+        payload = json_read(private_path / "dataset.json", None)
+        if not isinstance(payload, dict):
+            raise FileNotFoundError(f"Private dataset not found: {path_value}")
+        payload.setdefault("datasetPath", str(private_path))
+        payload.setdefault("cases", [])
+        return payload
     if is_http_url(path_value):
         return load_remote_research_dataset(str(path_value))
     dataset_dir = research_dataset_path(path_value)
@@ -3743,7 +3856,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 return self.send_json({"error": "Invalid Content-Length."}, status=400)
-            max_body = MAX_EXPORT_POST_BODY_BYTES if parsed.path in {"/api/export-file", "/api/save-desktop"} else MAX_POST_BODY_BYTES
+            max_body = MAX_EXPORT_POST_BODY_BYTES if parsed.path in {"/api/export-file", "/api/save-desktop", "/api/admin/private-dataset/upload"} else MAX_POST_BODY_BYTES
             if length > max_body:
                 return self.send_json({"error": "Request body is too large."}, status=413)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
@@ -3771,6 +3884,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(undo_validation_response(payload))
             if parsed.path == "/api/research/validation/export-file":
                 return self.send_json(save_validation_results_json_to_desktop(payload))
+            if parsed.path == "/api/admin/private-dataset/upload":
+                return self.send_json(upload_private_dataset(payload))
             if parsed.path != "/api/annotations":
                 return self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             record_id = required(qs, "id")

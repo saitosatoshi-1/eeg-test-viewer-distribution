@@ -64,6 +64,38 @@ https://raw.githubusercontent.com/<owner>/<repo>/main/datasets/v1/dataset.json
 
 Each case should include `edfUrl`. Relative `edfUrl` values are resolved from the `dataset.json` URL.
 
+## Private Server Dataset
+
+For data that must not be redistributed on GitHub, upload the EDF files to the deployed viewer's persistent disk.
+
+Build a local zip:
+
+```bash
+python tools/build_private_dataset_zip.py \
+  --epilepsy "/Users/saitosatoshi/Desktop/montage/test_data/学会用/epilepsy" \
+  --no-epilepsy "/Users/saitosatoshi/Desktop/montage/test_data/学会用/no_epilepsy" \
+  --out /tmp/gakkai_v1_private.zip
+```
+
+Upload it to the deployed viewer:
+
+```bash
+python tools/upload_private_dataset.py \
+  --viewer-url "https://<your-viewer-host>" \
+  --access-code ncnp \
+  --dataset-id gakkai_v1 \
+  --name "Gakkai EEG Test v1" \
+  --zip /tmp/gakkai_v1_private.zip
+```
+
+Then share this link:
+
+```text
+https://<your-viewer-host>/?access=ncnp&dataset=private:gakkai_v1
+```
+
+This keeps EDF files off GitHub. They are stored only in the Render persistent disk at `/data`.
+
 ## Local Docker Test
 
 ```bash
