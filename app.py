@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import csv
 import hashlib
 import importlib.util
 import json
@@ -31,7 +30,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse, urlunparse
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -78,21 +78,29 @@ def ensure_signal():
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
-USER_DATA_DIR = Path.home() / "Library" / "Application Support" / "EEG Viewer"
+USER_DATA_DIR = Path(os.environ.get("EEG_VIEWER_DATA_DIR") or (Path.home() / "Library" / "Application Support" / "EEG Viewer")).expanduser()
 ANNOTATION_DIR = USER_DATA_DIR / "annotations"
 RESEARCH_DIR = USER_DATA_DIR / "research"
 RESEARCH_DATASET_DIR = RESEARCH_DIR / "datasets"
+REMOTE_DATASET_CACHE_DIR = RESEARCH_DIR / "remote_cache"
+SUBMITTED_RESULTS_DIR = RESEARCH_DIR / "submitted_results"
 USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
 SERVER_TOKEN = secrets.token_urlsafe(32)
 LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
+PUBLIC_MODE = os.environ.get("EEG_VIEWER_PUBLIC_MODE", "").lower() in {"1", "true", "yes", "on"}
+ACCESS_USER = os.environ.get("EEG_VIEWER_ACCESS_USER", "viewer")
+ACCESS_PASSWORD = os.environ.get("EEG_VIEWER_ACCESS_PASSWORD", "")
+ACCESS_CODE = os.environ.get("EEG_VIEWER_ACCESS_CODE", ACCESS_PASSWORD)
+ALLOW_UNPROTECTED_PUBLIC = os.environ.get("EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC", "").lower() in {"1", "true", "yes", "on"}
 MAX_WINDOW_DURATION_SEC = 120.0
 MAX_POST_BODY_BYTES = 20 * 1024 * 1024
 MAX_EXPORT_POST_BODY_BYTES = 150 * 1024 * 1024
+MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
+MAX_REMOTE_EEG_BYTES = 2 * 1024 * 1024 * 1024
 RESEARCH_GROUP_SCAN_MAX_DEPTH = 8
 RESEARCH_GROUP_SCAN_LIMIT = 2000
-CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 ALLOWED_RESEARCH_WRITE_ROOTS = (
     RESEARCH_DATASET_DIR,
     DESKTOP_EXPORT_DIR,
@@ -104,12 +112,17 @@ MUTATING_PATHS = {
     "/api/open-file",
     "/api/annotations",
     "/api/export-file",
+    "/api/save-desktop",
     "/api/research/dataset/create",
     "/api/research/dataset/item",
     "/api/research/dataset/cut",
     "/api/research/test/response",
     "/api/research/test/response/undo",
+    "/api/research/test/export-file",
+    "/api/research/test/submit-result",
     "/api/research/validation/response",
+    "/api/research/validation/response/undo",
+    "/api/research/validation/export-file",
 }
 
 SCALP_ORDER = [
@@ -168,6 +181,18 @@ LAPLACIAN_NEIGHBORS = {
 }
 
 LEGACY_LABELS = {"T3": "T7", "T4": "T8", "T5": "P7", "T6": "P8"}
+EAR_REFERENCE_LABELS = {
+    "M1": "A1",
+    "M2": "A2",
+    "LE": "A1",
+    "RE": "A2",
+    "LPA": "A1",
+    "RPA": "A2",
+    "LEFTMASTOID": "A1",
+    "RIGHTMASTOID": "A2",
+    "LEFTAURICULAR": "A1",
+    "RIGHTAURICULAR": "A2",
+}
 CANONICAL_CHANNEL_LABELS = {
     **{name.upper(): name for name in DISPLAY_EEG_LABELS},
     "FP1": "Fp1",
@@ -175,6 +200,7 @@ CANONICAL_CHANNEL_LABELS = {
     "FZ": "Fz",
     "CZ": "Cz",
     "PZ": "Pz",
+    **EAR_REFERENCE_LABELS,
 }
 ECG_CANDIDATES = ("X5", "E", "ECG", "EKG")
 ECG_EXACT_KEYS = {"X5", "E", "ECG", "EKG", "ECG1", "ECG2", "ECG3", "EKG1", "EKG2", "EKG3"}
@@ -316,6 +342,75 @@ def normalize_path_input(value: Any) -> str:
     if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
         return text[1:-1]
     return text
+
+
+def is_http_url(value: Any) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def normalize_github_url(value: str) -> str:
+    text = str(value or "").strip()
+    parsed = urlparse(text)
+    if parsed.scheme in {"http", "https"} and parsed.netloc.lower() == "github.com":
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 5 and parts[2] == "blob":
+            owner, repo, _, branch = parts[:4]
+            rest = "/".join(parts[4:])
+            return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{rest}"
+    return text
+
+
+def url_cache_key(value: str) -> str:
+    return hashlib.sha256(normalize_github_url(value).encode("utf-8")).hexdigest()
+
+
+def remote_cache_filename(url: str, fallback: str = "download.dat") -> str:
+    parsed = urlparse(url)
+    name = Path(unquote(parsed.path or "")).name or fallback
+    safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name).strip("._")
+    return safe or fallback
+
+
+def remote_file_cache_path(url: str) -> Path:
+    normalized = normalize_github_url(url)
+    suffix_name = remote_cache_filename(normalized)
+    return REMOTE_DATASET_CACHE_DIR / "files" / url_cache_key(normalized)[:16] / suffix_name
+
+
+def download_remote_url(url: str, target: Path, max_bytes: int) -> Path:
+    normalized = normalize_github_url(url)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and target.stat().st_size > 0:
+        return target
+    request = Request(normalized, headers={"User-Agent": "EEG-Test-Viewer/1.0"})
+    tmp = target.with_suffix(target.suffix + ".part")
+    total = 0
+    with urlopen(request, timeout=60) as response, tmp.open("wb") as out:
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"Remote file is too large: {normalized}")
+            out.write(chunk)
+    tmp.replace(target)
+    return target
+
+
+def read_remote_text(url: str, max_bytes: int = MAX_REMOTE_DATASET_BYTES) -> str:
+    normalized = normalize_github_url(url)
+    request = Request(normalized, headers={"User-Agent": "EEG-Test-Viewer/1.0"})
+    with urlopen(request, timeout=30) as response:
+        raw = response.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError(f"Remote dataset is too large: {normalized}")
+    return raw.decode("utf-8")
+
+
+def cached_remote_eeg_path(url: str) -> Path:
+    return download_remote_url(url, remote_file_cache_path(url), MAX_REMOTE_EEG_BYTES)
 
 
 def path_candidates_from_input(value: Any) -> list[Path]:
@@ -755,7 +850,7 @@ def safe_export_filename(value: str) -> str:
     name = Path(str(value or "eeg_export")).name
     stem = Path(name).stem or "eeg_export"
     suffix = Path(name).suffix.lower()
-    if suffix not in {".json", ".csv", ".jpg", ".jpeg"}:
+    if suffix not in {".json", ".jpg", ".jpeg"}:
         suffix = ".dat"
     safe_stem = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in stem).strip("._")
     return f"{safe_stem or 'eeg_export'}{suffix}"
@@ -785,6 +880,15 @@ def save_desktop_export(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Export file is too large")
     target = unique_desktop_export_path(filename)
     target.write_bytes(raw)
+    return {"ok": True, "path": str(target), "filename": target.name, "sizeBytes": len(raw)}
+
+
+def save_desktop_text_export(filename: str, text: str) -> dict[str, Any]:
+    raw = text.encode("utf-8")
+    if len(raw) > 100 * 1024 * 1024:
+        raise ValueError("Export file is too large")
+    target = unique_desktop_export_path(filename)
+    target.write_text(text, encoding="utf-8")
     return {"ok": True, "path": str(target), "filename": target.name, "sizeBytes": len(raw)}
 
 
@@ -943,18 +1047,6 @@ def ensure_allowed_research_write_path(path: Path) -> Path:
     raise PermissionError(f"Research outputs must be saved under one of: {allowed}")
 
 
-def csv_safe(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-    if value.startswith(CSV_FORMULA_PREFIXES):
-        return "'" + value
-    return value
-
-
-def csv_safe_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {key: csv_safe(value) for key, value in row.items()}
-
-
 @dataclass
 class Recording:
     record_id: str
@@ -1106,6 +1198,10 @@ class RecordingStore:
         with self._lock:
             if not str(path_text or "").strip():
                 raise ValueError("Path is required.")
+            if is_http_url(path_text):
+                cached_path = cached_remote_eeg_path(str(path_text))
+                rec = self.add_file(str(cached_path))
+                return {"id": rec.record_id, "recordings": [recording_payload(rec)], "path": str(cached_path), "sourceUrl": normalize_github_url(str(path_text)), "kind": "file"}
             path = resolve_path_input(path_text)
             if not path.exists():
                 raise FileNotFoundError(f"Path not found: {path}")
@@ -1644,20 +1740,34 @@ class RecordingStore:
         }
 
 
+def canonical_channel_label(clean: str) -> str:
+    key = re.sub(r"[^A-Z0-9]+", "", unicodedata.normalize("NFKC", clean).upper())
+    legacy = LEGACY_LABELS.get(key)
+    if legacy:
+        return legacy
+    return CANONICAL_CHANNEL_LABELS.get(key, clean)
+
+
 def normalize_label(name: str) -> str:
     clean = str(name).strip()
     clean = clean.replace("EEG ", "").replace("EEG_", "")
     clean = clean.replace("POL ", "").replace("POL_", "")
     clean = clean.replace("-Ref", "").replace("-REF", "").replace("-ref", "")
     clean = clean.replace("–", "-").replace("—", "-")
+    clean = unicodedata.normalize("NFKC", clean).strip()
+    if "-" in clean:
+        left, right = [part.strip() for part in clean.split("-", 1)]
+        right_key = re.sub(r"[^A-Z0-9]+", "", right.upper())
+        left_label = canonical_channel_label(left)
+        right_label = canonical_channel_label(right)
+        if right_key not in {"REF", "LE", "AV", "AVG"} and right_label in DISPLAY_EEG_LABELS:
+            return f"{left_label}-{right_label}"
     upper = clean.upper()
-    for suffix in ("-LE", "-REF"):
+    for suffix in ("-LE", "-REF", "-AV", "-AVG"):
         if upper.endswith(suffix):
             clean = clean[: -len(suffix)]
             break
-    clean = LEGACY_LABELS.get(clean, clean)
-    key = re.sub(r"[^A-Z0-9]+", "", unicodedata.normalize("NFKC", clean).upper())
-    return CANONICAL_CHANNEL_LABELS.get(key, clean)
+    return canonical_channel_label(clean)
 
 
 def is_display_eeg_channel_name(name: str) -> bool:
@@ -1835,6 +1945,10 @@ def build_montage_traces(
     def diff(a: str, b: str, group: str = "") -> bool:
         if a in index and b in index:
             add(f"{a}-{b}", data[index[a]] - data[index[b]], group=group or channel_group(a))
+            return True
+        existing = f"{a}-{b}"
+        if existing in index:
+            add(existing, data[index[existing]], group=group or channel_group(a))
             return True
         return False
 
@@ -2022,29 +2136,6 @@ def save_annotations(record_id: str, annotations: list[dict[str, Any]]) -> None:
     )
 
 
-def annotation_csv(store: RecordingStore, record_id: str) -> str:
-    from io import StringIO
-
-    out = StringIO()
-    fields = [
-        "id",
-        "recordingId",
-        "label",
-        "onset",
-        "sampleIndex",
-        "sfreq",
-        "duration",
-        "channel",
-        "montageChannel",
-        "note",
-        "createdAt",
-    ]
-    writer = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
-    writer.writeheader()
-    writer.writerows(csv_safe_row(row) for row in annotation_export_rows(store, record_id))
-    return out.getvalue()
-
-
 def annotation_export_rows(
     store: RecordingStore | None, record_id: str
 ) -> list[dict[str, Any]]:
@@ -2107,6 +2198,7 @@ RESEARCH_RATING_ALIASES = {
     "てんかん性異常あり": RESEARCH_RATING_POSITIVE,
 }
 RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse", "c3c4", "laplacian"]
+RESEARCH_PHASE1_SAMPLE_TOTAL = 20
 RESEARCH_PHASE1_SAMPLE_PER_GROUP = 20
 
 
@@ -2230,43 +2322,137 @@ def research_dataset_path(value: str | None) -> Path:
     raw = str(value or "").strip()
     if not raw:
         raise ValueError("Dataset path is required.")
+    if is_http_url(raw):
+        return remote_research_dataset_dir(raw)
     path = Path(raw).expanduser()
     if not path.is_absolute():
         path = RESEARCH_DATASET_DIR / safe_research_id(raw)
     return ensure_allowed_research_write_path(path)
 
 
+def remote_research_dataset_dir(url: str) -> Path:
+    normalized = normalize_github_url(url)
+    return RESEARCH_DATASET_DIR / f"remote_{url_cache_key(normalized)[:16]}"
+
+
+def resolve_remote_case_url(dataset_url: str, value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if is_http_url(text):
+        return normalize_github_url(text)
+    return normalize_github_url(urljoin(normalize_github_url(dataset_url), text))
+
+
+def load_remote_research_dataset(url: str) -> dict[str, Any]:
+    normalized = normalize_github_url(url)
+    dataset_dir = remote_research_dataset_dir(normalized)
+    payload = json.loads(read_remote_text(normalized))
+    if not isinstance(payload, dict):
+        raise ValueError("Remote dataset must be a JSON object.")
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    payload.setdefault("datasetId", safe_research_id(f"remote_{remote_cache_filename(normalized, 'dataset')}"))
+    payload.setdefault("name", Path(unquote(urlparse(normalized).path or "")).stem or "Remote dataset")
+    payload["datasetPath"] = str(dataset_dir)
+    payload["sourceDatasetUrl"] = normalized
+    payload.setdefault("cases", [])
+    cases = payload.get("cases") if isinstance(payload.get("cases"), list) else []
+    for row in cases:
+        if not isinstance(row, dict):
+            continue
+        edf_url = resolve_remote_case_url(normalized, row.get("edfUrl") or row.get("edfPath"))
+        if edf_url:
+            row["edfUrl"] = edf_url
+            row["edfPath"] = edf_url
+        row.setdefault("sourceDatasetUrl", normalized)
+    json_write(dataset_dir / "dataset.json", payload)
+    return payload
+
+
 def load_research_dataset(path_value: str | None) -> dict[str, Any]:
+    if is_http_url(path_value):
+        return load_remote_research_dataset(str(path_value))
     dataset_dir = research_dataset_path(path_value)
     payload = json_read(dataset_dir / "dataset.json", None)
     if not isinstance(payload, dict):
-        raise FileNotFoundError(f"dataset.json not found: {dataset_dir}")
+        payload = create_validation_dataset_from_edf_folder(dataset_dir)
     payload.setdefault("datasetPath", str(dataset_dir))
     payload.setdefault("cases", [])
     return payload
+
+
+def infer_validation_label_group_from_path(path: Path) -> str:
+    name = path.name.lower()
+    parent = path.parent.name.lower()
+    text = f"{parent}/{name}"
+    negative_markers = ("no_epilepsy", "non_epilepsy", "nonepilepsy", "non-epilepsy", "iedなし", "なし", "absent", "negative", "normal")
+    if any(marker in text for marker in negative_markers):
+        return "non_epileptiform"
+    return "epileptiform"
+
+
+def create_validation_dataset_from_edf_folder(source_path: Path) -> dict[str, Any]:
+    source = source_path.expanduser().resolve()
+    if not source.exists():
+        raise FileNotFoundError(f"dataset.json not found: {source_path}")
+    edf_paths = research_group_edf_paths(source)
+    if not edf_paths:
+        raise FileNotFoundError(f"dataset.json not found and no EDF files were found: {source}")
+    label_group = infer_validation_label_group_from_path(source)
+    source_hash = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:12]
+    dataset_id = safe_research_id(f"validation_{source.name}_{source_hash}")
+    dataset_dir = RESEARCH_DATASET_DIR / dataset_id
+    dataset_file = dataset_dir / "dataset.json"
+    existing = json_read(dataset_file, None)
+    if isinstance(existing, dict):
+        existing.setdefault("datasetPath", str(dataset_dir))
+        existing.setdefault("cases", [])
+        return existing
+    cases: list[dict[str, Any]] = []
+    for file_index, edf_path in enumerate(edf_paths, start=1):
+        try:
+            duration = edf_duration_seconds(edf_path)
+        except Exception:
+            duration = 10.0
+        reference_label = "MANUAL_EPI" if label_group == "epileptiform" else "MANUAL_NON"
+        case_id_seed = f"{edf_path.resolve()}|validation|{label_group}|{file_index}"
+        case_id = hashlib.sha1(case_id_seed.encode("utf-8")).hexdigest()[:16]
+        cases.append({
+            "caseId": case_id,
+            "edfPath": str(edf_path.resolve()),
+            "recordingId": edf_path.stem,
+            "eventTime": round(duration / 2.0, 6),
+            "epochStart": 0.0,
+            "durationSec": round(duration, 6),
+            "referenceLabel": reference_label,
+            "labelGroup": label_group,
+            "include": True,
+            "excludeReason": "",
+            "qualityNotes": "",
+            "phase1Montage": "conventional",
+            "sourceRoot": str(source),
+            "sourceGroup": "epilepsy" if label_group == "epileptiform" else "no_epilepsy",
+            "sourceAnnotation": "validation_input_folder",
+        })
+    dataset = {
+        "datasetId": dataset_id,
+        "name": source.name,
+        "datasetPath": str(dataset_dir),
+        "sourceRoot": str(source),
+        "sourceRoots": [str(source)],
+        "createdAt": utc_now_iso(),
+        "settings": {"phase1TotalSampleCount": len(cases), "phase1SamplePerGroup": len(cases)},
+        "cases": cases,
+    }
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    json_write(dataset_file, dataset)
+    return dataset
 
 
 def research_case_rows(dataset: dict[str, Any]) -> list[dict[str, Any]]:
     rows = list(dataset.get("cases") or [])
     rows.sort(key=lambda row: (str(row.get("recordingId", "")), float(row.get("epochStart", 0) or 0), str(row.get("caseId", ""))))
     return rows
-
-
-def research_dataset_csv_text(dataset: dict[str, Any]) -> str:
-    fields = [
-        "caseId", "edfPath", "recordingId", "eventTime", "epochStart", "durationSec",
-        "referenceLabel", "labelGroup", "include", "excludeReason", "qualityNotes",
-        "phase1Montage",
-    ]
-    out = []
-    class Sink:
-        def write(self, value): out.append(value)
-    writer = csv.DictWriter(Sink(), fieldnames=fields, extrasaction="ignore")
-    writer.writeheader()
-    for row in research_case_rows(dataset):
-        export_row = dict(row)
-        writer.writerow(csv_safe_row(export_row))
-    return "".join(out)
 
 
 def save_research_group_exports(dataset_dir: Path, dataset: dict[str, Any]) -> None:
@@ -2280,7 +2466,6 @@ def save_research_group_exports(dataset_dir: Path, dataset: dict[str, Any]) -> N
         group_cases = [row for row in research_case_rows(dataset) if row.get("labelGroup") == group]
         group_dataset = {**dataset, "cases": group_cases}
         json_write(group_dir / "dataset.json", group_dataset)
-        (group_dir / "dataset.csv").write_text(research_dataset_csv_text(group_dataset), encoding="utf-8")
 
 
 def save_research_dataset(dataset_dir: Path, dataset: dict[str, Any]) -> None:
@@ -2289,7 +2474,6 @@ def save_research_dataset(dataset_dir: Path, dataset: dict[str, Any]) -> None:
     (dataset_dir / "exports").mkdir(exist_ok=True)
     dataset["datasetPath"] = str(dataset_dir)
     json_write(dataset_dir / "dataset.json", dataset)
-    (dataset_dir / "dataset.csv").write_text(research_dataset_csv_text(dataset), encoding="utf-8")
     save_research_group_exports(dataset_dir, dataset)
 
 
@@ -2355,6 +2539,7 @@ def create_research_dataset(payload: dict[str, Any]) -> dict[str, Any]:
     source_root = Path(source_raw).expanduser().resolve() if source_raw else None
     group_paths_payload = payload.get("groupPaths") if isinstance(payload.get("groupPaths"), dict) else {}
     phase1_montage = str(payload.get("phase1Montage") or "conventional")
+    phase1_total_count = max(1, int(float(payload.get("phase1TotalSampleCount") or RESEARCH_PHASE1_SAMPLE_TOTAL)))
     if source_root is not None and not source_root.exists():
         raise FileNotFoundError(f"Source root not found: {source_root}")
     name = str(payload.get("name") or (source_root.name if source_root else "manual_dataset") or "dataset")
@@ -2447,7 +2632,8 @@ def create_research_dataset(payload: dict[str, Any]) -> dict[str, Any]:
         "settings": {
             "epochDurationSec": 10,
             "phase1Montage": phase1_montage,
-            "phase1SamplePerGroup": RESEARCH_PHASE1_SAMPLE_PER_GROUP,
+            "phase1TotalSampleCount": phase1_total_count,
+            "phase1SamplePerGroup": phase1_total_count,
         },
     }
     manifest = {"datasetId": dataset_id, "name": name, "createdAt": dataset["createdAt"], "sourceRoot": dataset["sourceRoot"], "version": RESEARCH_VERSION}
@@ -2466,9 +2652,13 @@ def update_research_dataset_item(payload: dict[str, Any]) -> dict[str, Any]:
     case_id = str(payload.get("caseId") or "")
     updates = dict(payload.get("updates") or {})
     allowed = {
-        "include", "excludeReason", "qualityNotes", "phase1Montage", "phase1SamplePerGroup",
+        "include", "excludeReason", "qualityNotes", "phase1Montage", "phase1SamplePerGroup", "phase1TotalSampleCount",
     }
     found = None
+    settings_keys = {"phase1SamplePerGroup", "phase1TotalSampleCount"}
+    if "phase1TotalSampleCount" in updates:
+        settings = dataset.setdefault("settings", {})
+        settings["phase1TotalSampleCount"] = max(1, int(float(updates.get("phase1TotalSampleCount") or RESEARCH_PHASE1_SAMPLE_TOTAL)))
     if "phase1SamplePerGroup" in updates:
         settings = dataset.setdefault("settings", {})
         settings["phase1SamplePerGroup"] = max(1, int(float(updates.get("phase1SamplePerGroup") or RESEARCH_PHASE1_SAMPLE_PER_GROUP)))
@@ -2476,7 +2666,7 @@ def update_research_dataset_item(payload: dict[str, Any]) -> dict[str, Any]:
         for row in dataset.get("cases") or []:
             if row.get("caseId") == case_id:
                 for key, value in updates.items():
-                    if key in allowed and key != "phase1SamplePerGroup":
+                    if key in allowed and key not in settings_keys:
                         row[key] = value
                 found = row
                 break
@@ -2493,15 +2683,15 @@ def research_reader_id(value: Any) -> str:
     return reader
 
 
-def research_reader_csv_filename(reader_id: str | None, profile: dict[str, Any] | None = None) -> str:
+def research_reader_json_filename(reader_id: str | None, profile: dict[str, Any] | None = None) -> str:
     if not reader_id:
-        return "all.responses.csv"
+        return "EEG_test_results.json"
     profile = profile if isinstance(profile, dict) else {}
     name = safe_filename_part(
         str(profile.get("readerName") or profile.get("doctorName") or reader_id),
         "reader",
     )
-    return f"{name}.csv"
+    return f"{name}.json"
 
 
 def research_response_path(dataset_dir: Path, reader_id: str) -> Path:
@@ -2563,6 +2753,14 @@ def stable_research_sample(rows: list[dict[str, Any]], limit: int, seed_parts: t
     return sampled
 
 
+def research_phase1_total_count(settings: dict[str, Any]) -> int:
+    if "phase1TotalSampleCount" in settings:
+        return max(1, int(float(settings.get("phase1TotalSampleCount") or RESEARCH_PHASE1_SAMPLE_TOTAL)))
+    if "phase1SamplePerGroup" in settings:
+        return max(1, int(float(settings.get("phase1SamplePerGroup") or RESEARCH_PHASE1_SAMPLE_PER_GROUP)) * 2)
+    return RESEARCH_PHASE1_SAMPLE_TOTAL
+
+
 def stable_balanced_research_order(rows: list[dict[str, Any]], seed_parts: tuple[str, ...]) -> list[dict[str, Any]]:
     seed = hashlib.sha256("|".join(seed_parts).encode("utf-8")).hexdigest()
     rng = random.Random(seed)
@@ -2587,16 +2785,27 @@ def stable_balanced_research_order(rows: list[dict[str, Any]], seed_parts: tuple
 
 def research_phase1_sample(dataset: dict[str, Any], reader_id: str, excluded_case_ids: set[str] | None = None) -> list[dict[str, Any]]:
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
-    per_group = int(settings.get("phase1SamplePerGroup") or RESEARCH_PHASE1_SAMPLE_PER_GROUP)
+    total_count = research_phase1_total_count(settings)
     excluded = excluded_case_ids or set()
     included = [
         row for row in research_case_rows(dataset)
         if bool(row.get("include", True)) and str(row.get("caseId", "")) not in excluded
     ]
     sampled: list[dict[str, Any]] = []
-    for group in ("epileptiform", "non_epileptiform"):
+    selected_ids: set[str] = set()
+    group_limits = {
+        "epileptiform": total_count // 2 + total_count % 2,
+        "non_epileptiform": total_count // 2,
+    }
+    for group, limit in group_limits.items():
         rows = [row for row in included if row.get("labelGroup") == group]
-        sampled.extend(stable_research_sample(rows, per_group, (str(dataset.get("datasetId", "")), reader_id, "phase1", group)))
+        group_sample = stable_research_sample(rows, limit, (str(dataset.get("datasetId", "")), reader_id, "phase1", group))
+        sampled.extend(group_sample)
+        selected_ids.update(str(row.get("caseId", "")) for row in group_sample)
+    remaining = total_count - len(sampled)
+    if remaining > 0:
+        fill_pool = [row for row in included if str(row.get("caseId", "")) not in selected_ids]
+        sampled.extend(stable_research_sample(fill_pool, remaining, (str(dataset.get("datasetId", "")), reader_id, "phase1", "fill")))
     return stable_balanced_research_order(sampled, (str(dataset.get("datasetId", "")), reader_id, "phase1", "balanced-order"))
 
 
@@ -2650,6 +2859,8 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
     all_cases = research_phase_case_pool(dataset, reader_id, phase, active)
     active_rows = list(active.values())
     non_sample_cases = [row for row in all_cases if not row.get("sampleEpoch")]
+    settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
+    requested_total = research_phase1_total_count(settings)
     return {
         "datasetPath": dataset.get("datasetPath"),
         "datasetId": dataset.get("datasetId"),
@@ -2661,7 +2872,8 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         "answeredCount": sum(1 for row in non_sample_cases if active.get((str(row.get("caseId")), phase))),
         "totalCount": len(non_sample_cases),
         "displayCount": len(cases),
-        "samplePerGroup": int((dataset.get("settings") or {}).get("phase1SamplePerGroup") or RESEARCH_PHASE1_SAMPLE_PER_GROUP),
+        "requestedTotalCount": requested_total,
+        "samplePerGroup": max(1, math.ceil(requested_total / 2)),
         "groupCounts": {group: sum(1 for row in non_sample_cases if row.get("labelGroup") == group) for group in ("epileptiform", "non_epileptiform")},
         "ratings": [RESEARCH_RATING_POSITIVE, RESEARCH_RATING_NEGATIVE, RESEARCH_RATING_UNKNOWN],
     }
@@ -2761,8 +2973,6 @@ def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         "startedAt": payload.get("startedAt") or now,
         "answeredAt": payload.get("answeredAt") or now,
         "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
-        "epochStart": float(case.get("epochStart", 0) or 0),
-        "eventTime": float(case.get("eventTime", 0) or 0),
         "labelGroup": case.get("labelGroup", ""),
         "referenceLabel": case.get("referenceLabel", ""),
         "usedMontage": payload.get("usedMontage") or "",
@@ -2781,7 +2991,24 @@ def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
     return {"response": response, "session": session}
 
 
-def export_validation_results_json(dataset_dir: Path, output_path: Any = None) -> str:
+def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+    response_id = str(payload.get("responseId") or "")
+    responses = load_validation_responses(dataset_dir)
+    candidates = [row for row in responses if not row.get("superseded") and not row.get("undoneAt")]
+    target = None
+    if response_id:
+        target = next((row for row in candidates if row.get("responseId") == response_id), None)
+    if target is None and candidates:
+        target = max(candidates, key=lambda row: str(row.get("answeredAt") or ""))
+    if target is None:
+        raise ValueError("No active validation response to undo.")
+    target["undoneAt"] = utc_now_iso()
+    save_validation_responses(dataset_dir, responses)
+    return {"undone": target, "session": validation_session({"datasetPath": str(dataset_dir)})}
+
+
+def export_validation_results_json(dataset_dir: Path) -> str:
     dataset = load_research_dataset(str(dataset_dir))
     responses = load_validation_responses(dataset_dir)
     active = active_validation_map(responses)
@@ -2801,13 +3028,11 @@ def export_validation_results_json(dataset_dir: Path, output_path: Any = None) -
                 valid_count += 1
             else:
                 invalid_count += 1
-        cases_payload.append({
+        case_payload = {
             "caseId": case_id,
-            "edfPath": case.get("edfPath", ""),
+            "edfFile": Path(str(case.get("edfPath", ""))).name if case.get("edfPath") else "",
             "recordingId": case.get("recordingId", ""),
-            "epochStart": case.get("epochStart", ""),
-            "durationSec": case.get("durationSec", ""),
-            "eventTime": case.get("eventTime", ""),
+            "sourceGroup": case.get("sourceGroup", ""),
             "referenceLabel": case.get("referenceLabel", ""),
             "labelGroup": case.get("labelGroup", ""),
             "expectedRatingFromDataset": expected,
@@ -2818,32 +3043,31 @@ def export_validation_results_json(dataset_dir: Path, output_path: Any = None) -
             "validationMethod": response.get("validationMethod") if response else "",
             "answeredAt": response.get("answeredAt") if response else "",
             "responseId": response.get("responseId") if response else "",
-        })
+        }
+        cases_payload.append(case_payload)
     payload = {
+        "exportVersion": "compact-1",
         "exportedAt": utc_now_iso(),
-        "datasetId": dataset.get("datasetId", ""),
-        "datasetPath": str(dataset_dir),
+        "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "summary": {
             "totalEpochs": len(cases_payload),
             "reviewedEpochs": reviewed,
             "validEpochs": valid_count,
             "invalidEpochs": invalid_count,
             "unreviewedEpochs": max(0, len(cases_payload) - reviewed),
+            "invalidCaseIds": [row.get("caseId", "") for row in cases_payload if row.get("datasetValid") is False],
         },
         "cases": cases_payload,
-        "responses": responses,
     }
     json_text = json.dumps(payload, ensure_ascii=False, indent=2, default=json_safe) + "\n"
-    filename = "validation_results.json"
-    export_path = dataset_dir / "exports" / filename
-    export_path.parent.mkdir(parents=True, exist_ok=True)
-    export_path.write_text(json_text, encoding="utf-8")
-    output_dir = research_output_dir(dataset_dir, output_path)
-    if output_dir is not None:
-        output_file = output_dir / filename
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(json_text, encoding="utf-8")
     return json_text
+
+
+def save_validation_results_json_to_desktop(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+    json_text = export_validation_results_json(dataset_dir)
+    filename = safe_export_filename(str(payload.get("filename") or "validation_results.json"))
+    return save_desktop_text_export(filename, json_text)
 
 
 def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
@@ -2862,6 +3086,23 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
     responses = load_research_responses(dataset_dir, reader_id)
     reader_profile = payload.get("readerProfile") if isinstance(payload.get("readerProfile"), dict) else {}
     montage_durations = research_montage_duration_payload(payload.get("montageDurationsSec"))
+    montage_order = research_montage_order_payload(payload.get("montageOrder"))
+    montage_sequence = research_montage_sequence_payload(payload.get("montageSequence"))
+    montage_usage = research_montage_sequence_payload(payload.get("montageUsage"))
+    montage_timeline = research_montage_sequence_payload(payload.get("montageTimeline"))
+    montage_switches = research_montage_sequence_payload(payload.get("montageSwitches"))
+    if not montage_sequence and montage_switches:
+        montage_sequence = [
+            {
+                "index": int(row.get("index") or index),
+                "montage": str(row.get("to") or ""),
+                "atSec": row.get("atSec", 0),
+            }
+            for index, row in enumerate(montage_switches, start=1)
+            if str(row.get("to") or "").strip()
+        ]
+    if not montage_order and montage_sequence:
+        montage_order = [str(row.get("montage") or "").strip() for row in montage_sequence if str(row.get("montage") or "").strip()]
     displayed_montages = [str(item) for item in payload.get("displayedMontages", []) if str(item or "").strip()] if isinstance(payload.get("displayedMontages"), list) else list(montage_durations.keys())
     now = utc_now_iso()
     response_id = str(uuid.uuid4())
@@ -2870,39 +3111,44 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
             row["superseded"] = True
             row["supersededAt"] = now
             row["replacedByResponseId"] = response_id
+    answer_order = 1 + sum(
+        1
+        for row in responses
+        if str(row.get("phase")) == phase and not row.get("superseded") and not row.get("undoneAt")
+    )
     response = {
         "responseId": response_id,
         "readerId": reader_id,
         "caseId": case_id,
         "phase": phase,
+        "answerOrder": answer_order,
         "rating": rating,
         "startedAt": payload.get("startedAt") or now,
         "answeredAt": payload.get("answeredAt") or now,
         "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
-        "epochStart": float(case.get("epochStart", 0) or 0),
-        "eventTime": float(case.get("eventTime", 0) or 0),
         "displayMode": payload.get("displayMode") or "phase1_single",
         "usedMontage": payload.get("usedMontage") or "",
         "finalMontage": payload.get("finalMontage") or payload.get("usedMontage") or "",
         "displayedMontages": displayed_montages,
         "montageDurationsSec": montage_durations,
         "montageDurationSummary": research_montage_duration_summary(montage_durations),
+        "montageOrder": montage_order,
+        "montageSequence": montage_sequence,
+        "montageUsage": montage_usage,
+        "montageOrderSummary": payload.get("montageOrderSummary") or ";".join(f"{index}:{montage}" for index, montage in enumerate(montage_order, start=1)),
+        "montageUsageSummary": payload.get("montageUsageSummary") or ";".join(
+            f"{int(row.get('index') or row.get('order') or index)}:{row.get('montage', '')}:{row.get('startSec', 0)}-{row.get('endSec', 0)}s({row.get('durationSec', 0)}s)"
+            for index, row in enumerate(montage_usage, start=1)
+        ),
+        "montageTimeline": montage_timeline,
+        "montageSwitches": montage_switches,
+        "montageTimelineSummary": payload.get("montageTimelineSummary") or "",
+        "montageSwitchSummary": payload.get("montageSwitchSummary") or "",
         "sensitivity": payload.get("sensitivity") or "",
         "tc": payload.get("tc") or "",
         "hf": payload.get("hf") or "",
         "timebaseSec": payload.get("timebaseSec") or "",
-        "spikeTime": payload.get("spikeTime") if payload.get("spikeTime") != "" else "",
-        "spikeSampleIndex": payload.get("spikeSampleIndex") if payload.get("spikeSampleIndex") != "" else "",
-        "spikeSfreq": payload.get("spikeSfreq") if payload.get("spikeSfreq") != "" else "",
-        "spikeChannel": payload.get("spikeChannel") or "",
-        "clickedElectrode": payload.get("clickedElectrode") or "",
-        "clickedCanvasX": payload.get("clickedCanvasX") if payload.get("clickedCanvasX") != "" else "",
-        "clickedCanvasY": payload.get("clickedCanvasY") if payload.get("clickedCanvasY") != "" else "",
-        "clickedRowIndex": payload.get("clickedRowIndex") if payload.get("clickedRowIndex") != "" else "",
-        "spikeMontageChannel": payload.get("spikeMontageChannel") or "",
         "spikeMontage": payload.get("spikeMontage") or "",
-        "selectedWaveformStart": payload.get("selectedWaveformStart") if payload.get("selectedWaveformStart") != "" else "",
-        "selectedWaveformDuration": payload.get("selectedWaveformDuration") if payload.get("selectedWaveformDuration") != "" else "",
         "readerProfile": reader_profile,
         "superseded": False,
         "undoneAt": "",
@@ -2967,6 +3213,41 @@ def research_montage_duration_summary(value: dict[str, Any]) -> str:
     return ";".join(rows)
 
 
+def research_montage_order_payload(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for raw in value:
+        montage = str(raw or "").strip()
+        if montage:
+            out.append(montage)
+    return out
+
+
+def research_montage_sequence_payload(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for index, row in enumerate(value, start=1):
+        if not isinstance(row, dict):
+            continue
+        item: dict[str, Any] = {"index": int(row.get("index") or row.get("order") or index)}
+        if "order" in row:
+            item["order"] = int(row.get("order") or item["index"])
+        for key in ("montage", "from", "to"):
+            if key in row:
+                item[key] = str(row.get(key) or "")
+        for key in ("atSec", "startSec", "endSec", "durationSec"):
+            if key not in row or row.get(key) in (None, ""):
+                continue
+            try:
+                item[key] = round(float(row.get(key)), 3)
+            except (TypeError, ValueError):
+                item[key] = row.get(key)
+        out.append(item)
+    return out
+
+
 def response_reader_profile(*responses: dict[str, Any]) -> dict[str, Any]:
     for response in responses:
         profile = response.get("readerProfile") if isinstance(response, dict) else None
@@ -2983,132 +3264,9 @@ def profile_value(profile: dict[str, Any], *keys: str) -> Any:
     return ""
 
 
-def export_research_responses_csv(dataset_dir: Path, reader_id: str | None = None, output_path: Any = None) -> str:
-    dataset = load_research_dataset(str(dataset_dir))
-    reader_ids = [research_reader_id(reader_id)] if reader_id else [p.stem for p in (dataset_dir / "responses").glob("*.json")]
-    fields = [
-        "readerId", "readerName", "email", "affiliation", "specialty", "usualMontage",
-        "doctorName", "position", "medicalPracticeYears", "neurologyYears", "epilepsySpecialist",
-        "clinicalNeurophysEegSpecialist", "eegTraining", "eegReadsPerMonth",
-        "monthlyReads", "epilepsyCenterTraining", "epilepsyCenterTrainingDuration", "readerProfileJson",
-        "caseId", "edfPath", "edfFile", "recordingId", "epochStart", "durationSec", "epochEnd", "eventTime",
-        "referenceLabel", "labelGroup", "expectedRating", "sourceGroup", "sourceAnnotation",
-        "phase1Answered", "phase1StartedAt", "phase1AnsweredAt", "phase1ElapsedMs",
-        "phase1Rating", "phase1Correct", "phase1Incorrect", "isPhase1FalsePositive",
-        "phase1UsedMontage", "phase1FinalMontage", "phase1Sensitivity", "phase1Tc", "phase1Hf", "phase1TimebaseSec",
-        "phase1DisplayedMontages", "phase1MontageDurationSummary",
-        "phase1SpikeTime", "phase1SpikeSampleIndex", "phase1SpikeSfreq", "phase1SpikeChannel", "phase1ClickedElectrode",
-        "phase1ClickedCanvasX", "phase1ClickedCanvasY", "phase1ClickedRowIndex", "phase1SpikeMontageChannel", "phase1SpikeMontage",
-        "phase1SelectedWaveformStart", "phase1SelectedWaveformDuration",
-    ]
-    for montage in RESEARCH_MONTAGE_KEYS:
-        fields.append(f"phase1_{montage}_sec")
-    out = []
-    class Sink:
-        def write(self, value): out.append(value)
-    writer = csv.DictWriter(Sink(), fieldnames=fields)
-    writer.writeheader()
-    for rid in reader_ids:
-        responses = load_research_responses(dataset_dir, rid)
-        active = active_response_map(responses)
-        for case in research_case_rows(dataset):
-            if not bool(case.get("include", True)):
-                continue
-            case_id = str(case.get("caseId"))
-            p1 = active.get((case_id, "1"), {})
-            expected_rating = RESEARCH_RATING_POSITIVE if case.get("labelGroup") == "epileptiform" else RESEARCH_RATING_NEGATIVE
-            p1_correct = research_rating_correct(str(p1.get("rating", "")), str(case.get("labelGroup", ""))) if p1 else ""
-            is_fp = bool(p1.get("rating") == RESEARCH_RATING_POSITIVE and case.get("labelGroup") == "non_epileptiform")
-            profile = response_reader_profile(p1)
-            phase1_durations = p1.get("montageDurationsSec") if isinstance(p1.get("montageDurationsSec"), dict) else {}
-            epoch_start = float(case.get("epochStart", 0) or 0)
-            duration_sec = float(case.get("durationSec", 0) or 0)
-            edf_path = str(case.get("edfPath", "") or "")
-            export_row = {
-                "readerId": rid,
-                "readerName": profile_value(profile, "readerName", "doctorName"),
-                "email": profile_value(profile, "email"),
-                "affiliation": profile_value(profile, "affiliation"),
-                "specialty": profile_value(profile, "specialty"),
-                "usualMontage": profile_value(profile, "usualMontage"),
-                "doctorName": profile_value(profile, "doctorName", "readerName"),
-                "position": profile_value(profile, "position"),
-                "medicalPracticeYears": profile_value(profile, "medicalPracticeYears", "medicalYears"),
-                "neurologyYears": profile_value(profile, "neurologyYears"),
-                "epilepsySpecialist": profile_value(profile, "epilepsySpecialist"),
-                "clinicalNeurophysEegSpecialist": profile_value(profile, "clinicalNeurophysEegSpecialist"),
-                "eegTraining": profile_value(profile, "eegTraining"),
-                "eegReadsPerMonth": profile_value(profile, "eegReadsPerMonth", "monthlyReads"),
-                "monthlyReads": profile_value(profile, "monthlyReads", "eegReadsPerMonth"),
-                "epilepsyCenterTraining": profile_value(profile, "epilepsyCenterTraining"),
-                "epilepsyCenterTrainingDuration": profile_value(profile, "epilepsyCenterTrainingDuration"),
-                "readerProfileJson": json.dumps(profile, ensure_ascii=False, sort_keys=True) if profile else "",
-                "caseId": case_id,
-                "edfPath": edf_path,
-                "edfFile": Path(edf_path).name if edf_path else "",
-                "recordingId": case.get("recordingId", ""),
-                "epochStart": case.get("epochStart", ""),
-                "durationSec": case.get("durationSec", ""),
-                "epochEnd": round(epoch_start + duration_sec, 6) if duration_sec else "",
-                "eventTime": case.get("eventTime", ""),
-                "referenceLabel": case.get("referenceLabel", ""),
-                "labelGroup": case.get("labelGroup", ""),
-                "expectedRating": expected_rating,
-                "sourceGroup": case.get("sourceGroup", ""),
-                "sourceAnnotation": case.get("sourceAnnotation", ""),
-                "phase1Answered": bool(p1),
-                "phase1StartedAt": p1.get("startedAt", ""),
-                "phase1AnsweredAt": p1.get("answeredAt", ""),
-                "phase1ElapsedMs": p1.get("elapsedMs", ""),
-                "phase1Rating": p1.get("rating", ""),
-                "phase1Correct": p1_correct,
-                "phase1Incorrect": (not p1_correct) if p1_correct in (True, False) else "",
-                "isPhase1FalsePositive": is_fp,
-                "phase1UsedMontage": p1.get("usedMontage", ""),
-                "phase1FinalMontage": p1.get("finalMontage", p1.get("usedMontage", "")),
-                "phase1Sensitivity": p1.get("sensitivity", ""),
-                "phase1Tc": p1.get("tc", ""),
-                "phase1Hf": p1.get("hf", ""),
-                "phase1TimebaseSec": p1.get("timebaseSec", ""),
-                "phase1DisplayedMontages": ";".join(p1.get("displayedMontages", [])) if isinstance(p1.get("displayedMontages"), list) else "",
-                "phase1MontageDurationSummary": p1.get("montageDurationSummary", ""),
-                "phase1SpikeTime": p1.get("spikeTime", ""),
-                "phase1SpikeSampleIndex": p1.get("spikeSampleIndex", ""),
-                "phase1SpikeSfreq": p1.get("spikeSfreq", ""),
-                "phase1SpikeChannel": p1.get("spikeChannel", ""),
-                "phase1ClickedElectrode": p1.get("clickedElectrode", ""),
-                "phase1ClickedCanvasX": p1.get("clickedCanvasX", ""),
-                "phase1ClickedCanvasY": p1.get("clickedCanvasY", ""),
-                "phase1ClickedRowIndex": p1.get("clickedRowIndex", ""),
-                "phase1SpikeMontageChannel": p1.get("spikeMontageChannel", ""),
-                "phase1SpikeMontage": p1.get("spikeMontage", ""),
-                "phase1SelectedWaveformStart": p1.get("selectedWaveformStart", ""),
-                "phase1SelectedWaveformDuration": p1.get("selectedWaveformDuration", ""),
-            }
-            for montage in RESEARCH_MONTAGE_KEYS:
-                export_row[f"phase1_{montage}_sec"] = phase1_durations.get(montage, "")
-            writer.writerow(csv_safe_row(export_row))
-    csv_text = "".join(out)
-    filename_profile = response_reader_profile(*[
-        response
-        for rid in reader_ids
-        for response in active_research_responses(load_research_responses(dataset_dir, rid))
-    ]) if reader_id else {}
-    filename = research_reader_csv_filename(reader_id, filename_profile)
-    export_path = dataset_dir / "exports" / filename
-    export_path.parent.mkdir(parents=True, exist_ok=True)
-    export_path.write_text(csv_text, encoding="utf-8")
-    output_dir = research_output_dir(dataset_dir, output_path)
-    if output_dir is not None:
-        output_file = output_dir / filename
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(csv_text, encoding="utf-8")
-    return csv_text
-
-
 def research_json_case_payload(case: dict[str, Any]) -> dict[str, Any]:
     row = dict(case)
-    for key in ("phase2Montages", "topomapTime"):
+    for key in ("phase2Montages", "topomapTime", "epochStart", "eventTime", "durationSec"):
         row.pop(key, None)
     return row
 
@@ -3120,6 +3278,13 @@ def research_json_response_payload(response: dict[str, Any]) -> dict[str, Any] |
     row["phase"] = "1"
     if row.get("displayMode") == "phase2_4montage_topomap":
         row["displayMode"] = "phase1_single"
+    for key in (
+        "epochStart", "eventTime", "durationSec",
+        "spikeTime", "spikeSampleIndex", "spikeSfreq", "spikeChannel",
+        "clickedElectrode", "clickedCanvasX", "clickedCanvasY", "clickedRowIndex",
+        "spikeMontageChannel", "selectedWaveformStart", "selectedWaveformDuration",
+    ):
+        row.pop(key, None)
     return row
 
 
@@ -3133,48 +3298,190 @@ def research_json_dataset_payload(dataset: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def export_research_responses_json(dataset_dir: Path, reader_id: str | None = None, output_path: Any = None) -> str:
+def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: profile.get(key, "")
+        for key in (
+            "readerName", "email", "affiliation", "specialty", "position",
+            "epilepsySpecialist", "clinicalNeurophysEegSpecialist",
+            "medicalPracticeYears", "eegReadsPerMonth",
+            "epilepsyCenterTraining", "epilepsyCenterTrainingDuration",
+            "usualMontage",
+        )
+    }
+
+
+def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path) -> dict[str, Any]:
+    cases = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
+    settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
+    return {
+        "datasetId": dataset.get("datasetId", ""),
+        "name": dataset.get("name", ""),
+        "createdAt": dataset.get("createdAt", ""),
+        "version": dataset.get("version", ""),
+        "questionCount": research_phase1_total_count(settings),
+        "includedCaseCount": len(cases),
+        "groupCounts": {
+            group: sum(1 for row in cases if row.get("labelGroup") == group)
+            for group in ("epileptiform", "non_epileptiform")
+        },
+        "settings": {
+            "epochDurationSec": settings.get("epochDurationSec", 10),
+            "phase1Montage": settings.get("phase1Montage", ""),
+            "phase1TotalSampleCount": research_phase1_total_count(settings),
+        },
+    }
+
+
+def research_compact_response_payload(response: dict[str, Any], case: dict[str, Any] | None) -> dict[str, Any] | None:
+    row = research_json_response_payload(response)
+    if row is None:
+        return None
+    label_group = str(case.get("labelGroup") if case else "")
+    edf_path = str(case.get("edfPath", "") if case else "")
+    rating = str(row.get("rating", ""))
+    correct = research_rating_correct(rating, label_group) if label_group else ""
+    montage_usage = row.get("montageUsage")
+    if not isinstance(montage_usage, list) or not montage_usage:
+        montage_usage = row.get("montageTimeline") if isinstance(row.get("montageTimeline"), list) else []
+    return {
+        "answerOrder": row.get("answerOrder", ""),
+        "caseId": row.get("caseId", ""),
+        "edfFile": Path(edf_path).name if edf_path else "",
+        "recordingId": case.get("recordingId", "") if case else "",
+        "sourceGroup": case.get("sourceGroup", "") if case else "",
+        "labelGroup": label_group,
+        "referenceLabel": case.get("referenceLabel", "") if case else "",
+        "rating": rating,
+        "correct": correct,
+        "startedAt": row.get("startedAt", ""),
+        "answeredAt": row.get("answeredAt", ""),
+        "elapsedMs": row.get("elapsedMs", ""),
+        "display": {
+            "displayMode": row.get("displayMode", ""),
+            "finalMontage": row.get("finalMontage") or row.get("usedMontage", ""),
+            "displayedMontages": row.get("displayedMontages", []),
+            "sensitivity": row.get("sensitivity", ""),
+            "tc": row.get("tc", ""),
+            "hf": row.get("hf", ""),
+            "timebaseSec": row.get("timebaseSec", ""),
+        },
+        "montageUsage": montage_usage,
+        "montageUsageSummary": row.get("montageUsageSummary", ""),
+    }
+
+
+def research_reader_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(responses)
+    correct_count = sum(1 for row in responses if row.get("correct") is True)
+    incorrect_count = sum(1 for row in responses if row.get("correct") is False)
+    unknown_count = sum(1 for row in responses if row.get("rating") == RESEARCH_RATING_UNKNOWN)
+    return {
+        "totalAnswered": total,
+        "correct": correct_count,
+        "incorrect": incorrect_count,
+        "unknown": unknown_count,
+        "accuracy": round(correct_count / total, 4) if total else None,
+    }
+
+
+def export_research_responses_json(dataset_dir: Path, reader_id: str | None = None) -> str:
     dataset = load_research_dataset(str(dataset_dir))
     reader_ids = [research_reader_id(reader_id)] if reader_id else [p.stem for p in (dataset_dir / "responses").glob("*.json")]
+    case_by_id = {str(row.get("caseId", "")): row for row in research_case_rows(dataset)}
     readers = []
     for rid in reader_ids:
         responses = load_research_responses(dataset_dir, rid)
         active = active_response_map(responses)
-        active_responses = [row for row in (research_json_response_payload(row) for row in active.values()) if row is not None]
-        active_responses = sorted(
-            active_responses,
-            key=lambda row: (str(row.get("answeredAt", "")), str(row.get("caseId", ""))),
+        compact_responses = [
+            row for row in (
+                research_compact_response_payload(response, case_by_id.get(str(response.get("caseId", ""))))
+                for response in active.values()
+            )
+            if row is not None
+        ]
+        compact_responses = sorted(
+            compact_responses,
+            key=lambda row: (int(row.get("answerOrder") or 0), str(row.get("answeredAt", "")), str(row.get("caseId", ""))),
         )
-        exported_responses = [row for row in (research_json_response_payload(row) for row in responses) if row is not None]
-        profile = response_reader_profile(*active_responses, *exported_responses)
+        profile = response_reader_profile(*active.values())
         readers.append({
             "readerId": rid,
-            "readerProfile": profile,
-            "responses": exported_responses,
-            "activeResponses": active_responses,
+            "readerProfile": research_compact_reader_profile(profile),
+            "summary": research_reader_summary(compact_responses),
+            "responses": compact_responses,
         })
     payload = {
+        "exportVersion": "compact-1",
         "exportedAt": utc_now_iso(),
-        "datasetId": dataset.get("datasetId", ""),
-        "datasetPath": str(dataset_dir),
-        "dataset": research_json_dataset_payload(dataset),
+        "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "readers": readers,
     }
     json_text = json.dumps(payload, ensure_ascii=False, indent=2, default=json_safe) + "\n"
-    if reader_id:
-        profile = readers[0].get("readerProfile", {}) if readers else {}
-        filename = research_reader_csv_filename(reader_id, profile).removesuffix(".csv") + ".json"
-    else:
-        filename = "EEG_test_results.json"
-    export_path = dataset_dir / "exports" / filename
-    export_path.parent.mkdir(parents=True, exist_ok=True)
-    export_path.write_text(json_text, encoding="utf-8")
-    output_dir = research_output_dir(dataset_dir, output_path)
-    if output_dir is not None:
-        output_file = output_dir / filename
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(json_text, encoding="utf-8")
     return json_text
+
+
+def save_research_responses_json_to_desktop(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+    reader_id = str(payload.get("readerId") or "").strip() or None
+    json_text = export_research_responses_json(dataset_dir, reader_id)
+    filename = str(payload.get("filename") or "").strip()
+    if not filename:
+        profile = {}
+        if reader_id:
+            responses = load_research_responses(dataset_dir, reader_id)
+            profile = response_reader_profile(*responses)
+        filename = research_reader_json_filename(reader_id, profile)
+    return save_desktop_text_export(filename, json_text)
+
+
+def unique_submission_path(dataset_id: str, filename: str) -> Path:
+    dataset_part = safe_filename_part(dataset_id or "dataset", "dataset")
+    target_dir = SUBMITTED_RESULTS_DIR / dataset_part
+    target_dir.mkdir(parents=True, exist_ok=True)
+    base_name = safe_export_filename(filename or "EEG_test_results.json")
+    if not base_name.lower().endswith(".json"):
+        base_name = f"{Path(base_name).stem or 'EEG_test_results'}.json"
+    target = target_dir / base_name
+    if not target.exists():
+        return target
+    stem = target.stem
+    suffix = target.suffix
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = target.with_name(f"{stem}_{timestamp}{suffix}")
+    if not candidate.exists():
+        return candidate
+    for index in range(2, 1000):
+        candidate = target.with_name(f"{stem}_{timestamp}_{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise ValueError("Could not create a unique submission filename")
+
+
+def save_research_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+    dataset = load_research_dataset(str(dataset_dir))
+    reader_id = str(payload.get("readerId") or "").strip() or None
+    json_text = export_research_responses_json(dataset_dir, reader_id)
+    filename = str(payload.get("filename") or "").strip()
+    if not filename:
+        profile = {}
+        if reader_id:
+            responses = load_research_responses(dataset_dir, reader_id)
+            profile = response_reader_profile(*responses)
+        filename = research_reader_json_filename(reader_id, profile)
+    target = unique_submission_path(str(dataset.get("datasetId") or dataset_dir.name), filename)
+    target.write_text(json_text, encoding="utf-8")
+    return {
+        "ok": True,
+        "submittedAt": utc_now_iso(),
+        "submissionId": target.relative_to(SUBMITTED_RESULTS_DIR).as_posix(),
+        "path": str(target),
+        "filename": target.name,
+        "sizeBytes": len(json_text.encode("utf-8")),
+        "datasetId": dataset.get("datasetId", ""),
+        "readerId": research_reader_id(reader_id or "reader"),
+    }
 
 
 def required(qs: dict[str, list[str]], name: str) -> str:
@@ -3195,7 +3502,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-            "media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+            "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
         )
 
     def send_json(self, payload: Any, status: int = 200) -> None:
@@ -3216,7 +3523,98 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_auth_required(self, message: str = "Access link is required.") -> None:
+        if self.path.startswith("/api/"):
+            body = json.dumps({"error": message}, ensure_ascii=False).encode("utf-8")
+            content_type = "application/json; charset=utf-8"
+        else:
+            body = (
+                "<!doctype html><meta charset='utf-8'><title>EEG Test Viewer</title>"
+                "<body style='font-family:system-ui,sans-serif;margin:32px'>"
+                "<h1>EEG Test Viewer</h1>"
+                "<p>このテストには専用リンクが必要です。</p>"
+                "</body>"
+            ).encode("utf-8")
+            content_type = "text/html; charset=utf-8"
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_security_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def cookie_value(self, name: str) -> str:
+        raw = self.headers.get("Cookie", "")
+        for part in raw.split(";"):
+            key, sep, value = part.strip().partition("=")
+            if sep and key == name:
+                return unquote(value)
+        return ""
+
+    def access_code_from_query(self) -> str:
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        return qs.get("access", [""])[0] or qs.get("code", [""])[0]
+
+    def redirect_without_access_code(self) -> None:
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        qs.pop("access", None)
+        qs.pop("code", None)
+        clean_query = urlencode([(key, value) for key, values in qs.items() for value in values])
+        clean_url = urlunparse(("", "", parsed.path or "/", "", clean_query, ""))
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", clean_url or "/")
+        self.send_header("Set-Cookie", "eeg_viewer_access=ok; Path=/; HttpOnly; SameSite=Lax")
+        self.send_security_headers()
+        self.end_headers()
+
+    def access_code_allowed(self) -> bool:
+        if not ACCESS_CODE:
+            return False
+        query_code = self.access_code_from_query()
+        if query_code and secrets.compare_digest(query_code, ACCESS_CODE):
+            return True
+        return secrets.compare_digest(self.cookie_value("eeg_viewer_access"), "ok")
+
+    def access_allowed(self) -> tuple[bool, str]:
+        if not PUBLIC_MODE:
+            return True, ""
+        if not ACCESS_CODE and not ACCESS_PASSWORD and not ALLOW_UNPROTECTED_PUBLIC:
+            return False, "Public mode requires EEG_VIEWER_ACCESS_CODE."
+        if self.access_code_allowed():
+            return True, ""
+        if not ACCESS_PASSWORD:
+            if ALLOW_UNPROTECTED_PUBLIC:
+                return True, ""
+            return False, "Access link is required."
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Basic "):
+            return False, "Access link is required."
+        try:
+            decoded = base64.b64decode(header.removeprefix("Basic ").strip(), validate=True).decode("utf-8")
+        except Exception:
+            return False, "Invalid authentication header."
+        username, sep, password = decoded.partition(":")
+        if not sep:
+            return False, "Invalid authentication header."
+        username_ok = not ACCESS_USER or secrets.compare_digest(username, ACCESS_USER)
+        if not (username_ok and secrets.compare_digest(password, ACCESS_PASSWORD)):
+            return False, "Invalid password."
+        return True, ""
+
+    def handle_access_link(self) -> bool:
+        if not PUBLIC_MODE or not ACCESS_CODE:
+            return False
+        query_code = self.access_code_from_query()
+        if query_code and secrets.compare_digest(query_code, ACCESS_CODE):
+            self.redirect_without_access_code()
+            return True
+        return False
+
     def local_request_allowed(self) -> tuple[bool, str]:
+        if PUBLIC_MODE:
+            return True, ""
         client_host = str(self.client_address[0]) if self.client_address else ""
         if client_host not in {"127.0.0.1", "::1"}:
             return False, "API requests are limited to this Mac."
@@ -3241,6 +3639,11 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
+            if self.handle_access_link():
+                return
+            allowed, reason = self.access_allowed()
+            if not allowed:
+                return self.send_auth_required(reason)
             parsed = urlparse(self.path)
             path = unquote(parsed.path)
             qs = parse_qs(parsed.query)
@@ -3305,23 +3708,19 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/research/test/export.json":
                 dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
                 reader = qs.get("readerId", [""])[0] or None
-                output_path = qs.get("outputPath", [""])[0]
-                return self.send_text(export_research_responses_json(dataset_dir, reader, output_path), "application/json; charset=utf-8")
+                return self.send_text(export_research_responses_json(dataset_dir, reader), "application/json; charset=utf-8")
             if path == "/api/research/validation/session":
                 return self.send_json(validation_session({
                     "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
                 }))
             if path == "/api/research/validation/export.json":
                 dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
-                output_path = qs.get("outputPath", [""])[0]
-                return self.send_text(export_validation_results_json(dataset_dir, output_path), "application/json; charset=utf-8")
+                return self.send_text(export_validation_results_json(dataset_dir), "application/json; charset=utf-8")
             if path == "/api/annotations":
                 return self.send_json(load_annotations(required(qs, "id")))
             if path == "/api/annotations.json":
                 record_id = required(qs, "id")
                 return self.send_json(annotation_export_rows(self.store, record_id))
-            if path == "/api/annotations.csv":
-                return self.send_text(annotation_csv(self.store, required(qs, "id")), "text/csv; charset=utf-8")
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
         except Exception as exc:
             traceback.print_exc()
@@ -3329,9 +3728,14 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            if self.handle_access_link():
+                return
+            allowed, reason = self.access_allowed()
+            if not allowed:
+                return self.send_auth_required(reason)
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
-            if parsed.path in MUTATING_PATHS:
+            if parsed.path.startswith("/api/"):
                 allowed, reason = self.mutation_allowed(parsed.path)
                 if not allowed:
                     return self.send_json({"error": reason}, status=403)
@@ -3339,13 +3743,13 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 return self.send_json({"error": "Invalid Content-Length."}, status=400)
-            max_body = MAX_EXPORT_POST_BODY_BYTES if parsed.path == "/api/export-file" else MAX_POST_BODY_BYTES
+            max_body = MAX_EXPORT_POST_BODY_BYTES if parsed.path in {"/api/export-file", "/api/save-desktop"} else MAX_POST_BODY_BYTES
             if length > max_body:
                 return self.send_json({"error": "Request body is too large."}, status=413)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
             if parsed.path == "/api/open-file":
                 return self.send_json(self.store.add_path(normalize_path_input(payload.get("path", ""))))
-            if parsed.path == "/api/export-file":
+            if parsed.path in {"/api/export-file", "/api/save-desktop"}:
                 return self.send_json(save_desktop_export(payload))
             if parsed.path == "/api/research/dataset/create":
                 return self.send_json(create_research_dataset(payload))
@@ -3357,8 +3761,16 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(save_research_response(payload))
             if parsed.path == "/api/research/test/response/undo":
                 return self.send_json(undo_research_response(payload))
+            if parsed.path == "/api/research/test/export-file":
+                return self.send_json(save_research_responses_json_to_desktop(payload))
+            if parsed.path == "/api/research/test/submit-result":
+                return self.send_json(save_research_result_submission(payload))
             if parsed.path == "/api/research/validation/response":
                 return self.send_json(save_validation_response(payload))
+            if parsed.path == "/api/research/validation/response/undo":
+                return self.send_json(undo_validation_response(payload))
+            if parsed.path == "/api/research/validation/export-file":
+                return self.send_json(save_validation_results_json_to_desktop(payload))
             if parsed.path != "/api/annotations":
                 return self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             record_id = required(qs, "id")
@@ -3416,8 +3828,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the EEG Viewer local server.")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
     parser.add_argument("--fds-dir", type=Path, default=DEFAULT_FDS_DIR)
     parser.add_argument("--edf-dir", action="append", type=Path, default=[])
     parser.add_argument("--no-browser", action="store_true")

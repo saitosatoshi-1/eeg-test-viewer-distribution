@@ -1,0 +1,9 @@
+.git
+__pycache__/
+*.pyc
+.DS_Store
+annotations/
+dist/
+*.dmg
+*.pkg
+共同研究者配布用_Windows/

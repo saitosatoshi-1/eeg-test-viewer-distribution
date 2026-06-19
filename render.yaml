@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: eeg-test-viewer
+    env: docker
+    plan: starter
+    autoDeploy: false
+    disk:
+      name: eeg-test-viewer-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: EEG_VIEWER_PUBLIC_MODE
+        value: "1"
+      - key: EEG_VIEWER_DATA_DIR
+        value: /data
+      - key: EEG_VIEWER_ACCESS_CODE
+        value: ncnp
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"

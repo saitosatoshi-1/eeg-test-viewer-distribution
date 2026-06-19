@@ -92,9 +92,16 @@ const state = {
   topomapRequestId: 0,
   windowLoadInFlight: false,
   windowLoadPending: false,
+  windowLoadPromise: null,
   selectedScalogramIndex: 0,
   suppressNextClick: false,
   lastWaveWheelPageAt: 0,
+  lastMontageSelectValue: "",
+  lastDurationSelectValue: "",
+  lastFilterControlKey: "",
+  controlWatchTimer: null,
+  durationRefreshTimer: null,
+  durationSelectFocusedAt: 0,
   panelResizeDrag: null,
   annotationResizeDrag: null,
   researchMode: "test",
@@ -188,7 +195,6 @@ const els = {
   fzPeakWindowMsInput: document.getElementById("fzPeakWindowMsInput"),
   fzPeakWindowMsValue: document.getElementById("fzPeakWindowMsValue"),
   scalogramModeControls: Array.from(document.querySelectorAll(".scalogram-mode-controls")),
-  exportSpikeCsvBtn: document.getElementById("exportSpikeCsvBtn"),
   exportAnalysisJsonBtn: document.getElementById("exportAnalysisJsonBtn"),
   exportScalogramJpegBtn: document.getElementById("exportScalogramJpegBtn"),
   fzSpikeTopomapTitle: document.getElementById("fzSpikeTopomapTitle"),
@@ -203,7 +209,6 @@ const els = {
   topomapReadout: document.getElementById("topomapReadout"),
   earlobeTopomapTitle: document.getElementById("earlobeTopomapTitle"),
   exportTopomapJsonBtn: document.getElementById("exportTopomapJsonBtn"),
-  exportTopomapCsvBtn: document.getElementById("exportTopomapCsvBtn"),
   exportTopomapJpegBtn: document.getElementById("exportTopomapJpegBtn"),
   contextMenu: document.getElementById("contextMenu"),
   annotationDialog: document.getElementById("annotationDialog"),
@@ -220,17 +225,20 @@ const els = {
   reloadBtn: document.getElementById("reloadBtn"),
   rangeCancelBtn: document.getElementById("rangeCancelBtn"),
   exportJsonBtn: document.getElementById("exportJsonBtn"),
-  exportCsvBtn: document.getElementById("exportCsvBtn"),
   importJsonInput: document.getElementById("importJsonInput"),
   exportViewerJpegBtn: document.getElementById("exportViewerJpegBtn"),
   workspace: document.querySelector(".workspace"),
   panelResizeHandles: Array.from(document.querySelectorAll("[data-resize-panel]")),
   researchModeButtons: Array.from(document.querySelectorAll("[data-research-mode]")),
   researchDatasetPathInput: document.getElementById("researchDatasetPathInput"),
+  researchClearDatasetPathBtn: document.getElementById("researchClearDatasetPathBtn"),
   researchIedsPresentPathInput: document.getElementById("researchIedsPresentPathInput"),
+  researchClearIedsPresentPathBtn: document.getElementById("researchClearIedsPresentPathBtn"),
   researchIedsAbsentPathInput: document.getElementById("researchIedsAbsentPathInput"),
+  researchClearIedsAbsentPathBtn: document.getElementById("researchClearIedsAbsentPathBtn"),
   researchSetupScreen: document.getElementById("researchSetupScreen"),
   researchSetupMessage: document.getElementById("researchSetupMessage"),
+  researchSetupDatasetPathInput: document.getElementById("researchSetupDatasetPathInput"),
   researchCompleteScreen: document.getElementById("researchCompleteScreen"),
   researchCompleteTitle: document.getElementById("researchCompleteTitle"),
   researchCompleteMessage: document.getElementById("researchCompleteMessage"),
@@ -241,6 +249,7 @@ const els = {
   researchTutorial: document.getElementById("researchTutorial"),
   researchTutorialDismissBtn: document.getElementById("researchTutorialDismissBtn"),
   researchCompleteExportCsvBtn: document.getElementById("researchCompleteExportCsvBtn"),
+  researchCompleteSaveDesktopBtn: document.getElementById("researchCompleteSaveDesktopBtn"),
   researchSetupIedsPresentPathInput: document.getElementById("researchSetupIedsPresentPathInput"),
   researchSetupIedsAbsentPathInput: document.getElementById("researchSetupIedsAbsentPathInput"),
   researchSetupReaderIdInput: document.getElementById("researchSetupReaderIdInput"),
@@ -256,6 +265,7 @@ const els = {
   researchSetupMontageSelect: document.getElementById("researchSetupMontageSelect"),
   researchSetupEpochCountInput: document.getElementById("researchSetupEpochCountInput"),
   researchSetupStartBtn: document.getElementById("researchSetupStartBtn"),
+  researchSetupResetProfileBtn: document.getElementById("researchSetupResetProfileBtn"),
   researchCreateDatasetBtn: document.getElementById("researchCreateDatasetBtn"),
   researchLoadDatasetBtn: document.getElementById("researchLoadDatasetBtn"),
   researchCutEpochBtn: document.getElementById("researchCutEpochBtn"),
@@ -275,6 +285,8 @@ const els = {
   researchMonthlyReadsInput: document.getElementById("researchMonthlyReadsInput"),
   researchTestProgress: document.getElementById("researchTestProgress"),
   researchWaveProgress: document.getElementById("researchWaveProgress"),
+  researchInlineProgress: document.getElementById("researchInlineProgress"),
+  validationInlineProgress: document.getElementById("validationInlineProgress"),
   researchDesignEpochCountInput: document.getElementById("researchDesignEpochCountInput"),
   researchPhase2SampleToggle: document.getElementById("researchPhase2SampleToggle"),
   researchFalsePositiveToggle: document.getElementById("researchFalsePositiveToggle"),
@@ -342,37 +354,66 @@ function setOpenFileBusy(isBusy) {
 }
 
 async function init() {
-  restorePanelWidths();
-  restoreAnnotationListHeight();
-  scheduleLayoutRefresh();
+  bindControls();
+  bindPanelResizers();
+  try {
+    restorePanelWidths();
+    restoreAnnotationListHeight();
+  } catch (err) {
+    console.warn("Panel restore skipped", err);
+  }
+  try {
+    scheduleLayoutRefresh();
+  } catch (err) {
+    console.warn("Initial layout skipped", err);
+  }
   window.addEventListener("resize", scheduleLayoutRefresh);
   if (window.ResizeObserver && els.waveCanvas?.parentElement) {
     const observer = new ResizeObserver(scheduleLayoutRefresh);
     observer.observe(els.waveCanvas.parentElement);
   }
-  restoreSettings();
-  applyWorkspaceMode({ redraw: false });
-  applyRightPanelTab();
-  applyRightPanelVisibility({ redraw: false });
-  applyScalogramVisibility({ redraw: false });
-  applyTopomapLayout();
-  restoreRecentFiles();
-  restoreResearchProfile();
-  state.rightPanelVisible = false;
+  try {
+    restoreSettings();
+    applyWorkspaceMode({ redraw: false });
+    applyRightPanelTab();
+    applyRightPanelVisibility({ redraw: false });
+    applyScalogramVisibility({ redraw: false });
+    applyTopomapLayout();
+  } catch (err) {
+    console.warn("Settings restore skipped", err);
+  }
+  try {
+    restoreRecentFiles();
+    restoreResearchProfile();
+    applyLaunchParams();
+  } catch (err) {
+    console.warn("Profile/recent restore skipped", err);
+  }
   if (els.recordingLabel) els.recordingLabel.hidden = true;
-  bindControls();
-  bindPanelResizers();
+  state.rightPanelVisible = false;
+  applyRightPanelVisibility({ redraw: false });
   setResearchMode("test");
+  rememberControlValues();
+  startControlValueWatcher();
   await loadRecordings();
+}
+
+function applyLaunchParams() {
+  const params = new URLSearchParams(window.location.search || "");
+  const dataset = params.get("dataset") || params.get("datasetUrl") || "";
+  if (dataset && els.researchSetupDatasetPathInput) {
+    els.researchSetupDatasetPathInput.value = dataset;
+  }
+  const questions = params.get("questions") || params.get("count") || "";
+  if (questions && els.researchSetupEpochCountInput) {
+    els.researchSetupEpochCountInput.value = questions;
+  }
 }
 
 function scheduleLayoutRefresh() {
   const refresh = () => {
     resizeCanvas();
-    resizeTopomapCanvases();
     draw();
-    renderScalogram();
-    renderTopomaps();
   };
   requestAnimationFrame(() => {
     refresh();
@@ -380,6 +421,143 @@ function scheduleLayoutRefresh() {
   });
   window.setTimeout(refresh, 80);
   window.setTimeout(refresh, 300);
+}
+
+function forceViewerRepaint() {
+  const refresh = () => {
+    resizeCanvas();
+    draw();
+    renderStatus();
+  };
+  refresh();
+  requestAnimationFrame(refresh);
+  window.setTimeout(refresh, 60);
+  window.setTimeout(refresh, 180);
+  window.setTimeout(refresh, 420);
+}
+
+function rememberControlValues() {
+  state.lastMontageSelectValue = els.montageSelect?.value || "";
+  state.lastDurationSelectValue = els.durationSelect?.value || "";
+  state.lastFilterControlKey = filterControlKey();
+}
+
+function startControlValueWatcher() {
+  if (state.controlWatchTimer) window.clearInterval(state.controlWatchTimer);
+  state.controlWatchTimer = window.setInterval(() => {
+    const montageValue = els.montageSelect?.value || "";
+    const durationValue = els.durationSelect?.value || "";
+    const filterKey = filterControlKey();
+    if (montageValue && montageValue !== state.lastMontageSelectValue) {
+      state.lastMontageSelectValue = montageValue;
+      handleMontageControlChange("watcher");
+    }
+    if (durationValue && durationValue !== state.lastDurationSelectValue) {
+      state.lastDurationSelectValue = durationValue;
+      handleDurationControlChange("watcher");
+    }
+    if (filterKey !== state.lastFilterControlKey) {
+      state.lastFilterControlKey = filterKey;
+      handleFilterControlChange("watcher");
+    }
+  }, 150);
+}
+
+function checkDeferredControlValues(source = "deferred") {
+  const montageValue = els.montageSelect?.value || "";
+  const durationValue = els.durationSelect?.value || "";
+  const filterKey = filterControlKey();
+  if (montageValue && montageValue !== state.lastMontageSelectValue) {
+    state.lastMontageSelectValue = montageValue;
+    handleMontageControlChange(source);
+  }
+  if (durationValue && durationValue !== state.lastDurationSelectValue) {
+    state.lastDurationSelectValue = durationValue;
+    handleDurationControlChange(source);
+  }
+  if (filterKey !== state.lastFilterControlKey) {
+    state.lastFilterControlKey = filterKey;
+    handleFilterControlChange(source);
+  }
+}
+
+function scheduleDurationRefresh(source = "duration", options = {}) {
+  if (!els.durationSelect) return;
+  if (state.durationRefreshTimer) window.clearTimeout(state.durationRefreshTimer);
+  state.durationRefreshTimer = window.setTimeout(() => {
+    state.durationRefreshTimer = null;
+    const value = els.durationSelect?.value || "";
+    const currentDuration = Number(state.windowData?.duration || 0);
+    const selectedDuration = Number(value || 0);
+    const changed = value && value !== state.lastDurationSelectValue;
+    const dataMismatch = Number.isFinite(selectedDuration) && selectedDuration > 0 && Math.abs(currentDuration - selectedDuration) > 0.001;
+    if (changed || dataMismatch || options.force) {
+      handleDurationControlChange(source);
+    }
+  }, options.delayMs ?? 40);
+}
+
+function commitDurationSelection(source = "duration") {
+  const select = els.durationSelect;
+  if (!select) return;
+  const focusedMs = Date.now() - Number(state.durationSelectFocusedAt || 0);
+  const shouldBlur = document.activeElement === select && (source.includes("change") || source.includes("input") || focusedMs > 250);
+  if (shouldBlur) {
+    window.setTimeout(() => {
+      if (document.activeElement === select) select.blur();
+      scheduleDurationRefresh(`${source}-commit`, { force: true, delayMs: 30 });
+    }, 0);
+  }
+  scheduleDurationRefresh(source, { force: true, delayMs: 80 });
+  window.setTimeout(() => scheduleDurationRefresh(`${source}-late`, { force: true, delayMs: 0 }), 260);
+}
+
+function filterControlKey() {
+  return [
+    els.tcSelect?.value || "",
+    els.hfSelect?.value || "",
+    els.acSelect?.value || "",
+    els.ecgToggle?.checked ? "1" : "0",
+    els.ecgFilterToggle?.checked ? "1" : "0",
+  ].join("|");
+}
+
+async function handleMontageControlChange(source = "change") {
+  if (!els.montageSelect) return;
+  state.lastMontageSelectValue = els.montageSelect.value || "";
+  state.activeMontage = state.lastMontageSelectValue || state.activeMontage;
+  state.windowData = null;
+  updateResearchMontageTiming();
+  renderStatus();
+  setStatus(`Loading montage ${state.activeMontage} / ${labelForMontage()}...`, { busy: true, progress: 70 });
+  await loadWindow();
+  forceViewerRepaint();
+}
+
+async function handleDurationControlChange(source = "change") {
+  if (!els.durationSelect) return;
+  state.lastDurationSelectValue = els.durationSelect.value || "";
+  const nextDuration = Number(state.lastDurationSelectValue || 10) || 10;
+  if (state.windowData) {
+    state.windowData.duration = nextDuration;
+  }
+  state.start = clampStart(state.start, nextDuration);
+  updateWaveScrollbar();
+  renderStatus();
+  forceViewerRepaint();
+  setStatus(`Loading timebase ${state.lastDurationSelectValue}s...`, { busy: true, progress: 70 });
+  await loadWindow();
+  forceViewerRepaint();
+}
+
+async function handleFilterControlChange(source = "change") {
+  state.lastFilterControlKey = filterControlKey();
+  state.windowData = null;
+  renderStatus();
+  forceViewerRepaint();
+  setStatus(`Loading filters TC ${tcText()} / HF ${hfText()}...`, { busy: true, progress: 70 });
+  await loadWindow();
+  forceViewerRepaint();
 }
 
 function resizeCanvas() {
@@ -415,38 +593,63 @@ function bindControls() {
     els.ecgToggle,
     els.ecgFilterToggle,
   ].filter(Boolean).forEach((el) => el.addEventListener("change", onControlChange));
-
-  els.prevBtn.addEventListener("click", () => {
+  [
+    els.montageSelect,
+    els.durationSelect,
+    els.tcSelect,
+    els.hfSelect,
+    els.acSelect,
+    els.ecgToggle,
+    els.ecgFilterToggle,
+  ].filter(Boolean).forEach((el) => {
+    const check = () => window.setTimeout(() => checkDeferredControlValues("deferred"), 0);
+    el.addEventListener("blur", check);
+    el.addEventListener("click", check);
+    el.addEventListener("input", check);
+    el.addEventListener("keyup", check);
+    el.addEventListener("mouseup", check);
+  });
+  if (els.durationSelect) {
+    els.durationSelect.addEventListener("focus", () => {
+      state.durationSelectFocusedAt = Date.now();
+    });
+    els.durationSelect.addEventListener("input", () => commitDurationSelection("duration-input"));
+    els.durationSelect.addEventListener("change", () => commitDurationSelection("duration-change"));
+    els.durationSelect.addEventListener("pointerup", () => commitDurationSelection("duration-pointerup"));
+    els.durationSelect.addEventListener("keyup", () => commitDurationSelection("duration-keyup"));
+    window.addEventListener("focus", () => scheduleDurationRefresh("duration-window-focus", { delayMs: 80 }));
+  }
+  els.prevBtn?.addEventListener("click", () => {
     pageWaveform(-1);
   });
-  els.nextBtn.addEventListener("click", () => {
+  els.nextBtn?.addEventListener("click", () => {
     pageWaveform(1);
   });
-  els.stepBackBtn.addEventListener("click", () => {
+  els.stepBackBtn?.addEventListener("click", () => {
     state.start = clampStart(state.start - 1);
     state.cursorTime = null;
     loadWindow();
   });
-  els.stepForwardBtn.addEventListener("click", () => {
+  els.stepForwardBtn?.addEventListener("click", () => {
     state.start = clampStart(state.start + 1);
     state.cursorTime = null;
     loadWindow();
   });
   els.reloadBtn?.addEventListener("click", loadWindow);
-  els.loadFileBtn.addEventListener("click", openFileFromPath);
+  els.loadFileBtn?.addEventListener("click", openFileFromPath);
   if (els.clearFilePathBtn) {
     els.clearFilePathBtn.addEventListener("click", () => {
       els.filePathInput.value = "";
       els.filePathInput.focus();
     });
   }
-  els.recentFileSelect.addEventListener("change", () => {
+  els.recentFileSelect?.addEventListener("change", () => {
     const path = els.recentFileSelect.value;
     if (!path) return;
     els.filePathInput.value = path;
     openFileFromPath();
   });
-  els.filePathInput.addEventListener("keydown", (ev) => {
+  els.filePathInput?.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault();
       openFileFromPath();
@@ -464,7 +667,7 @@ function bindControls() {
   for (const select of els.multiMontageSelects || []) {
     select.addEventListener("change", onMultiMontageSelectChange);
   }
-  els.rangeCancelBtn.addEventListener("click", () => {
+  els.rangeCancelBtn?.addEventListener("click", () => {
     state.rangeStart = null;
     state.dragSelection = null;
     state.scalogramSelection = null;
@@ -472,33 +675,32 @@ function bindControls() {
     els.rangeCancelBtn.disabled = true;
     hideContextMenu();
     draw();
-    renderScalogram();
   });
 
-  els.waveCanvas.addEventListener("contextmenu", openContextMenu);
-  els.waveCanvas.addEventListener("mousedown", onWaveMouseDown);
-  els.waveCanvas.addEventListener("mousemove", onWaveMouseMove);
-  els.waveCanvas.addEventListener("mouseup", onWaveMouseUp);
+  els.waveCanvas?.addEventListener("contextmenu", openContextMenu);
+  els.waveCanvas?.addEventListener("mousedown", onWaveMouseDown);
+  els.waveCanvas?.addEventListener("mousemove", onWaveMouseMove);
+  els.waveCanvas?.addEventListener("mouseup", onWaveMouseUp);
   window.addEventListener("mouseup", onWaveMouseUp);
-  els.waveCanvas.addEventListener("mouseleave", onWaveMouseLeave);
-  els.waveCanvas.addEventListener("wheel", onWaveWheel, { passive: false });
-  els.waveCanvas.addEventListener("click", onWaveClick);
-  els.waveCanvas.addEventListener("dblclick", onWaveDoubleClick);
+  els.waveCanvas?.addEventListener("mouseleave", onWaveMouseLeave);
+  els.waveCanvas?.addEventListener("wheel", onWaveWheel, { passive: false });
+  els.waveCanvas?.addEventListener("click", onWaveClick);
+  els.waveCanvas?.addEventListener("dblclick", onWaveDoubleClick);
   if (els.waveScrollbar) {
     els.waveScrollbar.addEventListener("input", onWaveScrollbarInput);
     els.waveScrollbar.addEventListener("change", onWaveScrollbarChange);
   }
   document.addEventListener("keydown", onKeyDown);
   document.addEventListener("click", (ev) => {
-    if (!els.contextMenu.contains(ev.target)) hideContextMenu();
+    if (!els.contextMenu?.contains(ev.target)) hideContextMenu();
   });
-  els.contextMenu.addEventListener("click", onContextMenuClick);
+  els.contextMenu?.addEventListener("click", onContextMenuClick);
 
-  els.saveAnnotationBtn.addEventListener("click", (ev) => {
+  els.saveAnnotationBtn?.addEventListener("click", (ev) => {
     ev.preventDefault();
     saveDialogAnnotation();
   });
-  els.annotationDialog.addEventListener("keydown", (ev) => {
+  els.annotationDialog?.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter" || ev.isComposing) return;
     if (ev.target === els.annotationNote && ev.shiftKey) return;
     if (ev.target instanceof HTMLButtonElement) return;
@@ -506,8 +708,7 @@ function bindControls() {
     saveDialogAnnotation();
   });
 
-  els.exportJsonBtn.addEventListener("click", exportJson);
-  els.exportCsvBtn.addEventListener("click", exportCsv);
+  els.exportJsonBtn?.addEventListener("click", exportJson);
   if (els.sourceAnnotationToggle) {
     els.sourceAnnotationToggle.addEventListener("change", () => {
       state.showSourceAnnotations = els.sourceAnnotationToggle.checked;
@@ -515,7 +716,6 @@ function bindControls() {
       applyAnnotationVisibility();
     });
   }
-  if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.addEventListener("click", exportSpikeCsv);
   if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.addEventListener("click", exportAnalysisJson);
   if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.addEventListener("click", exportScalogramJpeg);
   if (els.rightPanelToggleBtn) {
@@ -524,124 +724,8 @@ function bindControls() {
       toggleRightPanel();
     });
   }
-  for (const btn of els.analysisKindButtons || []) {
-    btn.addEventListener("click", () => {
-      state.analysisKind = btn.dataset.analysisKind || "scalogram";
-      state.scalogramData = null;
-      renderScalogram();
-      if (state.scalogramSelection) loadScalogram();
-    });
-  }
-  for (const btn of els.scalogramModeButtons || []) {
-    btn.addEventListener("click", () => {
-      state.scalogramMode = btn.dataset.scalogramMode || "signed";
-      renderScalogram();
-    });
-  }
-  for (const btn of els.scalogramScopeButtons || []) {
-    btn.addEventListener("click", () => {
-      state.scalogramDisplayScope = "all";
-      saveSettings();
-      renderScalogram();
-    });
-  }
-  for (const btn of els.scalogramDetectionButtons || []) {
-    btn.addEventListener("click", () => {
-      state.scalogramDetectionMode = btn.dataset.scalogramDetection || "both";
-      renderScalogram();
-    });
-  }
-  for (const btn of els.attenuationScaleButtons || []) {
-    btn.addEventListener("click", () => {
-      state.attenuationScaleMode = btn.dataset.attenuationScale === "z" ? "z" : "db";
-      saveSettings();
-      renderScalogram();
-    });
-  }
-  for (const btn of els.attenuationPresetButtons || []) {
-    btn.addEventListener("click", () => applyAttenuationPreset(btn.dataset.attenuationPreset || "balanced"));
-  }
-  for (const btn of els.stftScaleButtons || []) {
-    btn.addEventListener("click", () => {
-      state.stftScaleMode = btn.dataset.stftScale === "z" ? "z" : "db";
-      saveSettings();
-      renderScalogram();
-    });
-  }
-  for (const btn of els.scalogramPresetButtons || []) {
-    btn.addEventListener("click", () => applyScalogramPreset(btn.dataset.scalogramPreset || "balanced"));
-  }
-  for (const btn of els.stftPresetButtons || []) {
-    btn.addEventListener("click", () => applyStftPreset(btn.dataset.stftPreset || "balanced"));
-  }
-  [els.attenuationFreqLowInput, els.attenuationFreqHighInput].filter(Boolean).forEach((input) => {
-    input.addEventListener("change", onAttenuationFreqInputChange);
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        input.blur();
-        onAttenuationFreqInputChange();
-      }
-    });
-  });
-  for (const input of [els.attenuationBaselineSecInput, els.attenuationFreqStepInput, els.attenuationTimeBinsInput].filter(Boolean)) {
-    input.addEventListener("input", onAttenuationTuningInput);
-    input.addEventListener("change", onAttenuationTuningChange);
-  }
-  [els.psdFreqLowInput, els.psdFreqHighInput].filter(Boolean).forEach((input) => {
-    input.addEventListener("change", onPsdFreqInputChange);
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        input.blur();
-        onPsdFreqInputChange();
-      }
-    });
-  });
-  [els.stftFreqLowInput, els.stftFreqHighInput].filter(Boolean).forEach((input) => {
-    input.addEventListener("change", onStftFreqInputChange);
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        input.blur();
-        onStftFreqInputChange();
-      }
-    });
-  });
-  if (els.stftPowerGainInput) {
-    els.stftPowerGainInput.addEventListener("input", onStftPowerGainInput);
-    els.stftPowerGainInput.addEventListener("change", () => {
-      state.stftPowerGain = normalizeStftPowerGain(els.stftPowerGainInput.value);
-      syncStftPowerGainInput();
-      saveSettings();
-      renderScalogram();
-    });
-  }
-  if (els.scalogramFreqStepInput) {
-    els.scalogramFreqStepInput.addEventListener("input", onScalogramTuningInput);
-    els.scalogramFreqStepInput.addEventListener("change", onScalogramTuningChange);
-  }
-  if (els.scalogramTimeBinsInput) {
-    els.scalogramTimeBinsInput.addEventListener("input", onScalogramTuningInput);
-    els.scalogramTimeBinsInput.addEventListener("change", onScalogramTuningChange);
-  }
-  if (els.stftWindowMsInput) {
-    els.stftWindowMsInput.addEventListener("input", onStftTuningInput);
-    els.stftWindowMsInput.addEventListener("change", onStftTuningChange);
-  }
-  if (els.stftOverlapPctInput) {
-    els.stftOverlapPctInput.addEventListener("input", onStftTuningInput);
-    els.stftOverlapPctInput.addEventListener("change", onStftTuningChange);
-  }
-  if (els.fzPeakWindowMsInput) {
-    els.fzPeakWindowMsInput.addEventListener("input", onFzPeakWindowInput);
-    els.fzPeakWindowMsInput.addEventListener("change", onFzPeakWindowChange);
-  }
-  if (els.exportTopomapJsonBtn) els.exportTopomapJsonBtn.addEventListener("click", exportTopomapJson);
-  if (els.exportTopomapCsvBtn) els.exportTopomapCsvBtn.addEventListener("click", exportTopomapCsv);
-  if (els.exportTopomapJpegBtn) els.exportTopomapJpegBtn.addEventListener("click", exportTopomapJpeg);
   if (els.exportViewerJpegBtn) els.exportViewerJpegBtn.addEventListener("click", exportViewerJpeg);
-  els.importJsonInput.addEventListener("change", importJson);
+  els.importJsonInput?.addEventListener("change", importJson);
   bindResearchControls();
 }
 
@@ -656,14 +740,19 @@ function bindResearchControls() {
   els.researchStartValidationBtn?.addEventListener("click", startValidationMode);
   els.researchStartTestBtn?.addEventListener("click", startResearchTest);
   els.researchSetupStartBtn?.addEventListener("click", startResearchTest);
+  els.researchSetupResetProfileBtn?.addEventListener("click", resetResearchProfileForm);
+  els.researchClearDatasetPathBtn?.addEventListener("click", () => clearResearchPath("dataset"));
+  els.researchClearIedsPresentPathBtn?.addEventListener("click", () => clearResearchPath("iedsPresent"));
+  els.researchClearIedsAbsentPathBtn?.addEventListener("click", () => clearResearchPath("iedsAbsent"));
   els.researchEpochCountInput?.addEventListener("change", saveResearchEpochCount);
-  els.researchCompleteExportCsvBtn?.addEventListener("click", exportResearchJson);
+  els.researchCompleteExportCsvBtn?.addEventListener("click", submitResearchJson);
+  els.researchCompleteSaveDesktopBtn?.addEventListener("click", exportResearchJson);
   els.researchCopyEmailBtn?.addEventListener("click", copyResearchEmailBody);
   els.researchTutorialDismissBtn?.addEventListener("click", () => {
     state.researchTutorialDismissed = true;
     updateResearchTutorial();
   });
-  els.researchUndoBtn?.addEventListener("click", undoResearchResponse);
+  els.researchUndoBtn?.addEventListener("click", undoLastResearchAction);
   els.researchSaveCaseBtn?.addEventListener("click", saveResearchCaseEdits);
   els.researchPrevCaseBtn?.addEventListener("click", () => moveResearchCase(-1));
   els.researchNextCaseBtn?.addEventListener("click", () => moveResearchCase(1));
@@ -714,6 +803,68 @@ function bindSyncedInputs(a, b) {
   b.addEventListener("change", () => sync(b, a));
 }
 
+function clearResearchPath(kind) {
+  if (kind === "dataset") {
+    if (els.researchDatasetPathInput) els.researchDatasetPathInput.value = "";
+    state.researchDatasetPath = "";
+    state.researchDataset = null;
+    state.researchSession = null;
+    state.validationSession = null;
+    state.researchResponses = [];
+    state.validationResponses = [];
+    state.researchCaseIndex = 0;
+    hideResearchTutorial();
+    hideResearchCompletion();
+    hideResearchWaveProgress();
+    hideValidationWaveProgress();
+    renderResearchPanel();
+    updateResearchSetupScreen();
+    setStatus("Dataset path cleared");
+    els.researchDatasetPathInput?.focus();
+    return;
+  }
+  const target = kind === "iedsPresent" ? els.researchIedsPresentPathInput : els.researchIedsAbsentPathInput;
+  if (!target) return;
+  target.value = "";
+  target.dispatchEvent(new Event("input", { bubbles: true }));
+  target.dispatchEvent(new Event("change", { bubbles: true }));
+  setStatus(kind === "iedsPresent" ? "IEDs-present path cleared" : "IEDs-absent path cleared");
+  target.focus();
+}
+
+function resetResearchProfileForm() {
+  const textInputs = [
+    els.researchSetupReaderIdInput,
+    els.researchSetupReaderNameInput,
+    els.researchSetupReaderEmailInput,
+    els.researchSetupReaderAffiliationInput,
+    els.researchDoctorNameInput,
+    els.researchMedicalYearsInput,
+    els.researchNeurologyYearsInput,
+    els.researchMonthlyReadsInput,
+    els.researchEpilepsyCenterTrainingDurationInput,
+  ];
+  for (const input of textInputs.filter(Boolean)) input.value = "";
+  for (const select of [
+    els.researchSetupReaderSpecialtySelect,
+    els.researchPositionSelect,
+    els.researchEpilepsySpecialistSelect,
+    els.researchClinicalNeurophysEegSpecialistSelect,
+    els.researchEpilepsyCenterTrainingSelect,
+    els.researchEegTrainingSelect,
+  ].filter(Boolean)) select.value = "";
+  const usualMontage = storedResearchProfile().usualMontage || activeMontageValue();
+  try {
+    localStorage.setItem(RESEARCH_PROFILE_KEY, JSON.stringify({ usualMontage }));
+  } catch {
+    // Ignore private-mode storage failures.
+  }
+  updateEpilepsyCenterDurationRequirement();
+  setResearchSetupMessage("テスト者情報を初期化しました。");
+  setStatus("Test profile reset");
+  els.researchSetupReaderNameInput?.focus();
+}
+
 function updateEpilepsyCenterDurationRequirement() {
   const hasTraining = els.researchEpilepsyCenterTrainingSelect?.value === "yes";
   if (!els.researchEpilepsyCenterTrainingDurationInput) return;
@@ -736,7 +887,7 @@ function validateResearchProfileForStart() {
     [els.researchClinicalNeurophysEegSpecialistSelect, "臨床神経生理 EEG専門医"],
     [els.researchMonthlyReadsInput, "月間EEG読影数"],
     [els.researchEpilepsyCenterTrainingSelect, "てんかんセンター専従歴"],
-    [els.researchSetupEpochCountInput, "各群の問題数"],
+    [els.researchSetupEpochCountInput, "テスト問題数"],
   ];
   if (els.researchEpilepsyCenterTrainingSelect?.value === "yes") {
     requiredFields.splice(requiredFields.length - 1, 0, [els.researchEpilepsyCenterTrainingDurationInput, "専従期間"]);
@@ -759,6 +910,7 @@ function validateResearchProfileForStart() {
 function researchProfile() {
   const storedProfile = storedResearchProfile();
   return {
+    datasetPath: els.researchSetupDatasetPathInput?.value.trim() || els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "",
     outputPath: els.researchOutputPathInput?.value.trim() || "",
     readerId: els.researchSetupReaderIdInput?.value.trim() || "",
     readerName: els.researchSetupReaderNameInput?.value.trim() || els.researchDoctorNameInput?.value.trim() || "",
@@ -788,7 +940,7 @@ function storedResearchProfile() {
   }
 }
 
-function safeCsvFilenamePart(value, fallback = "reader") {
+function safeResultFilenamePart(value, fallback = "reader") {
   const cleaned = String(value || "")
     .normalize("NFKC")
     .trim()
@@ -809,13 +961,8 @@ function researchReaderDisplayId(profile = researchProfile()) {
   );
 }
 
-function researchCsvFilename(readerId, profile = researchProfile()) {
-  const readerName = safeCsvFilenamePart(profile.readerName || profile.doctorName || readerId, "reader");
-  return `${readerName}.csv`;
-}
-
 function researchJsonFilename(readerId, profile = researchProfile()) {
-  const readerName = safeCsvFilenamePart(profile.readerName || profile.doctorName || readerId, "reader");
+  const readerName = safeResultFilenamePart(profile.readerName || profile.doctorName || readerId, "reader");
   return `${readerName}.json`;
 }
 
@@ -843,6 +990,7 @@ function saveUsualResearchMontage(montage) {
 function restoreResearchProfile() {
   const profile = storedResearchProfile();
   if (els.researchOutputPathInput) els.researchOutputPathInput.value = profile.outputPath || "";
+  if (els.researchSetupDatasetPathInput) els.researchSetupDatasetPathInput.value = profile.datasetPath || "";
   if (els.researchDoctorNameInput) els.researchDoctorNameInput.value = profile.doctorName || "";
   if (els.researchSetupReaderIdInput) els.researchSetupReaderIdInput.value = profile.readerId || "";
   if (els.researchSetupReaderNameInput) els.researchSetupReaderNameInput.value = profile.readerName || profile.doctorName || "";
@@ -869,10 +1017,20 @@ function currentResearchDisplayedMontages() {
 }
 
 function startResearchMontageTiming() {
+  const now = performance.now();
+  const activeMontages = currentResearchDisplayedMontages();
   state.researchMontageTiming = {
-    lastAtMs: performance.now(),
-    activeMontages: currentResearchDisplayedMontages(),
+    startedAtMs: now,
+    lastAtMs: now,
+    activeMontages,
     totalsSec: {},
+    timeline: [],
+    switches: activeMontages.map((montage, index) => ({
+      index: index + 1,
+      atSec: 0,
+      from: "",
+      to: montage,
+    })),
   };
 }
 
@@ -881,11 +1039,30 @@ function updateResearchMontageTiming(nextMontages = currentResearchDisplayedMont
   if (!timing) return;
   const now = performance.now();
   const elapsedSec = Math.max(0, (now - Number(timing.lastAtMs || now)) / 1000);
-  for (const montage of timing.activeMontages || []) {
+  const previousMontages = [...new Set((timing.activeMontages || []).filter(Boolean))];
+  const nextUnique = [...new Set((nextMontages || []).filter(Boolean))];
+  const segmentStartSec = Math.max(0, (Number(timing.lastAtMs || now) - Number(timing.startedAtMs || timing.lastAtMs || now)) / 1000);
+  const segmentEndSec = Math.max(segmentStartSec, (now - Number(timing.startedAtMs || now)) / 1000);
+  for (const montage of previousMontages) {
     timing.totalsSec[montage] = Number(timing.totalsSec[montage] || 0) + elapsedSec;
+    timing.timeline.push({
+      index: timing.timeline.length + 1,
+      montage,
+      startSec: Number(segmentStartSec.toFixed(3)),
+      endSec: Number(segmentEndSec.toFixed(3)),
+      durationSec: Number(elapsedSec.toFixed(3)),
+    });
+  }
+  if (previousMontages.join("|") !== nextUnique.join("|")) {
+    timing.switches.push({
+      index: timing.switches.length + 1,
+      atSec: Number(segmentEndSec.toFixed(3)),
+      from: previousMontages.join("+"),
+      to: nextUnique.join("+"),
+    });
   }
   timing.lastAtMs = now;
-  timing.activeMontages = [...new Set((nextMontages || []).filter(Boolean))];
+  timing.activeMontages = nextUnique;
 }
 
 function researchMontageTimingPayload() {
@@ -899,10 +1076,36 @@ function researchMontageTimingPayload() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([montage, seconds]) => `${montage}:${seconds}`)
     .join(";");
+  const timeline = (timing?.timeline || []).filter((row) => Number(row.durationSec || 0) > 0);
+  const switches = timing?.switches || [];
+  const montageUsage = timeline.map((row, index) => ({
+    order: index + 1,
+    montage: String(row.montage || "").trim(),
+    startSec: Number(Number(row.startSec || 0).toFixed(3)),
+    endSec: Number(Number(row.endSec || 0).toFixed(3)),
+    durationSec: Number(Number(row.durationSec || 0).toFixed(3)),
+  })).filter((row) => row.montage);
+  const montageSequence = switches
+    .map((row, index) => ({
+      index: Number(row.index || index + 1),
+      montage: String(row.to || "").trim(),
+      atSec: Number(Number(row.atSec || 0).toFixed(3)),
+    }))
+    .filter((row) => row.montage);
+  const montageOrder = montageSequence.map((row) => row.montage);
   return {
     displayedMontages: Object.keys(totals),
     montageDurationsSec: totals,
     montageDurationSummary: summary,
+    montageOrder,
+    montageSequence,
+    montageUsage,
+    montageTimeline: timeline,
+    montageSwitches: switches,
+    montageOrderSummary: montageSequence.map((row) => `${row.index}:${row.montage}@${row.atSec}s`).join(";"),
+    montageUsageSummary: montageUsage.map((row) => `${row.order}:${row.montage}:${row.startSec}-${row.endSec}s(${row.durationSec}s)`).join(";"),
+    montageTimelineSummary: timeline.map((row) => `${row.index}:${row.montage}:${row.startSec}-${row.endSec}s`).join(";"),
+    montageSwitchSummary: switches.map((row) => `${row.index}:${row.atSec}s:${row.from || "-"}>${row.to || "-"}`).join(";"),
   };
 }
 
@@ -927,11 +1130,16 @@ function updateResearchControlsVisibility() {
   setResearchControlVisible(els.researchCreateDatasetBtn, false);
   setResearchControlVisible(els.researchLoadDatasetBtn, false);
   setResearchControlVisible(els.researchDatasetPathInput, datasetMode || validationMode);
+  setResearchControlVisible(els.researchClearDatasetPathBtn, datasetMode || validationMode);
   setResearchControlVisible(els.researchIedsPresentPathInput, !datasetMode && !validationMode);
+  setResearchControlVisible(els.researchClearIedsPresentPathBtn, !datasetMode && !validationMode);
   setResearchControlVisible(els.researchIedsAbsentPathInput, !datasetMode && !validationMode);
+  setResearchControlVisible(els.researchClearIedsAbsentPathBtn, !datasetMode && !validationMode);
+  const datasetTitle = document.querySelector('[data-research-section="dataset"] .research-section-title');
+  if (datasetTitle) datasetTitle.textContent = validationMode ? "Input" : "Output";
   if (els.researchDatasetPathInput) {
-    els.researchDatasetPathInput.placeholder = validationMode ? "validation dataset folder" : "output folder";
-    els.researchDatasetPathInput.title = validationMode ? "Dataset folder containing dataset.json" : "Output folder for cut EDF epochs";
+    els.researchDatasetPathInput.placeholder = validationMode ? "input path" : "output folder";
+    els.researchDatasetPathInput.title = validationMode ? "Input path containing dataset.json" : "Output folder for cut EDF epochs";
   }
   updateResearchSetupScreen();
 }
@@ -950,7 +1158,7 @@ function researchEmailBodyText(profile = researchProfile()) {
   return [
     "斉藤先生",
     "",
-    "脳波読影テストの結果JSONを送付します。",
+    "脳波読影テストの結果ファイルを送付します。",
     "添付ファイルをご確認ください。",
     "",
     "よろしくお願いいたします。",
@@ -972,15 +1180,18 @@ function showResearchCompletion() {
   if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = validationMode ? "Validation完了" : "お疲れ様でした!";
   if (els.researchCompleteMessage) {
     els.researchCompleteMessage.textContent = validationMode
-      ? "Validation結果JSONをDesktopに保存してください。"
-      : "結果JSONをDesktopに保存し、メールに添付して送信してください。";
+      ? "結果ファイルをDesktopに保存してください。専門的な形式ですが、このボタンで作成されるファイルをそのまま送れば大丈夫です。"
+      : "結果を送信してください。ローカル配布で実施している場合は、Desktop保存もできます。";
   }
   if (els.researchMailBox) els.researchMailBox.hidden = validationMode;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validationMode;
-  if (els.researchCompleteExportCsvBtn) els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation JSONをDesktopに保存" : "結果JSONをDesktopに保存";
+  if (els.researchCompleteExportCsvBtn) {
+    els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation結果ファイルをDesktopに保存" : "結果を送信";
+  }
+  if (els.researchCompleteSaveDesktopBtn) els.researchCompleteSaveDesktopBtn.hidden = validationMode;
   if (!validationMode) updateResearchEmailBody();
   if (els.researchSavedCsvName) {
-    els.researchSavedCsvName.textContent = "JSONはまだ保存されていません。";
+    els.researchSavedCsvName.textContent = "結果ファイルはまだ保存されていません。";
   }
   hideResearchWaveProgress();
   if (validationMode) hideValidationWaveProgress();
@@ -1093,12 +1304,12 @@ function renderResearchPanel() {
     renderRightResearchPanels();
     return;
   }
-  const sampleCount = dataset.settings?.phase1SamplePerGroup || session?.samplePerGroup || 20;
+  const sampleCount = researchConfiguredQuestionCount(dataset.settings || {}, session);
   syncResearchDesignControls(dataset.settings || {});
   const validationSession = state.validationSession;
   const answered = state.researchMode === "validation" && validationSession
     ? `${validationSession.answeredCount || 0}/${validationSession.totalCount || cases.length} validated`
-    : (session ? `${session.answeredCount || 0}/${session.totalCount || cases.length}` : `${cases.filter((row) => row.include !== false).length}/${cases.length} included · ${sampleCount}/group`);
+    : (session ? `${session.answeredCount || 0}/${session.totalCount || cases.length}` : `${cases.filter((row) => row.include !== false).length}/${cases.length} included · ${sampleCount} questions`);
   const modeLabel = state.researchMode === "validation" ? "Validation" : (state.researchMode === "test" ? `Phase ${escapeHtml(session?.phase || "")}` : "Cut");
   els.researchPanel.innerHTML = `
     <div class="research-summary"><strong>${escapeHtml(dataset.name || dataset.datasetId || "Dataset")}</strong></div>
@@ -1118,15 +1329,24 @@ function renderResearchPanel() {
 }
 
 function syncResearchDesignControls(settings) {
-  const sampleCount = Number(settings.phase1SamplePerGroup || 20);
+  const sampleCount = researchConfiguredQuestionCount(settings);
   if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(sampleCount);
   if (els.researchEpochCountInput) els.researchEpochCountInput.value = String(sampleCount);
+  if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = String(sampleCount);
+}
+
+function researchConfiguredQuestionCount(settings = {}, session = null) {
+  const total = Number(settings.phase1TotalSampleCount || session?.requestedTotalCount || 0);
+  if (Number.isFinite(total) && total > 0) return Math.max(1, Math.min(500, total));
+  const legacyPerGroup = Number(settings.phase1SamplePerGroup || session?.samplePerGroup || 0);
+  if (Number.isFinite(legacyPerGroup) && legacyPerGroup > 0) return Math.max(1, Math.min(500, legacyPerGroup * 2));
+  return 20;
 }
 
 function researchDesignSettings() {
   const samplePerGroup = Math.max(1, Math.min(500, Number(els.researchDesignEpochCountInput?.value || els.researchSetupEpochCountInput?.value || els.researchEpochCountInput?.value || 20)));
   return {
-    phase1SamplePerGroup: samplePerGroup,
+    phase1TotalSampleCount: samplePerGroup,
   };
 }
 
@@ -1134,8 +1354,9 @@ async function saveResearchTestDesign(datasetPathOverride = "") {
   const datasetPath = datasetPathOverride || state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
   if (!datasetPath) return;
   const settings = researchDesignSettings();
-  if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(settings.phase1SamplePerGroup);
-  if (els.researchEpochCountInput) els.researchEpochCountInput.value = String(settings.phase1SamplePerGroup);
+  if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(settings.phase1TotalSampleCount);
+  if (els.researchEpochCountInput) els.researchEpochCountInput.value = String(settings.phase1TotalSampleCount);
+  if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = String(settings.phase1TotalSampleCount);
   try {
     const data = await fetchJson("/api/research/dataset/item", {
       method: "POST",
@@ -1192,12 +1413,55 @@ function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
   `;
 }
 
+function hideResearchInlineProgress() {
+  for (const el of [els.researchInlineProgress, els.validationInlineProgress]) {
+    if (!el) continue;
+    el.hidden = true;
+    el.textContent = "";
+  }
+}
+
+function renderResearchInlineProgress(snapshot = null) {
+  if (els.researchCompleteScreen?.hidden === false && (state.researchMode === "test" || state.researchMode === "validation")) {
+    const el = state.researchMode === "validation" ? els.validationInlineProgress : els.researchInlineProgress;
+    hideResearchInlineProgress();
+    if (el) {
+      el.hidden = false;
+      el.textContent = "完了";
+    }
+    return;
+  }
+  if (state.researchMode === "test" && state.researchSession) {
+    const data = snapshot || researchProgressSnapshot();
+    const label = data.isPractice
+      ? `本番 ${data.total || 0} 問`
+      : `残り ${data.remaining} 問`;
+    hideResearchInlineProgress();
+    if (els.researchInlineProgress) {
+      els.researchInlineProgress.hidden = false;
+      els.researchInlineProgress.textContent = label;
+    }
+    return;
+  }
+  if (state.researchMode === "validation" && state.validationSession) {
+    const data = snapshot || validationProgressSnapshot();
+    hideResearchInlineProgress();
+    if (els.validationInlineProgress) {
+      els.validationInlineProgress.hidden = false;
+      els.validationInlineProgress.textContent = `残り ${data.remaining} epoch`;
+    }
+    return;
+  }
+  hideResearchInlineProgress();
+}
+
 function renderResearchProgress() {
   if (!els.researchTestProgress) return;
   const session = state.researchSession;
   if (!session || state.researchMode !== "test") {
     els.researchTestProgress.innerHTML = '<div class="research-empty">No test running.</div>';
     renderResearchWaveProgress();
+    renderResearchInlineProgress();
     renderRightResearchPanels();
     return;
   }
@@ -1214,6 +1478,7 @@ function renderResearchProgress() {
     </div>
   `;
   renderResearchWaveProgress(snapshot);
+  renderResearchInlineProgress(snapshot);
   renderRightResearchPanels();
 }
 
@@ -1235,21 +1500,14 @@ function hideValidationWaveProgress() {
 
 function renderValidationProgress() {
   const session = state.validationSession;
-  if (!session || state.researchMode !== "validation") return hideResearchWaveProgress();
+  if (!session || state.researchMode !== "validation") {
+    hideResearchWaveProgress();
+    renderResearchInlineProgress();
+    return;
+  }
   const snapshot = validationProgressSnapshot();
   const { total, answered, currentQuestion, remaining, pct } = snapshot;
-  if (els.researchWaveProgress && els.researchCompleteScreen?.hidden !== false) {
-    els.researchWaveProgress.hidden = false;
-    els.researchWaveProgress.setAttribute("aria-hidden", "false");
-    els.researchWaveProgress.innerHTML = `
-      <div class="research-wave-progress-main">
-        <strong>Validation ${currentQuestion}/${total || 0}</strong>
-        <span>評価済み ${answered}/${total || 0} · 残り ${remaining} epoch</span>
-      </div>
-      <div class="research-wave-progress-meter" aria-label="Validation進捗 ${pct}%"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
-      <div class="research-wave-progress-pct">${pct}%</div>
-    `;
-  }
+  hideResearchWaveProgress();
   if (els.researchTestProgress) {
     els.researchTestProgress.innerHTML = `
       <div class="research-progress-card">
@@ -1260,6 +1518,7 @@ function renderValidationProgress() {
       </div>
     `;
   }
+  renderResearchInlineProgress(snapshot);
 }
 
 function researchCaseLabelGroup(caseRow) {
@@ -1312,7 +1571,12 @@ function activeResearchResponses() {
   const rows = Array.isArray(state.researchResponses) ? state.researchResponses : [];
   return rows
     .filter((row) => row && !row.superseded && !row.undoneAt)
-    .sort((a, b) => String(b.answeredAt || "").localeCompare(String(a.answeredAt || "")));
+    .sort((a, b) => {
+      const orderA = Number(a.answerOrder || 0);
+      const orderB = Number(b.answerOrder || 0);
+      if (orderA || orderB) return orderA - orderB;
+      return String(a.answeredAt || "").localeCompare(String(b.answeredAt || ""));
+    });
 }
 
 function researchDetailRows(rows) {
@@ -1321,11 +1585,36 @@ function researchDetailRows(rows) {
 
 function researchMontageTimingSummaryText(response) {
   if (!response) return "";
+  if (response.montageUsageSummary) return response.montageUsageSummary;
+  if (Array.isArray(response.montageUsage) && response.montageUsage.length) {
+    return response.montageUsage
+      .map((row, index) => {
+        const order = Number(row.order || index + 1);
+        const montage = row.montage || "-";
+        const start = Number(row.startSec || 0).toFixed(1);
+        const end = Number(row.endSec || 0).toFixed(1);
+        const duration = Number(row.durationSec || 0).toFixed(1);
+        return `${order}. ${montage} ${start}-${end}s (${duration}s)`;
+      })
+      .join(" / ");
+  }
+  if (response.montageTimelineSummary) return response.montageTimelineSummary;
   if (response.montageDurationSummary) return response.montageDurationSummary;
   const durations = response.montageDurationsSec || {};
   return Object.entries(durations)
     .map(([montage, seconds]) => `${montage}:${Number(seconds || 0).toFixed(3)}`)
     .join(";");
+}
+
+function researchMontageUsageRows(response) {
+  const rows = Array.isArray(response?.montageUsage) ? response.montageUsage : [];
+  if (rows.length) {
+    return rows.map((row, index) => [
+      `Montage ${Number(row.order || index + 1)}`,
+      `${row.montage || "-"} / ${Number(row.startSec || 0).toFixed(1)}-${Number(row.endSec || 0).toFixed(1)}秒 / ${Number(row.durationSec || 0).toFixed(1)}秒使用`,
+    ]);
+  }
+  return [["Montage usage", researchMontageTimingSummaryText(response)]];
 }
 
 function renderRightResearchPanels() {
@@ -1359,18 +1648,16 @@ function renderRightTestPanel() {
       ["Correct", result.label || ""],
       ["Expected", result.expected || ""],
       ["Phase", response.phase || ""],
-      ["Epoch", `${formatSec(Number(response.epochStart || caseRow?.epochStart || 0))} + ${Number(caseRow?.durationSec || 10)}s`],
-      ["Spike time", response.spikeTime === "" ? "" : formatSec(Number(response.spikeTime || 0))],
-      ["Channel", response.spikeChannel || response.clickedElectrode || ""],
-      ["Montage", response.usedMontage || response.spikeMontage || ""],
-      ["Montage seconds", researchMontageTimingSummaryText(response)],
+      ["Final montage", response.finalMontage || response.usedMontage || response.spikeMontage || ""],
+      ...researchMontageUsageRows(response),
       ["Answered", response.answeredAt || ""],
     ];
-    return `<div class="research-result-card ${escapeHtml(result.className)}"><div class="research-result-head"><strong>#${index + 1} ${escapeHtml(result.label)}</strong><span>${escapeHtml(researchRatingLabel(response.rating) || "-")}</span></div>${researchDetailRows(rows)}</div>`;
+    const answerOrder = Number(response.answerOrder || index + 1);
+    return `<div class="research-result-card ${escapeHtml(result.className)}"><div class="research-result-head"><strong>${answerOrder}問目 ${escapeHtml(result.label)}</strong><span>${escapeHtml(researchRatingLabel(response.rating) || "-")}</span></div>${researchDetailRows(rows)}</div>`;
   }).join("");
   els.rightTestPanel.innerHTML = `
     ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No test epoch loaded.</div>'}
-    <div class="research-result-title">All judgments (${responses.length})</div>
+    <div class="research-result-title">解答記録 (${responses.length})</div>
     <div class="research-result-list">${resultCards || '<div class="research-empty">No saved judgment yet.</div>'}</div>
   `;
 }
@@ -1409,19 +1696,21 @@ function renderRightValidationPanel() {
 function renderRightAnswerPanel() {
   if (!els.rightAnswerPanel) return;
   if (state.researchMode === "validation") {
-    const response = state.lastValidationResponse;
-    if (!response) {
-      els.rightAnswerPanel.innerHTML = '<div class="research-empty">No validation yet.</div>';
-      return;
-    }
-    const rows = [
-      ["Case", response.caseId || ""],
-      ["Expert rating", researchRatingLabel(response.rating)],
-      ["Expected", researchRatingLabel(response.expectedRating)],
-      ["Dataset valid", response.datasetValid ? "OK" : "要確認"],
-      ["Method", response.validationMethod || ""],
-    ];
-    els.rightAnswerPanel.innerHTML = `<div class="research-result-card ${response.datasetValid ? "correct" : "incorrect"}"><div class="research-result-head"><strong>${response.datasetValid ? "OK" : "要確認"}</strong><span>${escapeHtml(researchRatingLabel(response.rating) || "-")}</span></div>${researchDetailRows(rows)}</div>`;
+    const rejected = activeValidationResponses().filter((response) => !response.datasetValid);
+    const cards = rejected.map((response, index) => {
+      const rows = [
+        ["Case", response.caseId || ""],
+        ["Expert rating", researchRatingLabel(response.rating)],
+        ["Expected", researchRatingLabel(response.expectedRating)],
+        ["Method", response.validationMethod || ""],
+        ["Answered", response.answeredAt || ""],
+      ];
+      return `<div class="research-result-card incorrect"><div class="research-result-head"><strong>#${index + 1} 要確認</strong><span>${escapeHtml(researchRatingLabel(response.rating) || "-")}</span></div>${researchDetailRows(rows)}</div>`;
+    }).join("");
+    els.rightAnswerPanel.innerHTML = `
+      <div class="research-result-title">Rejected epochs (${rejected.length})</div>
+      <div class="research-result-list">${cards || '<div class="research-empty">弾いたエポックはまだありません。</div>'}</div>
+    `;
     return;
   }
   const response = state.lastResearchResponse;
@@ -1438,8 +1727,7 @@ function renderRightAnswerPanel() {
     ["Your rating", researchRatingLabel(response.rating)],
     ["Expected", result.expected || ""],
     ["Phase", response.phase || ""],
-    ["Epoch", `${formatSec(Number(response.epochStart || caseRow?.epochStart || 0))} + ${Number(caseRow?.durationSec || 10)}s`],
-    ["Montage seconds", researchMontageTimingSummaryText(response)],
+    ...researchMontageUsageRows(response),
   ];
   els.rightAnswerPanel.innerHTML = `
     <div class="research-result-card ${escapeHtml(result.className)}">
@@ -1464,6 +1752,7 @@ async function createResearchDataset() {
       };
       payload.name = "manual_test_dataset";
       payload.phase1Montage = phase1Montage;
+      payload.phase1TotalSampleCount = researchDesignSettings().phase1TotalSampleCount;
     }
     if (outputValue) payload.outputPath = outputValue;
     const data = await fetchJson("/api/research/dataset/create", {
@@ -1474,7 +1763,7 @@ async function createResearchDataset() {
     state.researchDataset = data.dataset;
     state.researchDatasetPath = data.datasetPath;
     state.researchCaseIndex = 0;
-    if (els.researchEpochCountInput) els.researchEpochCountInput.value = data.dataset?.settings?.phase1SamplePerGroup || 20;
+    syncResearchDesignControls(data.dataset?.settings || {});
     if (state.researchMode === "dataset" && els.researchDatasetPathInput) {
       els.researchDatasetPathInput.value = data.datasetPath;
     }
@@ -1491,17 +1780,28 @@ async function loadResearchDatasetFromInput() {
   const path = els.researchDatasetPathInput?.value.trim() || "";
   if (!path) return setStatus("Enter dataset folder path", { error: true });
   try {
-    const dataset = await fetchJson(`/api/research/dataset?${qs({ path })}`);
-    state.researchDataset = dataset;
-    state.researchDatasetPath = dataset.datasetPath || path;
+    const dataset = await loadResearchDatasetFromPath(path);
     state.researchCaseIndex = 0;
-    if (els.researchEpochCountInput) els.researchEpochCountInput.value = dataset.settings?.phase1SamplePerGroup || 20;
     if (state.researchMode !== "validation") setResearchMode("dataset");
-    renderResearchPanel();
     setStatus(`Dataset loaded: ${(dataset.cases || []).length} cases`);
   } catch (err) {
     setStatus(`Dataset load failed: ${err.message}`, { error: true });
   }
+}
+
+async function loadResearchDatasetFromPath(path) {
+  const datasetPath = String(path || "").trim();
+  if (!datasetPath) throw new Error("Dataset path or URL is required.");
+  const dataset = await fetchJson(`/api/research/dataset?${qs({ path: datasetPath })}`);
+  state.researchDataset = dataset;
+  state.researchDatasetPath = dataset.datasetPath || datasetPath;
+  if (els.researchDatasetPathInput) els.researchDatasetPathInput.value = state.researchDatasetPath;
+  if (els.researchSetupDatasetPathInput && !/^https?:\/\//i.test(datasetPath)) {
+    els.researchSetupDatasetPathInput.value = state.researchDatasetPath;
+  }
+  syncResearchDesignControls(dataset.settings || {});
+  renderResearchPanel();
+  return dataset;
 }
 
 function moveResearchCase(delta) {
@@ -1613,17 +1913,18 @@ async function saveResearchEpochCount() {
   const value = Math.max(1, Math.min(500, Number(els.researchEpochCountInput.value || 20)));
   els.researchEpochCountInput.value = String(value);
   if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(value);
+  if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = String(value);
   try {
     const data = await fetchJson("/api/research/dataset/item", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datasetPath: state.researchDatasetPath, updates: { phase1SamplePerGroup: value } }),
+      body: JSON.stringify({ datasetPath: state.researchDatasetPath, updates: { phase1TotalSampleCount: value } }),
     });
     state.researchDataset = data.dataset;
     renderResearchPanel();
-    setStatus(`Epoch/group set to ${value}`);
+    setStatus(`Test question count set to ${value}`);
   } catch (err) {
-    setStatus(`Epoch count save failed: ${err.message}`, { error: true });
+    setStatus(`Question count save failed: ${err.message}`, { error: true });
   }
 }
 
@@ -1665,7 +1966,7 @@ async function showValidationCase(index) {
   if (!cases.length) {
     renderResearchPanel();
     showResearchCompletion();
-    setStatus("Validation complete. JSON export is ready");
+    setStatus("Validation complete. 結果ファイルを保存できます");
     return;
   }
   state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, index));
@@ -1678,13 +1979,14 @@ async function showValidationCase(index) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: item.edfPath }),
     });
-    await loadRecordings(opened.id);
+    await loadRecordings(opened.id, { loadWindow: false });
     state.recordingId = opened.id;
     els.recordingSelect.value = opened.id;
-    state.start = Number(item.epochStart || 0);
-    state.cursorTime = Number(item.eventTime ?? item.epochStart ?? 0);
+    state.start = 0;
+    state.cursorTime = null;
     state.rangeStart = null;
     state.scalogramSelection = null;
+    state.topomapSelection = null;
     state.scalogramData = null;
     const montage = item.phase1Montage || storedResearchProfile().usualMontage || "conventional";
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
@@ -1696,10 +1998,10 @@ async function showValidationCase(index) {
     state.activeMontage = els.montageSelect.value;
     updateViewModeButtons();
     syncMultiMontageControls();
-    state.rightPanelVisible = false;
-    applyRightPanelVisibility({ redraw: false });
+    setRightPanelVisible(false, { save: false });
     state.windowData = null;
     await loadWindow();
+    scheduleLayoutRefresh();
     state.validationCaseStartedAt = new Date().toISOString();
     renderValidationProgress();
     renderRightResearchPanels();
@@ -1711,9 +2013,10 @@ async function showValidationCase(index) {
 
 function renderValidationRatingContextMenu() {
   const expected = researchExpectedRating(currentResearchCase());
+  const opposite = expected === "てんかん性異常あり" ? "てんかん性異常なし" : "てんかん性異常あり";
   els.contextMenu.innerHTML = `
-    <div class="context-menu-caption">Validation: データセットlabelと矛盾する場合に選択</div>
-    ${["てんかん性異常あり", "てんかん性異常なし"].map((rating) => `<button data-action="validation-rating" data-rating="${escapeHtml(rating)}">${escapeHtml(rating)}${rating === expected ? " (label通り)" : ""}</button>`).join("")}
+    <div class="context-menu-caption">Validation: labelと矛盾する場合のみ選択</div>
+    <button data-action="validation-rating" data-rating="${escapeHtml(opposite)}">${escapeHtml(opposite)}として修正</button>
   `;
 }
 
@@ -1751,13 +2054,13 @@ async function saveValidationRating(rating, method = "manual_override") {
     setValidationResponsesFromSession(data.session);
     state.lastValidationResponse = data.response;
     const label = data.response?.datasetValid ? "妥当" : "要確認";
-    showResearchToast(`Validation保存: ${label} · ${researchRatingLabel(rating)}`);
+    showResearchToast(`Validation保存: ${label} · ${researchRatingLabel(rating)} · やり直す場合は「前の問題をやりなおす」`, { undo: true });
     const cases = activeResearchCases();
     if (cases.length) await showValidationCase(0);
     else {
       renderResearchPanel();
       showResearchCompletion();
-      setStatus("Validation complete. JSON export is ready");
+      setStatus("Validation complete. 結果ファイルを保存できます");
     }
   } catch (err) {
     setStatus(`Validation save failed: ${err.message}`, { error: true });
@@ -1769,6 +2072,7 @@ async function saveValidationRating(rating, method = "manual_override") {
 async function acceptCurrentValidationEpoch() {
   const item = currentResearchCase();
   if (!item || state.researchMode !== "validation") return;
+  hideContextMenu();
   await saveValidationRating(researchExpectedRating(item), "enter_accept");
 }
 
@@ -1776,23 +2080,24 @@ async function exportValidationJson() {
   const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
   if (!datasetPath) return setStatus("Validation用のデータセットパスを入力してください", { error: true });
   try {
-    setStatus("Saving validation JSON to Desktop...", { busy: true });
-    const headers = new Headers();
-    if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
-    const jsonRes = await fetch(`/api/research/validation/export.json?${qs({ dataset: datasetPath })}`, { headers });
-    if (!jsonRes.ok) throw new Error(jsonRes.statusText);
+    setStatus("Validation結果ファイルをDesktopに保存中...", { busy: true });
     const jsonFilename = "validation_results.json";
-    const jsonResult = await saveBlobToDesktop(new Blob([await jsonRes.text()], { type: "application/json;charset=utf-8" }), jsonFilename);
+    const jsonResult = await fetchJson("/api/research/validation/export-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ datasetPath, filename: jsonFilename }),
+    });
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `Desktopに保存しました: ${jsonResult.filename || jsonFilename}`;
+      els.researchSavedCsvName.textContent = `Desktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`;
     }
-    setStatus(`Validation JSON saved to Desktop: ${jsonResult.filename || jsonFilename}`);
+    setStatus(`Validation結果ファイルをDesktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`);
   } catch (err) {
     setStatus(`Validation export failed: ${err.message}`, { error: true });
   }
 }
 
 async function startResearchTest() {
+  setResearchSetupMessage("入力内容を確認中...");
   if (!validateResearchProfileForStart()) return;
   saveResearchProfile();
   hideResearchCompletion();
@@ -1803,6 +2108,7 @@ async function startResearchTest() {
   const readerId = researchReaderDisplayId(profile);
   const phase = "1";
   const usualMontage = profile.usualMontage || activeMontageValue();
+  const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || "";
   const iedsPresentPath = els.researchIedsPresentPathInput?.value.trim() || els.researchSetupIedsPresentPathInput?.value.trim() || "";
   const iedsAbsentPath = els.researchIedsAbsentPathInput?.value.trim() || els.researchSetupIedsAbsentPathInput?.value.trim() || "";
   if (els.researchEpochCountInput && els.researchSetupEpochCountInput?.value) {
@@ -1813,10 +2119,10 @@ async function startResearchTest() {
     els.montageSelect.value = usualMontage;
     state.activeMontage = els.montageSelect.value || usualMontage;
   }
-  if (!iedsPresentPath || !iedsAbsentPath) {
+  if (!setupDatasetPath && (!iedsPresentPath || !iedsAbsentPath)) {
     const existingDatasetPath = state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
     if (!existingDatasetPath) {
-      const message = "先にCutモードでデータセットを作成してください";
+      const message = "GitHub dataset URL、local dataset path、またはIEDs present/absentのDataを入力してください";
       setResearchSetupMessage(message, true);
       setStatus(message, { error: true });
       return;
@@ -1826,9 +2132,13 @@ async function startResearchTest() {
   setResearchStartBusy(true);
   setStatus("Starting test...", { busy: true });
   try {
-    const existingDatasetPath = state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
+    const existingDatasetPath = setupDatasetPath || state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
     const created = iedsPresentPath && iedsAbsentPath ? await createResearchDataset() : null;
-    const datasetPath = created?.datasetPath || existingDatasetPath || state.researchDatasetPath || "";
+    let datasetPath = created?.datasetPath || existingDatasetPath || state.researchDatasetPath || "";
+    if (!created && datasetPath) {
+      const dataset = await loadResearchDatasetFromPath(datasetPath);
+      datasetPath = dataset.datasetPath || datasetPath;
+    }
     await saveResearchTestDesign(datasetPath);
     const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId, phase })}`);
     state.researchSession = session;
@@ -1858,7 +2168,7 @@ async function showResearchCase(index) {
     hideResearchTutorial();
     renderResearchPanel();
     showResearchCompletion();
-    setStatus("Test complete. JSON export is ready");
+    setStatus("Test complete. 結果ファイルを保存できます");
     return;
   }
   state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, index));
@@ -1871,13 +2181,14 @@ async function showResearchCase(index) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: item.edfPath }),
     });
-    await loadRecordings(opened.id);
+    await loadRecordings(opened.id, { loadWindow: false });
     state.recordingId = opened.id;
     els.recordingSelect.value = opened.id;
-    state.start = Number(item.epochStart || 0);
-    state.cursorTime = Number(item.eventTime ?? item.epochStart ?? 0);
+    state.start = 0;
+    state.cursorTime = null;
     state.rangeStart = null;
     state.scalogramSelection = null;
+    state.topomapSelection = null;
     state.scalogramData = null;
     const profile = researchProfile();
     const usualMontage = isResearchPracticeCase(item) ? "conventional" : (profile.usualMontage || item.phase1Montage || "conventional");
@@ -1890,17 +2201,15 @@ async function showResearchCase(index) {
     state.activeMontage = els.montageSelect.value;
     updateViewModeButtons();
     syncMultiMontageControls();
-    state.rightPanelVisible = false;
-    applyRightPanelVisibility({ redraw: false });
+    setRightPanelVisible(false, { save: false });
     state.windowData = null;
     await loadWindow();
+    scheduleLayoutRefresh();
     updateResearchTutorial(item);
     state.researchCaseStartedAt = new Date().toISOString();
     startResearchMontageTiming();
-    const total = Number(state.researchSession?.totalCount || cases.filter((row) => !row.sampleEpoch).length || 0);
-    const answered = Number(state.researchSession?.answeredCount || 0);
-    const remaining = Math.max(0, total - answered);
-    setStatus(isResearchPracticeCase(item) ? "練習サンプル: 波形を左クリックして三択から回答してください" : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length} · 残り ${remaining} 問`));
+    renderResearchInlineProgress();
+    setStatus(isResearchPracticeCase(item) ? "練習サンプル: 波形を左クリックして三択から回答してください" : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`));
     renderRightResearchPanels();
   } catch (err) {
     hideResearchTutorial();
@@ -1969,7 +2278,7 @@ async function saveResearchRating(rating) {
       if (cases.length) await showResearchCase(0);
       else {
         showResearchCompletion();
-        setStatus("Test complete. JSON export is ready");
+        setStatus("Test complete. 結果ファイルを保存できます");
       }
       return;
     }
@@ -2004,15 +2313,16 @@ async function saveResearchRating(rating) {
       state.researchCaseIndex = cases.length ? cases.length - 1 : 0;
       renderResearchPanel();
       showResearchCompletion();
-      setStatus("Test complete. JSON export is ready");
+      setStatus("Test complete. 結果ファイルを保存できます");
     }
   } catch (err) {
     setStatus(`Save failed: ${err.message}`, { error: true });
+    showResearchToast(`保存できませんでした: ${err.message}`);
   }
 }
 
 function showResearchToast(message, options = {}) {
-  if (!els.researchToast) return;
+  if (!els.researchToast || !els.researchToastText) return;
   els.researchToastText.textContent = message;
   if (els.researchUndoBtn) els.researchUndoBtn.hidden = !options.undo;
   els.researchToast.classList.remove("hidden");
@@ -2049,6 +2359,39 @@ async function undoResearchResponse() {
   }
 }
 
+async function undoValidationResponse() {
+  if (!state.lastValidationResponse || !state.validationSession) return;
+  try {
+    const data = await fetchJson("/api/research/validation/response/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        datasetPath: state.researchDatasetPath,
+        responseId: state.lastValidationResponse.responseId,
+      }),
+    });
+    state.validationSession = data.session;
+    setValidationResponsesFromSession(data.session);
+    const cases = activeResearchCases();
+    const caseId = data.undone?.caseId;
+    const index = cases.findIndex((row) => row.caseId === caseId);
+    state.lastValidationResponse = null;
+    hideResearchToast();
+    await showValidationCase(index >= 0 ? index : 0);
+    setStatus("Validation undo complete");
+  } catch (err) {
+    setStatus(`Validation undo failed: ${err.message}`, { error: true });
+  }
+}
+
+function undoLastResearchAction() {
+  if (state.researchMode === "validation") {
+    undoValidationResponse();
+    return;
+  }
+  undoResearchResponse();
+}
+
 async function exportResearchJson() {
   if (state.researchMode === "validation") return exportValidationJson();
   const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
@@ -2057,20 +2400,44 @@ async function exportResearchJson() {
   const profile = researchProfile();
   const readerId = researchReaderDisplayId(profile);
   try {
-    setStatus("Saving result JSON to Desktop...", { busy: true });
-    const headers = new Headers();
-    if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
-    const query = qs({ dataset: datasetPath, readerId, outputPath: profile.outputPath });
-    const jsonRes = await fetch(`/api/research/test/export.json?${query}`, { headers });
-    if (!jsonRes.ok) throw new Error(jsonRes.statusText);
+    setStatus("結果ファイルをDesktopに保存中...", { busy: true });
     const jsonFilename = researchJsonFilename(readerId, profile);
-    const jsonResult = await saveBlobToDesktop(new Blob([await jsonRes.text()], { type: "application/json;charset=utf-8" }), jsonFilename);
+    const jsonResult = await fetchJson("/api/research/test/export-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ datasetPath, readerId, filename: jsonFilename }),
+    });
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `Desktopに保存しました: ${jsonResult.filename || jsonFilename}`;
+      els.researchSavedCsvName.textContent = `Desktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`;
     }
-    setStatus(`Result JSON saved to Desktop: ${jsonResult.filename || jsonFilename}`);
+    setStatus(`結果ファイルをDesktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`);
   } catch (err) {
     setStatus(`Export failed: ${err.message}`, { error: true });
+  }
+}
+
+async function submitResearchJson() {
+  if (state.researchMode === "validation") return exportValidationJson();
+  const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
+  if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
+  saveResearchProfile();
+  const profile = researchProfile();
+  const readerId = researchReaderDisplayId(profile);
+  try {
+    setStatus("結果を送信中...", { busy: true });
+    const jsonFilename = researchJsonFilename(readerId, profile);
+    const result = await fetchJson("/api/research/test/submit-result", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ datasetPath, readerId, filename: jsonFilename }),
+    });
+    const label = result.submissionId || result.filename || jsonFilename;
+    if (els.researchSavedCsvName) {
+      els.researchSavedCsvName.textContent = `送信しました: ${label}`;
+    }
+    setStatus(`結果を送信しました: ${label}`);
+  } catch (err) {
+    setStatus(`Submit failed: ${err.message}`, { error: true });
   }
 }
 
@@ -2205,10 +2572,7 @@ function onPanelResizePointerMove(ev) {
   const nextWidth = drag.startWidth + (drag.startX - ev.clientX);
   applyPanelWidth(drag.panel, nextWidth);
   resizeCanvas();
-  resizeTopomapCanvases();
   draw();
-  renderScalogram();
-  renderTopomaps();
 }
 
 function finishPanelResize() {
@@ -2280,54 +2644,23 @@ function restoreSettings() {
     setSelectValue(els.hfSelect, settings.hf);
     setSelectValue(els.acSelect, settings.ac);
     setSelectValue(els.durationSelect, settings.duration);
+    syncTimebaseButtons();
     setSelectValue(els.paperSelect, settings.paper);
     if (typeof settings.ecg === "boolean") els.ecgToggle.checked = settings.ecg;
     if (typeof settings.ecgFilter === "boolean" && els.ecgFilterToggle) {
       els.ecgFilterToggle.checked = settings.ecgFilter;
     }
-    state.rightPanelVisible = false;
-    if (typeof settings.scalogramVisible === "boolean") {
-      state.scalogramVisible = settings.scalogramVisible;
+    if (typeof settings.rightPanelVisible === "boolean") {
+      state.rightPanelVisible = settings.rightPanelVisible;
     }
+    state.scalogramVisible = false;
     if (typeof settings.showSourceAnnotations === "boolean") {
       state.showSourceAnnotations = settings.showSourceAnnotations;
       if (els.sourceAnnotationToggle) els.sourceAnnotationToggle.checked = settings.showSourceAnnotations;
     }
-    if (settings.attenuationScaleMode === "z" || settings.attenuationScaleMode === "db") {
-      state.attenuationScaleMode = settings.attenuationScaleMode;
-    }
-    if (settings.stftScaleMode === "z" || settings.stftScaleMode === "db") {
-      state.stftScaleMode = settings.stftScaleMode;
-    }
     state.topomapMode = "mean";
     state.topomapLayout = "system";
-    state.stftPowerGain = normalizeStftPowerGain(settings.stftPowerGain);
-    if (settings.attenuationFreqRange && typeof settings.attenuationFreqRange === "object") {
-      state.attenuationFreqRange = normalizeAttenuationFreqRange(settings.attenuationFreqRange.low, settings.attenuationFreqRange.high);
-    }
-    state.attenuationBaselineSec = normalizeAttenuationBaselineSec(settings.attenuationBaselineSec);
-    state.attenuationFreqStepHz = normalizeAttenuationFreqStep(settings.attenuationFreqStepHz);
-    state.attenuationTimeBins = normalizeAttenuationTimeBins(settings.attenuationTimeBins);
-    if (settings.psdFreqRange && typeof settings.psdFreqRange === "object") {
-      state.psdFreqRange = normalizeAnalysisFreqRange(settings.psdFreqRange.low, settings.psdFreqRange.high);
-    }
-    if (settings.stftFreqRange && typeof settings.stftFreqRange === "object") {
-      state.stftFreqRange = normalizeStftFreqRange(settings.stftFreqRange.low, settings.stftFreqRange.high);
-    }
     state.scalogramDisplayScope = "all";
-    syncAttenuationFreqInputs();
-    syncAttenuationTuningInputs();
-    syncPsdFreqInputs();
-    syncStftFreqInputs();
-    syncStftPowerGainInput();
-    state.scalogramFreqStepHz = normalizeScalogramFreqStep(settings.scalogramFreqStepHz);
-    state.scalogramTimeBins = normalizeScalogramTimeBins(settings.scalogramTimeBins);
-    state.stftWindowMs = normalizeStftWindowMs(settings.stftWindowMs);
-    state.stftOverlapPct = normalizeStftOverlapPct(settings.stftOverlapPct);
-    syncScalogramTuningInputs();
-    syncStftTuningInputs();
-    state.fzPeakWindowMs = normalizeFzPeakWindowMs(settings.fzPeakWindowMs);
-    syncFzPeakWindowInput();
   } catch {
     localStorage.removeItem(SETTINGS_KEY);
   }
@@ -2348,25 +2681,7 @@ function saveSettings() {
     ecg: els.ecgToggle.checked,
     ecgFilter: els.ecgFilterToggle?.checked || false,
     rightPanelVisible: state.rightPanelVisible,
-    scalogramVisible: state.scalogramVisible,
     showSourceAnnotations: state.showSourceAnnotations,
-    attenuationScaleMode: state.attenuationScaleMode === "z" ? "z" : "db",
-    stftScaleMode: stftScaleMode(),
-    stftPowerGain: normalizeStftPowerGain(state.stftPowerGain),
-    topomapMode: topomapMode(),
-    topomapLayout: topomapLayout(),
-    attenuationFreqRange: normalizeAttenuationFreqRange(state.attenuationFreqRange.low, state.attenuationFreqRange.high),
-    attenuationBaselineSec: normalizeAttenuationBaselineSec(state.attenuationBaselineSec),
-    attenuationFreqStepHz: normalizeAttenuationFreqStep(state.attenuationFreqStepHz),
-    attenuationTimeBins: normalizeAttenuationTimeBins(state.attenuationTimeBins),
-    psdFreqRange: normalizeAnalysisFreqRange(state.psdFreqRange.low, state.psdFreqRange.high),
-    stftFreqRange: normalizeStftFreqRange(state.stftFreqRange.low, state.stftFreqRange.high),
-    scalogramFreqStepHz: normalizeScalogramFreqStep(state.scalogramFreqStepHz),
-    scalogramTimeBins: normalizeScalogramTimeBins(state.scalogramTimeBins),
-    stftWindowMs: normalizeStftWindowMs(state.stftWindowMs),
-    stftOverlapPct: normalizeStftOverlapPct(state.stftOverlapPct),
-    fzPeakWindowMs: normalizeFzPeakWindowMs(state.fzPeakWindowMs),
-    scalogramDisplayScope: "all",
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -2579,8 +2894,7 @@ function setRightPanelTab(tab, options = {}) {
   if (!RIGHT_PANEL_TABS.includes(tab)) return;
   state.rightPanelTab = tab;
   if (!state.rightPanelVisible) {
-    state.rightPanelVisible = true;
-    applyRightPanelVisibility({ redraw: false });
+    setRightPanelVisible(true, { save: false, redraw: false });
   }
   applyRightPanelTab();
   if (options.save !== false) saveSettings();
@@ -2601,19 +2915,22 @@ function applyRightPanelVisibility(options = {}) {
   scheduleLayoutRefresh();
 }
 
+function setRightPanelVisible(visible, options = {}) {
+  state.rightPanelVisible = Boolean(visible);
+  if (options.save !== false) saveSettings();
+  applyRightPanelVisibility(options);
+}
+
 function toggleRightPanel() {
-  state.rightPanelVisible = !state.rightPanelVisible;
-  saveSettings();
-  applyRightPanelVisibility();
+  setRightPanelVisible(!state.rightPanelVisible);
 }
 
 
 function applyScalogramVisibility(options = {}) {
-  const visible = state.scalogramVisible;
-  document.body.classList.toggle("scalogram-hidden", !visible);
+  state.scalogramVisible = false;
+  document.body.classList.add("scalogram-hidden");
   if (options.redraw === false) return;
   scheduleLayoutRefresh();
-  if (visible && state.scalogramSelection && !state.scalogramData) loadScalogram();
 }
 
 
@@ -2795,6 +3112,7 @@ function setMontage(montage) {
   els.montageSelect.value = montage;
   state.activeMontage = montage;
   saveSettings();
+  state.windowData = null;
   loadWindow();
 }
 
@@ -2809,10 +3127,9 @@ function stepSensitivity(direction) {
   saveSettings();
   renderStatus();
   draw();
-  renderScalogram();
 }
 
-async function loadRecordings(preferredId = "") {
+async function loadRecordings(preferredId = "", options = {}) {
   setStatus("Loading recording list...", { busy: true, progress: 40 });
   state.recordings = await fetchJson("/api/recordings");
   els.recordingSelect.innerHTML = "";
@@ -2833,8 +3150,10 @@ async function loadRecordings(preferredId = "") {
     els.recordingSelect.value = state.recordingId;
     setStatus("Loading metadata...", { busy: true, progress: 60 });
     await loadMetadata();
-    if (preferredId) {
+    if (preferredId && options.loadWindow !== false) {
       await loadWindow();
+    } else if (preferredId) {
+      setStatus("Ready. Loading waveform...", { busy: true, progress: 65 });
     } else {
       setStatus("Ready. Loading waveform...", { busy: true, progress: 65 });
       setTimeout(() => loadWindow(), 0);
@@ -2846,15 +3165,17 @@ async function loadRecordings(preferredId = "") {
 
 async function onControlChange(ev) {
   saveSettings();
-  if (ev.target === els.montageSelect) updateResearchMontageTiming();
+  if (ev.target === els.montageSelect) {
+    await handleMontageControlChange("change");
+    return;
+  }
   if (ev.target === els.sensitivitySelect) {
     renderStatus();
     draw();
-    renderScalogram();
     return;
   }
-  if (ev.target === els.montageSelect && isMultiMontageMode()) {
-    setActiveMontage(els.montageSelect.value, { reloadScalogram: true });
+  if (ev.target === els.durationSelect) {
+    await handleDurationControlChange("change");
     return;
   }
   if (ev.target === els.recordingSelect) {
@@ -2868,9 +3189,12 @@ async function onControlChange(ev) {
     state.scalogramRequestId += 1;
     if (els.rangeCancelBtn) els.rangeCancelBtn.disabled = true;
     await loadMetadata();
-  } else if ([els.tcSelect, els.hfSelect, els.acSelect].includes(ev.target)) {
+  } else if ([els.tcSelect, els.hfSelect, els.acSelect, els.ecgToggle, els.ecgFilterToggle].includes(ev.target)) {
+    await handleFilterControlChange("change");
+    return;
   }
   await loadWindow();
+  scheduleLayoutRefresh();
 }
 
 
@@ -2885,81 +3209,58 @@ async function loadWindow() {
   if (state.windowLoadInFlight) {
     state.windowLoadPending = true;
     setStatus("Loading waveform...", { busy: true, progress: 75 });
-    return;
+    return state.windowLoadPromise || undefined;
   }
   state.windowLoadInFlight = true;
-  state.windowLoadPending = false;
-  setStatus("Loading waveform...", { busy: true, progress: 75 });
-  const params = {
-    id: state.recordingId,
-    start: state.start,
-    duration: els.durationSelect.value,
-    montage: activeMontageValue(),
-    montages: "",
-    tc: els.tcSelect.value,
-    hf: els.hfSelect.value,
-    ac: els.acSelect.value,
-    ecg: els.ecgToggle.checked ? "1" : "0",
-    ecgFilter: els.ecgFilterToggle?.checked ? "1" : "0",
-    topomap: "0",
-  };
-  const endpoint = "/api/window";
-  try {
-    const data = await fetchJson(`${endpoint}?${qs(params)}`);
-    if (state.windowLoadPending) return;
-    state.windowData = data;
-    state.activeMontage = els.montageSelect.value;
-    state.allAnnotations = state.windowData.annotations || [];
-    state.annotations = visibleAnnotations();
-    state.start = state.windowData.start || 0;
-    state.scalogramData = null;
-    renderStatus();
-    updateWaveScrollbar();
-    renderWarnings();
-    renderAnnotations();
-    draw();
-  } catch (err) {
-    if (!state.windowLoadPending) setStatus(`Waveform failed: ${err.message}`, { error: true });
-  } finally {
-    state.windowLoadInFlight = false;
-    if (state.windowLoadPending) {
+  state.windowLoadPromise = (async () => {
+    const endpoint = "/api/window";
+    try {
+      do {
+        state.windowLoadPending = false;
+        setStatus("Loading waveform...", { busy: true, progress: 75 });
+        const requestedMontage = activeMontageValue();
+        const requestedDuration = Number(els.durationSelect?.value || 10) || 10;
+        const params = {
+          id: state.recordingId,
+          start: state.start,
+          duration: requestedDuration,
+          montage: requestedMontage,
+          montages: "",
+          tc: els.tcSelect.value,
+          hf: els.hfSelect.value,
+          ac: els.acSelect.value,
+          ecg: els.ecgToggle.checked ? "1" : "0",
+          ecgFilter: els.ecgFilterToggle?.checked ? "1" : "0",
+          topomap: "0",
+        };
+        const data = await fetchJson(`${endpoint}?${qs(params)}`);
+        if (state.windowLoadPending) continue;
+        state.windowData = data;
+        state.activeMontage = data.montage || requestedMontage;
+        state.allAnnotations = state.windowData.annotations || [];
+        state.annotations = visibleAnnotations();
+        state.start = state.windowData.start || 0;
+        state.scalogramData = null;
+        renderStatus();
+        updateWaveScrollbar();
+        renderWarnings();
+        renderAnnotations();
+        draw();
+      } while (state.windowLoadPending);
+    } catch (err) {
+      if (!state.windowLoadPending) setStatus(`Waveform failed: ${err.message}`, { error: true });
+    } finally {
+      state.windowLoadInFlight = false;
       state.windowLoadPending = false;
-      setTimeout(() => loadWindow(), 0);
+      state.windowLoadPromise = null;
     }
-  }
+  })();
+  return state.windowLoadPromise;
 }
 
 async function loadPreciseTopomap() {
-  if (!topomapPanelActive()) {
-    state.topomapRequestId += 1;
-    return;
-  }
-  if (!state.recordingId || state.cursorTime === null) {
-    state.preciseTopomap = null;
-    renderTopomaps();
-    return;
-  }
-  const interval = fixedTopomapInterval(state.cursorTime, 0.005);
-  const requestId = ++state.topomapRequestId;
-  const params = {
-    id: state.recordingId,
-    time: interval.center,
-    start: interval.start,
-    end: interval.end,
-    tc: els.tcSelect.value,
-    hf: els.hfSelect.value,
-    ac: els.acSelect.value,
-    halfWindowSec: String(Math.max(0.001, interval.duration / 2)),
-  };
-  try {
-    const data = await fetchJson(`/api/topomap?${qs(params)}`);
-    if (requestId !== state.topomapRequestId) return;
-    state.preciseTopomap = data;
-  } catch (err) {
-    if (requestId !== state.topomapRequestId) return;
-    state.preciseTopomap = { available: false, reason: err.message };
-  }
-  renderTopomaps();
+  state.topomapRequestId += 1;
+  state.preciseTopomap = null;
 }
 
 function setTopomapSelection(selection) {
@@ -3045,7 +3346,10 @@ function renderStatus() {
     ? (state.windowData.montageViews || []).map((view) => (view.traces || []).length).join("/")
     : String((state.windowData?.traces || []).length);
   const traceText = traceCount && traceCount !== "0" ? ` · ${traceCount} traces` : "";
-  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${els.acSelect.options[els.acSelect.selectedIndex].text}${ecgFilterText}${traceText} · ${formatSec(state.start)}-${formatSec(end)}`);
+  const firstTrace = state.windowData?.traces?.[0]?.label ? ` · ${state.windowData.traces[0].label}` : "";
+  const loadedDuration = Number(state.windowData?.duration || 0);
+  const durationText = loadedDuration ? ` · loaded ${loadedDuration.toFixed(2)}s` : "";
+  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${els.acSelect.options[els.acSelect.selectedIndex].text}${ecgFilterText}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
   els.timeReadout.textContent = `${formatSec(state.start)} - ${formatSec(end)}`;
   els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${els.acSelect.options[els.acSelect.selectedIndex].text}${ecgFilterText} · ${els.paperSelect.value} mm/s`;
 }
@@ -3102,2005 +3406,89 @@ function renderAnnotations() {
 }
 
 async function loadScalogram() {
-  if (!state.recordingId || !state.scalogramSelection || !state.scalogramVisible) return;
-  const selection = state.scalogramSelection;
-  const requestId = ++state.scalogramRequestId;
-  const requestKind = state.analysisKind;
-  const requestRecordingId = state.recordingId;
-  const requestStart = Number(selection.start);
-  const requestDuration = Number(selection.duration || 1);
-  els.scalogramReadout.textContent = `Loading ${formatSec(selection.start)} + ${Number(selection.duration || 1).toFixed(3)}s...`;
-  const params = {
-    id: state.recordingId,
-    start: selection.start,
-    duration: state.analysisKind === "attenuation" ? Math.min(selection.duration || 3, 3) : (selection.duration || 1),
-    montage: activeMontageValue(),
-    tc: els.tcSelect.value,
-    hf: els.hfSelect.value,
-    ac: els.acSelect.value,
-    ...(state.analysisKind === "attenuation" ? {
-      freqLow: normalizeAttenuationFreqRange(state.attenuationFreqRange.low, state.attenuationFreqRange.high).low,
-      freqHigh: normalizeAttenuationFreqRange(state.attenuationFreqRange.low, state.attenuationFreqRange.high).high,
-      baselineSec: normalizeAttenuationBaselineSec(state.attenuationBaselineSec),
-      freqStepHz: normalizeAttenuationFreqStep(state.attenuationFreqStepHz),
-      timeBins: normalizeAttenuationTimeBins(state.attenuationTimeBins),
-    } : {}),
-    ...(state.analysisKind === "psd" ? {
-      freqLow: normalizeAnalysisFreqRange(state.psdFreqRange.low, state.psdFreqRange.high).low,
-      freqHigh: normalizeAnalysisFreqRange(state.psdFreqRange.low, state.psdFreqRange.high).high,
-    } : {}),
-    ...(state.analysisKind === "stft" ? {
-      freqLow: normalizeStftFreqRange(state.stftFreqRange.low, state.stftFreqRange.high).low,
-      freqHigh: normalizeStftFreqRange(state.stftFreqRange.low, state.stftFreqRange.high).high,
-      windowSec: normalizeStftWindowMs(state.stftWindowMs) / 1000,
-      overlapPct: normalizeStftOverlapPct(state.stftOverlapPct),
-    } : {}),
-    ecg: els.ecgToggle.checked ? "1" : "0",
-    ecgFilter: els.ecgFilterToggle?.checked ? "1" : "0",
-    ...(state.analysisKind === "scalogram" ? {
-      eventHalfWindowSec: normalizeFzPeakWindowMs(state.fzPeakWindowMs) / 1000,
-      freqStepHz: normalizeScalogramFreqStep(state.scalogramFreqStepHz),
-      timeBins: normalizeScalogramTimeBins(state.scalogramTimeBins),
-      iedPhenotype: selectedIedPhenotype(),
-      ...(isAdditionalPhenotype(selectedIedPhenotype()) && state.additionalManualAnchor ? {
-        manualAnchorTime: state.additionalManualAnchor.time,
-        manualAnchorElectrode: state.additionalManualAnchor.electrode || "",
-      } : {}),
-    } : {}),
-  };
-  try {
-    const endpoint = state.analysisKind === "attenuation" ? "/api/attenuation" : (state.analysisKind === "psd" ? "/api/psd" : (state.analysisKind === "stft" ? "/api/stft" : "/api/scalogram"));
-    const data = await fetchJson(`${endpoint}?${qs(params)}`);
-    if (
-      requestId !== state.scalogramRequestId ||
-      requestKind !== state.analysisKind ||
-      requestRecordingId !== state.recordingId ||
-      !state.scalogramVisible ||
-      !state.scalogramSelection ||
-      Number(state.scalogramSelection.start) !== requestStart ||
-      Number(state.scalogramSelection.duration || 1) !== requestDuration
-    ) {
-      return;
-    }
-    state.scalogramData = data;
-    state.selectedScalogramIndex = Math.min(
-      state.selectedScalogramIndex || 0,
-      Math.max(0, (state.scalogramData.traces || []).length - 1)
-    );
-  } catch (err) {
-    if (
-      requestId !== state.scalogramRequestId ||
-      requestKind !== state.analysisKind ||
-      requestRecordingId !== state.recordingId ||
-      !state.scalogramVisible
-    ) {
-      return;
-    }
-    state.scalogramData = { available: false, reason: err.message, traces: [], freqs: [], bands: [] };
-  }
-  try {
-    renderScalogram();
-  } catch (err) {
-    console.error("Scalogram render failed", err);
-    state.scalogramData = { available: false, reason: `Scalogram render failed: ${err.message}`, traces: [], freqs: [], bands: [] };
-    renderScalogram();
-  }
-  if (state.analysisKind === "attenuation" || state.analysisKind === "psd" || state.analysisKind === "stft") {
-    state.fzSpikeTopomap = null;
-    state.fzAfterSlowTopomap = null;
-    renderFzSpikeTopomap();
-  } else {
-    loadFzSpikeTopomap();
-  }
-  draw();
-}
-
-
-function percentileAbs(values, percentile) {
-  const sorted = (values || [])
-    .map((value) => Math.abs(Number(value)))
-    .filter((value) => Number.isFinite(value))
-    .sort((a, b) => a - b);
-  if (!sorted.length) return 0;
-  const index = Math.max(0, Math.min(sorted.length - 1, Math.round((Number(percentile || 0) / 100) * (sorted.length - 1))));
-  return sorted[index];
+  return;
 }
 
 function renderScalogram() {
-  if (!state.scalogramVisible) return;
-  const kind = state.analysisKind === "attenuation" ? "attenuation" : (state.analysisKind === "psd" ? "psd" : (state.analysisKind === "stft" ? "stft" : "scalogram"));
-  updateAnalysisKindUi(kind);
-  const data = state.scalogramData;
-  if (!state.scalogramSelection) {
-    const emptyLabel = kind === "attenuation" ? "Drag waveform to create attenuation fingerprint" : (kind === "psd" ? "Drag waveform to create PSD" : (kind === "stft" ? "Drag waveform to create STFT spectrogram" : "Drag waveform to create scalogram"));
-    els.scalogramReadout.textContent = "Drag waveform";
-    els.scalogramDetailTitle.textContent = "No selection";
-    els.scalogramDetailTitle.hidden = kind === "attenuation" || kind === "psd" || kind === "stft";
-    els.scalogramDetailCanvas.hidden = kind === "attenuation" || kind === "psd" || kind === "stft";
-    els.scalogramList.innerHTML = `<div class='annotation-row empty'><small>${emptyLabel}</small></div>`;
-    if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.disabled = true;
-    if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = true;
-    if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = true;
-    state.fzSpikeTopomap = null;
-    state.fzAfterSlowTopomap = null;
-    setFzTopomapVisible(kind !== "attenuation" && kind !== "psd" && kind !== "stft");
-    renderFzSpikeTopomap();
-    return;
-  }
-  if (!data || data.available === false) {
-    const label = kind === "attenuation" ? "Attenuation" : (kind === "psd" ? "PSD" : (kind === "stft" ? "STFT" : "Scalogram"));
-    els.scalogramReadout.textContent = data?.reason || `${label} unavailable`;
-    els.scalogramDetailTitle.textContent = "Unavailable";
-    els.scalogramDetailTitle.hidden = kind === "attenuation" || kind === "psd" || kind === "stft";
-    els.scalogramDetailCanvas.hidden = kind === "attenuation" || kind === "psd" || kind === "stft";
-    els.scalogramList.innerHTML = `<div class='annotation-row empty'><small>${label} unavailable</small></div>`;
-    if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.disabled = true;
-    if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = true;
-    if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = true;
-    state.fzSpikeTopomap = null;
-    state.fzAfterSlowTopomap = null;
-    setFzTopomapVisible(kind !== "attenuation" && kind !== "psd" && kind !== "stft");
-    renderFzSpikeTopomap(data?.reason || `${label} unavailable`);
-    return;
-  }
-
-  const traces = data.traces || [];
-  if (kind === "attenuation") {
-    renderAttenuation(data, traces);
-    return;
-  }
-  if (kind === "psd") {
-    renderPsd(data, traces);
-    return;
-  }
-  if (kind === "stft") {
-    renderStft(data, traces);
-    return;
-  }
-
-  const freqs = data.freqs || [];
-  const upper = freqs.length ? Number(freqs[freqs.length - 1]) : 70;
-  const band = data.spikeBand || { low: 14, high: Math.min(70, upper) };
-  els.scalogramReadout.textContent = `${formatSec(data.start)} + ${Number(data.duration || 1).toFixed(3)}s · ${selectedIedPhenotype()} · step ${metricNumber(data.freqStepHz || state.scalogramFreqStepHz, 1)}Hz · ${Number(data.timeBinCount || state.scalogramTimeBins)} bins · signed polarity: displayed negativity blue / positivity red · raw EEG overlay · spike ${Number(band.low).toFixed(0)}-${Number(band.high).toFixed(0)}Hz`;
-  const displayTracesForScope = scalogramDisplayTraces(traces);
-  const displayTraceSet = new Set(displayTracesForScope.map((item) => item.index));
-  const detailTrace = (displayTraceSet.has(state.selectedScalogramIndex) ? traces[state.selectedScalogramIndex] : displayTracesForScope[0]?.trace) || traces[state.selectedScalogramIndex] || traces[0];
-  els.scalogramDetailTitle.hidden = false;
-  els.scalogramDetailCanvas.hidden = false;
-  els.scalogramDetailTitle.textContent = detailTrace ? spikeMetricText(detailTrace, true) : "No data";
-  if (detailTrace) drawScalogramCanvas(els.scalogramDetailCanvas, detailTrace, data, true, "signed");
-  if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.disabled = !traces.length;
-  if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = !traces.length;
-  if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = !traces.length;
-
-  const mode = state.scalogramMode === "magnitude" ? "magnitude" : "signed";
-  const detectionMode = scalogramDetectionMode();
-  for (const btn of els.scalogramModeButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.scalogramMode || "signed") === mode);
-  }
-  for (const btn of els.scalogramScopeButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.scalogramScope || "all") === scalogramDisplayScope());
-  }
-  for (const btn of els.scalogramDetectionButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.scalogramDetection || "both") === detectionMode);
-  }
-  els.scalogramList.innerHTML = "";
-  const layout = document.createElement("div");
-  layout.className = "scalogram-display-layout";
-  const scopeTitle = mode === "magnitude" ? "Magnitude" : "Signed polarity";
-  layout.append(createScalogramModeGroup(mode, scopeTitle, traces, data, scalogramDisplayScope()));
-  layout.append(createScalogramAnalysisPanel(traces, data));
-  els.scalogramList.appendChild(layout);
-  setFzTopomapVisible(true);
+  return;
 }
 
-function updateAnalysisKindUi(kind) {
-  for (const btn of els.analysisKindButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.analysisKind || "scalogram") === kind);
-  }
-  for (const el of els.scalogramModeControls || []) {
-    el.hidden = kind === "attenuation" || kind === "psd" || kind === "stft";
-  }
-  for (const el of document.querySelectorAll(".attenuation-scale-controls")) {
-    el.hidden = kind !== "attenuation";
-  }
-  for (const el of document.querySelectorAll(".stft-scale-controls")) {
-    el.hidden = kind !== "stft";
-  }
-  for (const el of document.querySelectorAll(".attenuation-freq-controls")) {
-    el.hidden = kind !== "attenuation";
-  }
-  for (const el of document.querySelectorAll(".attenuation-tuning-control")) {
-    el.hidden = kind !== "attenuation";
-  }
-  for (const el of document.querySelectorAll(".psd-freq-controls")) {
-    el.hidden = kind !== "psd";
-  }
-  for (const el of document.querySelectorAll(".stft-freq-controls")) {
-    el.hidden = kind !== "stft";
-  }
-  for (const el of document.querySelectorAll(".stft-power-control")) {
-    el.hidden = kind !== "stft";
-  }
-  for (const el of document.querySelectorAll(".scalogram-tuning-control")) {
-    el.hidden = kind !== "scalogram";
-  }
-  for (const el of document.querySelectorAll(".stft-tuning-control")) {
-    el.hidden = kind !== "stft";
-  }
-  syncAttenuationFreqInputs();
-  syncAttenuationTuningInputs();
-  syncPsdFreqInputs();
-  syncStftFreqInputs();
-  syncStftPowerGainInput();
-  syncScalogramTuningInputs();
-  syncStftTuningInputs();
-  syncAnalysisPresetButtons();
-  syncFzPeakWindowInput();
-  for (const btn of els.attenuationScaleButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.attenuationScale || "db") === attenuationScaleMode());
-  }
-  for (const btn of els.stftScaleButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.stftScale || "db") === stftScaleMode());
-  }
+function renderTopomaps() {
+  return;
 }
 
-function attenuationScaleMode() {
-  return state.attenuationScaleMode === "z" ? "z" : "db";
-}
-
-function stftScaleMode() {
-  return state.stftScaleMode === "z" ? "z" : "db";
-}
-
-function topomapMode() {
-  return "mean";
-}
-
-function topomapLayout() {
-  return "system";
+function resizeTopomapCanvases() {
+  return;
 }
 
 function applyTopomapLayout() {
-  state.topomapLayout = "system";
+  return;
 }
 
-function normalizeAttenuationFreqRange(low, high) {
-  let lo = Number(low);
-  let hi = Number(high);
-  if (!Number.isFinite(lo)) lo = 0;
-  if (!Number.isFinite(hi)) hi = 120;
-  lo = Math.max(0, Math.min(120, lo));
-  hi = Math.max(1, Math.min(120, hi));
-  if (hi <= lo) hi = Math.min(120, lo + 1);
-  return { low: Number(lo.toFixed(1)), high: Number(hi.toFixed(1)) };
-}
-
-function syncAttenuationFreqInputs() {
-  const range = normalizeAttenuationFreqRange(state.attenuationFreqRange.low, state.attenuationFreqRange.high);
-  state.attenuationFreqRange = range;
-  if (els.attenuationFreqLowInput) els.attenuationFreqLowInput.value = String(range.low);
-  if (els.attenuationFreqHighInput) els.attenuationFreqHighInput.value = String(range.high);
-}
-
-function normalizeAttenuationBaselineSec(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 3;
-  return Math.max(0.5, Math.min(10, Math.round(number * 2) / 2));
-}
-
-function normalizeAttenuationFreqStep(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 1;
-  return Math.max(0.5, Math.min(5, Math.round(number * 2) / 2));
-}
-
-function normalizeAttenuationTimeBins(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 120;
-  return Math.max(40, Math.min(240, Math.round(number / 20) * 20));
-}
-
-function syncAttenuationTuningInputs() {
-  state.attenuationBaselineSec = normalizeAttenuationBaselineSec(state.attenuationBaselineSec);
-  state.attenuationFreqStepHz = normalizeAttenuationFreqStep(state.attenuationFreqStepHz);
-  state.attenuationTimeBins = normalizeAttenuationTimeBins(state.attenuationTimeBins);
-  if (els.attenuationBaselineSecInput) els.attenuationBaselineSecInput.value = String(state.attenuationBaselineSec);
-  if (els.attenuationBaselineSecValue) els.attenuationBaselineSecValue.value = state.attenuationBaselineSec.toFixed(1);
-  if (els.attenuationFreqStepInput) els.attenuationFreqStepInput.value = String(state.attenuationFreqStepHz);
-  if (els.attenuationFreqStepValue) els.attenuationFreqStepValue.value = state.attenuationFreqStepHz.toFixed(1);
-  if (els.attenuationTimeBinsInput) els.attenuationTimeBinsInput.value = String(state.attenuationTimeBins);
-  if (els.attenuationTimeBinsValue) els.attenuationTimeBinsValue.value = String(state.attenuationTimeBins);
-  syncAnalysisPresetButtons();
-}
-
-function onAttenuationTuningInput() {
-  state.attenuationBaselineSec = normalizeAttenuationBaselineSec(els.attenuationBaselineSecInput?.value);
-  state.attenuationFreqStepHz = normalizeAttenuationFreqStep(els.attenuationFreqStepInput?.value);
-  state.attenuationTimeBins = normalizeAttenuationTimeBins(els.attenuationTimeBinsInput?.value);
-  syncAttenuationTuningInputs();
-}
-
-function onAttenuationTuningChange() {
-  onAttenuationTuningInput();
-  saveSettings();
-  if (state.analysisKind === "attenuation" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function matchingAttenuationPreset() {
-  const baselineSec = normalizeAttenuationBaselineSec(state.attenuationBaselineSec);
-  const freqStepHz = normalizeAttenuationFreqStep(state.attenuationFreqStepHz);
-  const timeBins = normalizeAttenuationTimeBins(state.attenuationTimeBins);
-  for (const [name, preset] of Object.entries(ATTENUATION_PRESETS)) {
-    if (baselineSec === preset.baselineSec && freqStepHz === preset.freqStepHz && timeBins === preset.timeBins) return name;
-  }
-  return "custom";
-}
-
-function applyAttenuationPreset(name) {
-  const preset = ATTENUATION_PRESETS[name] || ATTENUATION_PRESETS.balanced;
-  state.attenuationBaselineSec = preset.baselineSec;
-  state.attenuationFreqStepHz = preset.freqStepHz;
-  state.attenuationTimeBins = preset.timeBins;
-  syncAttenuationTuningInputs();
-  saveSettings();
-  if (state.analysisKind === "attenuation" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function normalizeAnalysisFreqRange(low, high) {
-  let lo = Number(low);
-  let hi = Number(high);
-  if (!Number.isFinite(lo)) lo = 0;
-  if (!Number.isFinite(hi)) hi = 120;
-  lo = Math.max(0, Math.min(120, lo));
-  hi = Math.max(0.1, Math.min(120, hi));
-  if (hi <= lo) hi = Math.min(120, lo + 0.1);
-  return { low: Number(lo.toFixed(1)), high: Number(hi.toFixed(1)) };
-}
-
-function syncPsdFreqInputs() {
-  const range = normalizeAnalysisFreqRange(state.psdFreqRange.low, state.psdFreqRange.high);
-  state.psdFreqRange = range;
-  if (els.psdFreqLowInput) els.psdFreqLowInput.value = String(range.low);
-  if (els.psdFreqHighInput) els.psdFreqHighInput.value = String(range.high);
-}
-
-function onPsdFreqInputChange() {
-  state.psdFreqRange = normalizeAnalysisFreqRange(
-    els.psdFreqLowInput?.value,
-    els.psdFreqHighInput?.value
-  );
-  syncPsdFreqInputs();
-  saveSettings();
-  if (state.analysisKind === "psd" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function normalizeStftFreqRange(low, high) {
-  let lo = Number(low);
-  let hi = Number(high);
-  if (!Number.isFinite(lo)) lo = 0;
-  if (!Number.isFinite(hi)) hi = 120;
-  lo = Math.max(0, Math.min(120, lo));
-  hi = Math.max(0.1, Math.min(120, hi));
-  if (hi <= lo) hi = Math.min(120, lo + 0.1);
-  return { low: Number(lo.toFixed(1)), high: Number(hi.toFixed(1)) };
-}
-
-function syncStftFreqInputs() {
-  const range = normalizeStftFreqRange(state.stftFreqRange.low, state.stftFreqRange.high);
-  state.stftFreqRange = range;
-  if (els.stftFreqLowInput) els.stftFreqLowInput.value = String(range.low);
-  if (els.stftFreqHighInput) els.stftFreqHighInput.value = String(range.high);
-}
-
-function onStftFreqInputChange() {
-  state.stftFreqRange = normalizeStftFreqRange(
-    els.stftFreqLowInput?.value,
-    els.stftFreqHighInput?.value
-  );
-  syncStftFreqInputs();
-  saveSettings();
-  if (state.analysisKind === "stft" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function normalizeStftPowerGain(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 1;
-  return Math.max(0.5, Math.min(4, Math.round(number * 10) / 10));
-}
-
-function syncStftPowerGainInput() {
-  state.stftPowerGain = normalizeStftPowerGain(state.stftPowerGain);
-  if (els.stftPowerGainInput) els.stftPowerGainInput.value = String(state.stftPowerGain);
-  if (els.stftPowerGainValue) els.stftPowerGainValue.value = state.stftPowerGain.toFixed(1);
-}
-
-function onStftPowerGainInput() {
-  state.stftPowerGain = normalizeStftPowerGain(els.stftPowerGainInput?.value);
-  syncStftPowerGainInput();
-  renderScalogram();
-}
-
-function normalizeScalogramFreqStep(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 1;
-  return Math.max(0.5, Math.min(5, Math.round(number * 2) / 2));
-}
-
-function normalizeScalogramTimeBins(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 120;
-  return Math.max(40, Math.min(240, Math.round(number / 20) * 20));
-}
-
-function syncScalogramTuningInputs() {
-  state.scalogramFreqStepHz = normalizeScalogramFreqStep(state.scalogramFreqStepHz);
-  state.scalogramTimeBins = normalizeScalogramTimeBins(state.scalogramTimeBins);
-  if (els.scalogramFreqStepInput) els.scalogramFreqStepInput.value = String(state.scalogramFreqStepHz);
-  if (els.scalogramFreqStepValue) els.scalogramFreqStepValue.value = state.scalogramFreqStepHz.toFixed(1);
-  if (els.scalogramTimeBinsInput) els.scalogramTimeBinsInput.value = String(state.scalogramTimeBins);
-  if (els.scalogramTimeBinsValue) els.scalogramTimeBinsValue.value = String(state.scalogramTimeBins);
-  syncAnalysisPresetButtons();
-}
-
-function onScalogramTuningInput() {
-  state.scalogramFreqStepHz = normalizeScalogramFreqStep(els.scalogramFreqStepInput?.value);
-  state.scalogramTimeBins = normalizeScalogramTimeBins(els.scalogramTimeBinsInput?.value);
-  syncScalogramTuningInputs();
-}
-
-function onScalogramTuningChange() {
-  onScalogramTuningInput();
-  saveSettings();
-  if (state.analysisKind === "scalogram" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function matchingScalogramPreset() {
-  const freqStepHz = normalizeScalogramFreqStep(state.scalogramFreqStepHz);
-  const timeBins = normalizeScalogramTimeBins(state.scalogramTimeBins);
-  for (const [name, preset] of Object.entries(SCALOGRAM_PRESETS)) {
-    if (freqStepHz === preset.freqStepHz && timeBins === preset.timeBins) return name;
-  }
-  return "custom";
-}
-
-function applyScalogramPreset(name) {
-  const preset = SCALOGRAM_PRESETS[name] || SCALOGRAM_PRESETS.balanced;
-  state.scalogramFreqStepHz = preset.freqStepHz;
-  state.scalogramTimeBins = preset.timeBins;
-  syncScalogramTuningInputs();
-  saveSettings();
-  if (state.analysisKind === "scalogram" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function normalizeStftWindowMs(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 125;
-  return Math.max(50, Math.min(1000, Math.round(number / 25) * 25));
-}
-
-function normalizeStftOverlapPct(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 95;
-  return Math.max(50, Math.min(98, Math.round(number)));
-}
-
-function syncStftTuningInputs() {
-  state.stftWindowMs = normalizeStftWindowMs(state.stftWindowMs);
-  state.stftOverlapPct = normalizeStftOverlapPct(state.stftOverlapPct);
-  if (els.stftWindowMsInput) els.stftWindowMsInput.value = String(state.stftWindowMs);
-  if (els.stftWindowMsValue) els.stftWindowMsValue.value = String(state.stftWindowMs);
-  if (els.stftOverlapPctInput) els.stftOverlapPctInput.value = String(state.stftOverlapPct);
-  if (els.stftOverlapPctValue) els.stftOverlapPctValue.value = String(state.stftOverlapPct);
-  syncAnalysisPresetButtons();
-}
-
-function onStftTuningInput() {
-  state.stftWindowMs = normalizeStftWindowMs(els.stftWindowMsInput?.value);
-  state.stftOverlapPct = normalizeStftOverlapPct(els.stftOverlapPctInput?.value);
-  syncStftTuningInputs();
-}
-
-function onStftTuningChange() {
-  onStftTuningInput();
-  saveSettings();
-  if (state.analysisKind === "stft" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function matchingStftPreset() {
-  const windowMs = normalizeStftWindowMs(state.stftWindowMs);
-  const overlapPct = normalizeStftOverlapPct(state.stftOverlapPct);
-  for (const [name, preset] of Object.entries(STFT_PRESETS)) {
-    if (windowMs === preset.windowMs && overlapPct === preset.overlapPct) return name;
-  }
-  return "custom";
-}
-
-function applyStftPreset(name) {
-  const preset = STFT_PRESETS[name] || STFT_PRESETS.balanced;
-  state.stftWindowMs = preset.windowMs;
-  state.stftOverlapPct = preset.overlapPct;
-  syncStftTuningInputs();
-  saveSettings();
-  if (state.analysisKind === "stft" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function syncAnalysisPresetButtons() {
-  const attenuationPreset = matchingAttenuationPreset();
-  for (const btn of els.attenuationPresetButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.attenuationPreset || "") === attenuationPreset);
-  }
-  const scalogramPreset = matchingScalogramPreset();
-  for (const btn of els.scalogramPresetButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.scalogramPreset || "") === scalogramPreset);
-  }
-  const stftPreset = matchingStftPreset();
-  for (const btn of els.stftPresetButtons || []) {
-    btn.classList.toggle("active", (btn.dataset.stftPreset || "") === stftPreset);
-  }
-}
-
-function normalizeFzPeakWindowMs(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 10;
-  return Math.max(4, Math.min(30, Math.round(number)));
-}
-
-function normalizeIedPhenotype(value) {
-  const text = String(value || "generalized-like").trim().toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
-  if (["generalized-like", "typical-generalized", "focal-spike", "fragmented-ied"].includes(text)) return text;
-  return "generalized-like";
-}
-
-function selectedIedPhenotype() {
-  return "generalized-like";
-}
-
-function isAdditionalPhenotype(value = selectedIedPhenotype()) {
-  const phenotype = normalizeIedPhenotype(value);
-  return phenotype === "focal-spike" || phenotype === "fragmented-ied";
-}
-
-function syncFzPeakWindowInput() {
-  state.fzPeakWindowMs = normalizeFzPeakWindowMs(state.fzPeakWindowMs);
-  if (els.fzPeakWindowMsInput) els.fzPeakWindowMsInput.value = String(state.fzPeakWindowMs);
-  if (els.fzPeakWindowMsValue) els.fzPeakWindowMsValue.value = String(state.fzPeakWindowMs);
-}
-
-function onFzPeakWindowInput() {
-  state.fzPeakWindowMs = normalizeFzPeakWindowMs(els.fzPeakWindowMsInput?.value);
-  syncFzPeakWindowInput();
-  renderFzSpikeTopomap();
-}
-
-function onFzPeakWindowChange() {
-  state.fzPeakWindowMs = normalizeFzPeakWindowMs(els.fzPeakWindowMsInput?.value);
-  syncFzPeakWindowInput();
-  saveSettings();
-  if (state.analysisKind === "scalogram" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    loadFzSpikeTopomap();
-  }
-}
-
-function onAttenuationFreqInputChange() {
-  state.attenuationFreqRange = normalizeAttenuationFreqRange(
-    els.attenuationFreqLowInput?.value,
-    els.attenuationFreqHighInput?.value
-  );
-  syncAttenuationFreqInputs();
-  saveSettings();
-  if (state.analysisKind === "attenuation" && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  } else {
-    renderScalogram();
-  }
-}
-
-function renderStft(data, traces) {
-  const band = data.band || {};
-  const gain = normalizeStftPowerGain(state.stftPowerGain);
-  const scaleText = stftScaleMode() === "z" ? "z-score per trace" : "dB percentile scale";
-  els.scalogramReadout.textContent = `${formatSec(data.start)} + ${Number(data.duration || 0).toFixed(3)}s · STFT spectrogram ${metricNumber(band.low, 0)}-${metricNumber(band.high, 0)}Hz · ${scaleText} · power ×${gain.toFixed(1)} · window ${Number(data.windowSec || 0).toFixed(3)}s · overlap ${metricNumber(data.overlapPct, 0)}% · step ${Number(data.stepSec || 0).toFixed(3)}s · freq bin ${metricNumber(data.freqStepHz, 3)}Hz`;
-  if (els.scalogramDetailTitle) els.scalogramDetailTitle.hidden = true;
-  if (els.scalogramDetailCanvas) els.scalogramDetailCanvas.hidden = true;
-  if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.disabled = true;
-  if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = true;
-  if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = !(traces || []).length;
-  setFzTopomapVisible(false);
-  els.scalogramList.innerHTML = "";
-  const layout = document.createElement("div");
-  layout.className = "psd-display-layout";
-  layout.append(createStftGroup(traces, data));
-  els.scalogramList.appendChild(layout);
-}
-
-function createStftGroup(traces, data) {
-  const panel = document.createElement("div");
-  panel.className = "psd-mode-group";
-  const heading = document.createElement("div");
-  heading.className = "scalogram-mode-title";
-  const band = data.band || {};
-  heading.textContent = `STFT spectrogram ${metricNumber(band.low, 0)}-${metricNumber(band.high, 0)} Hz`;
-  panel.appendChild(heading);
-  const groups = groupScalogramTraces(traces);
-  const columns = document.createElement("div");
-  columns.className = "psd-columns";
-  const leftColumn = document.createElement("div");
-  leftColumn.className = "scalogram-column left";
-  const rightColumn = document.createElement("div");
-  rightColumn.className = "scalogram-column right";
-  columns.append(leftColumn, rightColumn);
-  panel.appendChild(columns);
-  groups.left.forEach((item) => leftColumn.appendChild(createStftRow(item.trace, data)));
-  groups.right.forEach((item) => rightColumn.appendChild(createStftRow(item.trace, data)));
-  if (groups.full.length) {
-    const fullWidth = document.createElement("div");
-    fullWidth.className = "scalogram-fullwidth";
-    groups.full.forEach((item) => fullWidth.appendChild(createStftRow(item.trace, data)));
-    panel.appendChild(fullWidth);
-  }
-  return panel;
-}
-
-function createStftRow(trace, data) {
-  const row = document.createElement("div");
-  row.className = "psd-row";
-  const summary = stftScaleMode() === "z"
-    ? `z-score · peak ${metricNumber(trace.peakFreq, 1)}Hz`
-    : `peak ${metricNumber(trace.peakFreq, 1)}Hz · ${metricNumber(trace.peakDb, 1)}dB`;
-  row.innerHTML = `<div class="psd-row-header"><strong>${escapeHtml(nkLabel(trace.label))}</strong><small>${escapeHtml(summary)}</small></div><canvas width="280" height="116"></canvas>`;
-  drawStftSpectrogramCanvas(row.querySelector("canvas"), trace, data);
-  return row;
-}
-
-function drawStftSpectrogramCanvas(canvas, trace, data) {
-  sizeCanvasToDisplay(canvas, 280, 116);
-  const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
-  const w = canvas.width;
-  const h = canvas.height;
-  const left = 24 * ratio;
-  const right = 5 * ratio;
-  const top = 5 * ratio;
-  const bottom = 15 * ratio;
-  const plotW = Math.max(1, w - left - right);
-  const plotH = Math.max(1, h - top - bottom);
-  const freqs = data.freqs || [];
-  const timeBins = data.timeBins || [];
-  const matrix = stftDisplayMatrix(trace);
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#fbfbf8";
-  ctx.fillRect(0, 0, w, h);
-  if (!freqs.length || !timeBins.length || !matrix.length) return;
-  const rows = matrix.length;
-  const cols = matrix[0]?.length || 0;
-  if (!rows || !cols) return;
-  const xEdges = stftTimeEdges(data, cols);
-  for (let r = 0; r < rows; r++) {
-    const y0 = top + (1 - (r + 1) / rows) * plotH;
-    const y1 = top + (1 - r / rows) * plotH;
-    for (let c = 0; c < cols; c++) {
-      const x0 = left + (xEdges[c] / Math.max(1e-6, Number(data.duration || 1))) * plotW;
-      const x1 = left + (xEdges[c + 1] / Math.max(1e-6, Number(data.duration || 1))) * plotW;
-      ctx.fillStyle = stftSpectrogramColor(applyStftPowerGain(Number(matrix[r][c] || 0)));
-      ctx.fillRect(x0, y0, Math.max(1, x1 - x0 + 0.5), Math.max(1, y1 - y0 + 0.5));
-    }
-  }
-  drawStftWaveformOverlay(ctx, trace, data, left, top, plotW, plotH, ratio);
-  ctx.strokeStyle = "rgba(80,80,75,.45)";
-  ctx.lineWidth = Math.max(1, 0.7 * ratio);
-  ctx.strokeRect(left, top, plotW, plotH);
-  const minFreq = Number(freqs[0] || 1);
-  const maxFreq = Number(freqs[freqs.length - 1] || data.band?.high || 120);
-  ctx.fillStyle = "#555650";
-  ctx.font = `${8 * ratio}px Arial`;
-  ctx.textAlign = "right";
-  ctx.textBaseline = "middle";
-  for (const freq of [1, 10, 30, 70, 120]) {
-    if (freq < minFreq || freq > maxFreq) continue;
-    const y = top + (1 - (freq - minFreq) / Math.max(1, maxFreq - minFreq)) * plotH;
-    ctx.fillText(`${freq}`, left - 3 * ratio, y);
-  }
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  ctx.fillText("0s", left, top + plotH + 3 * ratio);
-  ctx.textAlign = "right";
-  ctx.fillText(`${Number(data.duration || 0).toFixed(1)}s`, left + plotW, top + plotH + 3 * ratio);
-}
-
-function stftTimeEdges(data, cols) {
-  const duration = Math.max(1e-6, Number(data?.duration || 1));
-  const start = Number(data?.start || 0);
-  const bins = (data?.timeBins || []).map((time) => Number(time) - start);
-  if (bins.length !== cols || bins.some((time) => !Number.isFinite(time))) {
-    return Array.from({ length: cols + 1 }, (_, index) => (index / Math.max(1, cols)) * duration);
-  }
-  const edges = new Array(cols + 1);
-  if (cols === 1) {
-    const half = Math.max(1e-6, Number(data?.stepSec || duration)) * 0.5;
-    edges[0] = bins[0] - half;
-    edges[1] = bins[0] + half;
-  } else {
-    edges[0] = bins[0] - (bins[1] - bins[0]) * 0.5;
-    for (let index = 1; index < cols; index++) {
-      edges[index] = (bins[index - 1] + bins[index]) * 0.5;
-    }
-    edges[cols] = bins[cols - 1] + (bins[cols - 1] - bins[cols - 2]) * 0.5;
-  }
-  for (let index = 0; index < edges.length; index++) {
-    const previous = index > 0 ? edges[index - 1] : 0;
-    edges[index] = Math.max(previous, Math.min(duration, Math.max(0, Number(edges[index]) || 0)));
-  }
-  return edges;
-}
-
-function stftDisplayMatrix(trace) {
-  if (stftScaleMode() !== "z") return trace.values || [];
-  const db = trace.valuesDb || [];
-  const finite = [];
-  for (const row of db) {
-    for (const raw of row || []) {
-      const value = Number(raw);
-      if (Number.isFinite(value)) finite.push(value);
-    }
-  }
-  if (!finite.length) return trace.values || [];
-  const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
-  const variance = finite.reduce((sum, value) => sum + (value - mean) ** 2, 0) / finite.length;
-  const sd = Math.sqrt(Math.max(variance, 1e-9));
-  return db.map((row) => (row || []).map((raw) => {
-    const z = (Number(raw) - mean) / sd;
-    return Math.max(0, Math.min(1, (Math.max(-3, Math.min(3, z)) + 3) / 6));
-  }));
-}
-
-function applyStftPowerGain(value) {
-  const v = Math.max(0, Math.min(1, Number(value) || 0));
-  const gain = normalizeStftPowerGain(state.stftPowerGain);
-  return Math.max(0, Math.min(1, (v - 0.5) * gain + 0.5));
-}
-
-function percentile(sortedValues, pct) {
-  if (!Array.isArray(sortedValues) || !sortedValues.length) return 0;
-  const position = Math.max(0, Math.min(sortedValues.length - 1, (sortedValues.length - 1) * pct));
-  const lower = Math.floor(position);
-  const upper = Math.ceil(position);
-  if (lower === upper) return sortedValues[lower];
-  const fraction = position - lower;
-  return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * fraction;
-}
-
-function autoEcgUvPerMm(values) {
-  const finite = (values || [])
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value));
-  if (finite.length < 8) return ECG_UV_PER_MM;
-  finite.sort((a, b) => a - b);
-  const median = percentile(finite, 0.5);
-  const deviations = finite
-    .map((value) => Math.abs(value - median))
-    .filter((value) => Number.isFinite(value) && value > 0)
-    .sort((a, b) => a - b);
-  if (!deviations.length) return ECG_UV_PER_MM;
-  const robustHalfRangeUv = percentile(deviations, 0.98);
-  const uvPerMm = robustHalfRangeUv / ECG_AUTO_TARGET_MM;
-  if (!Number.isFinite(uvPerMm) || uvPerMm <= 0) return ECG_UV_PER_MM;
-  return Math.max(ECG_AUTO_MIN_UV_PER_MM, Math.min(ECG_AUTO_MAX_UV_PER_MM, uvPerMm));
-}
-
-function traceUvPerMm(trace, fallbackSensitivity, values = null) {
-  if (trace?.role !== "ecg") return fallbackSensitivity;
-  return autoEcgUvPerMm(values || trace.values || trace.waveformUv || trace.waveform || []);
-}
-
-function drawStftWaveformOverlay(ctx, trace, data, left, top, plotW, plotH, ratio) {
-  const overlay = scalogramOverlayFromWaveViewer(trace, data);
-  const waveform = overlay.values.length >= 2
-    ? overlay.values
-    : (Array.isArray(trace?.waveformUv) ? trace.waveformUv : trace?.waveform || []);
-  if (!Array.isArray(waveform) || waveform.length < 2) return;
-  const sensitivity = sensitivityValue();
-  const uvPerMm = traceUvPerMm(trace, sensitivity, waveform);
-  const pxPerMm = 3.78 * ratio;
-  const yScale = pxPerMm / Math.max(1e-6, uvPerMm);
-  const centerY = top + plotH * 0.5;
-  const start = Number(data?.start || state.scalogramSelection?.start || state.start || 0);
-  const duration = Math.max(1e-6, Number(data?.duration || state.scalogramSelection?.duration || 1));
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(left, top, plotW, plotH);
-  ctx.clip();
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  waveform.forEach((raw, index) => {
-    const valueUv = Number(raw) || 0;
-    const t = overlay.times.length === waveform.length ? Number(overlay.times[index]) : start + (index / Math.max(1, waveform.length - 1)) * duration;
-    const x = left + ((t - start) / duration) * plotW;
-    const y = centerY - valueUv * yScale;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = "rgba(255,255,255,.9)";
-  ctx.lineWidth = 3.2 * ratio;
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(5,9,12,.82)";
-  ctx.lineWidth = 1.25 * ratio;
-  ctx.stroke();
-  ctx.restore();
-}
-
-
-function stftSpectrogramColor(value) {
-  return spectrogramColor(value);
-}
-
-
-function renderPsd(data, traces) {
-  const band = data.band || {};
-  els.scalogramReadout.textContent = `${formatSec(data.start)} + ${Number(data.duration || 0).toFixed(3)}s · Welch PSD ${metricNumber(band.low, 0)}-${metricNumber(band.high, 0)}Hz · ${data.valueLabel || "dB uV^2/Hz"}`;
-  if (els.scalogramDetailTitle) els.scalogramDetailTitle.hidden = true;
-  if (els.scalogramDetailCanvas) els.scalogramDetailCanvas.hidden = true;
-  if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.disabled = true;
-  if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = true;
-  if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = !(traces || []).length;
-  setFzTopomapVisible(false);
-  els.scalogramList.innerHTML = "";
-  const layout = document.createElement("div");
-  layout.className = "psd-display-layout";
-  const yRange = computePsdCommonYRange(traces, data.freqs || []);
-  layout.append(createPsdGroup(traces, data, yRange));
-  els.scalogramList.appendChild(layout);
-}
-
-function createPsdGroup(traces, data, yRange) {
-  const panel = document.createElement("div");
-  panel.className = "psd-mode-group";
-  const heading = document.createElement("div");
-  heading.className = "scalogram-mode-title";
-  const band = data.band || {};
-  heading.textContent = `Welch PSD ${metricNumber(band.low, 0)}-${metricNumber(band.high, 0)} Hz`;
-  panel.appendChild(heading);
-  const groups = groupScalogramTraces(traces);
-  const columns = document.createElement("div");
-  columns.className = "psd-columns";
-  const leftColumn = document.createElement("div");
-  leftColumn.className = "scalogram-column left";
-  const rightColumn = document.createElement("div");
-  rightColumn.className = "scalogram-column right";
-  columns.append(leftColumn, rightColumn);
-  panel.appendChild(columns);
-  groups.left.forEach((item) => leftColumn.appendChild(createPsdRow(item.trace, item.index, data, yRange)));
-  groups.right.forEach((item) => rightColumn.appendChild(createPsdRow(item.trace, item.index, data, yRange)));
-  if (groups.full.length) {
-    const fullWidth = document.createElement("div");
-    fullWidth.className = "scalogram-fullwidth";
-    groups.full.forEach((item) => fullWidth.appendChild(createPsdRow(item.trace, item.index, data, yRange)));
-    panel.appendChild(fullWidth);
-  }
-  return panel;
-}
-
-function createPsdRow(trace, index, data, yRange) {
-  const row = document.createElement("div");
-  row.className = "psd-row";
-  const summary = `peak ${metricNumber(trace.peakFreq, 1)}Hz · ${metricNumber(trace.peakDb, 1)}dB`;
-  row.innerHTML = `<div class="psd-row-header"><strong>${escapeHtml(nkLabel(trace.label))}</strong><small>${escapeHtml(summary)} · envelope</small></div><canvas width="280" height="116"></canvas>`;
-  drawPsdCanvas(row.querySelector("canvas"), trace, data, yRange);
-  return row;
-}
-
-function drawPsdCanvas(canvas, trace, data, yRange = null) {
-  sizeCanvasToDisplay(canvas, 280, 116);
-  const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
-  const w = canvas.width;
-  const h = canvas.height;
-  const left = 24 * ratio;
-  const right = 5 * ratio;
-  const top = 5 * ratio;
-  const bottom = 14 * ratio;
-  const plotW = Math.max(1, w - left - right);
-  const plotH = Math.max(1, h - top - bottom);
-  const freqs = data.freqs || [];
-  const values = trace.values || [];
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#fbfbf8";
-  ctx.fillRect(0, 0, w, h);
-  if (!freqs.length || !values.length) return;
-  const finite = values.map(Number).filter(Number.isFinite);
-  const localMinDb = finite.length ? Math.min(...finite) : -80;
-  const localMaxDb = finite.length ? Math.max(...finite) : 0;
-  const useSharedRange = trace.role !== "ecg" && yRange && Number.isFinite(yRange.yMin) && Number.isFinite(yRange.yMax);
-  const yMin = useSharedRange ? yRange.yMin : localMinDb - Math.max(3, (localMaxDb - localMinDb) * 0.08);
-  const yMax = useSharedRange ? yRange.yMax : localMaxDb + Math.max(3, (localMaxDb - localMinDb) * 0.08);
-  const minDb = useSharedRange ? yMin : localMinDb;
-  const maxDb = useSharedRange ? yMax : localMaxDb;
-  const fMin = Number(freqs[0] || 0);
-  const fMax = Number(freqs[freqs.length - 1] || data.band?.high || 120);
-  ctx.save();
-  ctx.strokeStyle = "rgba(80,80,75,.18)";
-  ctx.lineWidth = Math.max(1, 0.7 * ratio);
-  for (const freq of [0, 10, 20, 30, 50, 70, 90, 120]) {
-    if (freq < fMin || freq > fMax) continue;
-    const x = left + ((freq - fMin) / Math.max(1e-6, fMax - fMin)) * plotW;
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, top + plotH);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = "rgba(80,80,75,.45)";
-  ctx.strokeRect(left, top, plotW, plotH);
-  const envelope = psdEnvelope(values, freqs);
-  ctx.strokeStyle = trace.role === "ecg" ? "rgba(95,103,98,.36)" : "rgba(40,79,159,.28)";
-  ctx.lineWidth = Math.max(1, 0.9 * ratio);
-  drawPsdLine(ctx, values, freqs, left, top, plotW, plotH, fMin, fMax, yMin, yMax);
-  ctx.strokeStyle = trace.role === "ecg" ? "#4e5752" : "#1f4f9d";
-  ctx.lineWidth = Math.max(1.5, 2.1 * ratio);
-  drawPsdLine(ctx, envelope, freqs, left, top, plotW, plotH, fMin, fMax, yMin, yMax);
-  ctx.fillStyle = "#555650";
-  ctx.font = `${8 * ratio}px Arial`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  ctx.fillText(`${metricNumber(fMin, 0)}Hz`, left, top + plotH + 3 * ratio);
-  ctx.textAlign = "right";
-  ctx.fillText(`${metricNumber(fMax, 0)}Hz`, left + plotW, top + plotH + 3 * ratio);
-  ctx.textAlign = "right";
-  ctx.textBaseline = "middle";
-  ctx.fillText(`${metricNumber(maxDb, 0)}`, left - 3 * ratio, top + 5 * ratio);
-  ctx.fillText(`${metricNumber(minDb, 0)}`, left - 3 * ratio, top + plotH - 5 * ratio);
-  ctx.restore();
-}
-
-
-function computePsdCommonYRange(traces, freqs) {
-  const values = [];
-  for (const trace of traces || []) {
-    if (trace?.role === "ecg") continue;
-    const traceValues = Array.isArray(trace?.values) ? trace.values : [];
-    for (const value of traceValues) {
-      const number = Number(value);
-      if (Number.isFinite(number)) values.push(number);
-    }
-    for (const value of psdEnvelope(traceValues, freqs || [])) {
-      const number = Number(value);
-      if (Number.isFinite(number)) values.push(number);
-    }
-  }
-  if (!values.length) return null;
-  const minDb = Math.min(...values);
-  const maxDb = Math.max(...values);
-  const pad = Math.max(3, (maxDb - minDb) * 0.08);
-  return { yMin: minDb - pad, yMax: maxDb + pad };
-}
-
-function psdEnvelope(values, freqs) {
-  const numeric = values.map((value) => Number(value));
-  const frequencyValues = freqs.map((freq) => Number(freq));
-  if (numeric.length < 3) return numeric;
-  const step = Math.max(0.25, Math.abs((frequencyValues[1] ?? 1) - (frequencyValues[0] ?? 0)) || 1);
-  const halfBins = Math.max(1, Math.round(1.5 / step));
-  return numeric.map((value, index) => {
-    let weighted = 0;
-    let weightSum = 0;
-    const lo = Math.max(0, index - halfBins);
-    const hi = Math.min(numeric.length - 1, index + halfBins);
-    for (let j = lo; j <= hi; j++) {
-      const sample = numeric[j];
-      if (!Number.isFinite(sample)) continue;
-      const weight = 1 + halfBins - Math.abs(j - index);
-      weighted += sample * weight;
-      weightSum += weight;
-    }
-    return weightSum ? weighted / weightSum : value;
-  });
-}
-
-function drawPsdLine(ctx, values, freqs, left, top, plotW, plotH, fMin, fMax, yMin, yMax) {
-  ctx.beginPath();
-  values.forEach((raw, index) => {
-    const value = Number(raw);
-    const freq = Number(freqs[index]);
-    if (!Number.isFinite(value) || !Number.isFinite(freq)) return;
-    const x = left + ((freq - fMin) / Math.max(1e-6, fMax - fMin)) * plotW;
-    const y = top + (1 - (value - yMin) / Math.max(1e-6, yMax - yMin)) * plotH;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-}
-
-function renderAttenuation(data, traces) {
-  const band = data.band || {};
-  const mode = attenuationScaleMode();
-  const dbScale = data.colorScaleDb || { min: -15, max: 6 };
-  const zScale = data.zScale || { min: -3, max: 3 };
-  const scaleText = mode === "z"
-    ? `baseline z-score ${metricNumber(zScale.min, 0)} to +${metricNumber(zScale.max, 0)} fixed scale`
-    : `${metricNumber(dbScale.min, 0)} to +${metricNumber(dbScale.max, 0)} dB fixed scale`;
-  const baselineText = mode === "z" ? "baseline z-score" : `dB vs preceding ${Number(data.baselineDuration || 0).toFixed(2)}s baseline`;
-  const requested = band.requestedLow !== undefined ? ` requested ${metricNumber(band.requestedLow, 0)}-${metricNumber(band.requestedHigh, 0)}Hz` : "";
-  els.scalogramReadout.textContent = `${formatSec(data.start)} + ${Number(data.duration || 0).toFixed(3)}s · Morlet power attenuation ${metricNumber(band.low, 0)}-${metricNumber(band.high, 0)}Hz${requested} · ${baselineText} · step ${metricNumber(data.freqStepHz || state.attenuationFreqStepHz, 1)}Hz · ${Number(data.timeBinCount || state.attenuationTimeBins)} bins · ${scaleText}`;
-  if (els.scalogramDetailTitle) els.scalogramDetailTitle.hidden = true;
-  if (els.scalogramDetailCanvas) els.scalogramDetailCanvas.hidden = true;
-  if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.disabled = true;
-  if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = true;
-  if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = !(traces || []).length;
-  setFzTopomapVisible(false);
-  els.scalogramList.innerHTML = "";
-  const layout = document.createElement("div");
-  layout.className = "attenuation-display-layout";
-  layout.append(createAttenuationGroup(traces, data));
-  els.scalogramList.appendChild(layout);
-}
-
-function setFzTopomapVisible(visible) {
-  const row = document.querySelector(".scalogram-fz-topomap-row");
-  if (row) row.hidden = !visible;
-}
-
-function createAttenuationGroup(traces, data) {
-  const panel = document.createElement("div");
-  panel.className = "attenuation-mode-group";
-  const heading = document.createElement("div");
-  heading.className = "scalogram-mode-title";
-  const band = data.band || {};
-  heading.textContent = `${attenuationScaleMode() === "z" ? "Morlet attenuation fingerprint z-score" : "Morlet attenuation fingerprint dB"} ${metricNumber(band.low, 0)}-${metricNumber(band.high, 0)} Hz`;
-  panel.appendChild(heading);
-  const groups = groupScalogramTraces(traces);
-  const columns = document.createElement("div");
-  columns.className = "attenuation-columns";
-  const leftColumn = document.createElement("div");
-  leftColumn.className = "scalogram-column left";
-  const rightColumn = document.createElement("div");
-  rightColumn.className = "scalogram-column right";
-  columns.append(leftColumn, rightColumn);
-  panel.appendChild(columns);
-  groups.left.forEach((item) => leftColumn.appendChild(createAttenuationRow(item.trace, item.index, data)));
-  groups.right.forEach((item) => rightColumn.appendChild(createAttenuationRow(item.trace, item.index, data)));
-  if (groups.full.length) {
-    const fullWidth = document.createElement("div");
-    fullWidth.className = "scalogram-fullwidth";
-    groups.full.forEach((item) => fullWidth.appendChild(createAttenuationRow(item.trace, item.index, data)));
-    panel.appendChild(fullWidth);
-  }
-  return panel;
-}
-
-function createAttenuationRow(trace, index, data) {
-  const row = document.createElement("div");
-  row.className = "attenuation-row";
-  const mode = attenuationScaleMode();
-  const dbScale = data.colorScaleDb || { min: -15, max: 6 };
-  const zScale = data.zScale || { min: -3, max: 3 };
-  const summary = mode === "z"
-    ? `median z ${metricNumber(trace.medianZ, 2)} · ${metricNumber(zScale.min, 0)}..+${metricNumber(zScale.max, 0)}`
-    : `median ${metricNumber(trace.medianDb, 1)} dB · ${metricNumber(dbScale.min, 0)}..+${metricNumber(dbScale.max, 0)}dB`;
-  row.innerHTML = `<span class="scalogram-label">${escapeHtml(nkLabel(trace.label))}<small>${escapeHtml(summary)}</small></span><canvas width="220" height="116"></canvas>`;
-  drawAttenuationCanvas(row.querySelector("canvas"), trace, data);
-  return row;
-}
-
-function drawAttenuationCanvas(canvas, trace, data) {
-  sizeCanvasToDisplay(canvas, 220, 116);
-  const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
-  const w = canvas.width;
-  const h = canvas.height;
-  const left = 24 * ratio;
-  const right = 4 * ratio;
-  const top = 4 * ratio;
-  const bottom = 13 * ratio;
-  const plotW = Math.max(1, w - left - right);
-  const plotH = Math.max(1, h - top - bottom);
-  const values = attenuationScaleMode() === "z" ? (trace.zDisplayValues || trace.values || []) : (trace.values || []);
-  const freqs = data.freqs || [];
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#091017";
-  ctx.fillRect(0, 0, w, h);
-  if (!values.length || !freqs.length) return;
-  const rows = values.length;
-  const cols = values[0]?.length || 0;
-  for (let r = 0; r < rows; r++) {
-    const row = values[r] || [];
-    const y = top + ((rows - 1 - r) / rows) * plotH;
-    const y2 = top + ((rows - r) / rows) * plotH;
-    for (let c = 0; c < cols; c++) {
-      const x = left + (c / cols) * plotW;
-      const x2 = left + ((c + 1) / cols) * plotW;
-      ctx.fillStyle = attenuationColor(Number(row[c] || 0));
-      ctx.fillRect(x, y, Math.max(1, x2 - x + 0.5), Math.max(1, y2 - y + 0.5));
-    }
-  }
-  drawStftWaveformOverlay(ctx, trace, data, left, top, plotW, plotH, ratio);
-  drawAttenuationAxes(ctx, data, left, top, plotW, plotH, ratio);
-}
-
-function drawAttenuationAxes(ctx, data, left, top, plotW, plotH, ratio) {
-  const freqs = data.freqs || [];
-  const minFreq = Number(data.band?.low ?? freqs[0] ?? 0);
-  const maxFreq = Number(freqs[freqs.length - 1] || data.band?.high || 120);
-  ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,.35)";
-  ctx.lineWidth = Math.max(1, 0.6 * ratio);
-  const ticks = [0, 5, 10, 20, 30, 50, 70, 90, 120].filter((freq) => freq >= minFreq && freq <= maxFreq);
-  if (!ticks.includes(minFreq)) ticks.unshift(minFreq);
-  if (!ticks.includes(maxFreq)) ticks.push(maxFreq);
-  for (const freq of ticks) {
-    if (freq < minFreq || freq > maxFreq) continue;
-    const y = top + (1 - (freq - minFreq) / Math.max(1, maxFreq - minFreq)) * plotH;
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(left + plotW, y);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,.72)";
-    ctx.font = `${7.5 * ratio}px Arial`;
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${freq}`, left - 3 * ratio, y);
-  }
-  ctx.strokeStyle = "rgba(255,255,255,.55)";
-  ctx.strokeRect(left, top, plotW, plotH);
-  ctx.fillStyle = "rgba(255,255,255,.76)";
-  ctx.font = `${8 * ratio}px Arial`;
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  ctx.fillText("0s", left, top + plotH + 3 * ratio);
-  ctx.textAlign = "right";
-  const timeBins = data.timeBins || [];
-  const endSec = Number(timeBins[timeBins.length - 1] ?? data.duration ?? 0);
-  ctx.fillText(`${endSec.toFixed(2)}s`, left + plotW, top + plotH + 3 * ratio);
-  ctx.restore();
-}
-
-function attenuationColor(value) {
-  const v = Math.max(-1, Math.min(1, Number(value) || 0));
-  const t = (v + 1) / 2;
-  const stops = [
-    [0.00, 0, 0, 4],
-    [0.18, 29, 12, 64],
-    [0.36, 87, 16, 110],
-    [0.54, 151, 43, 108],
-    [0.72, 224, 93, 75],
-    [0.88, 252, 178, 64],
-    [1.00, 252, 253, 191],
-  ];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const a = stops[i];
-    const b = stops[i + 1];
-    if (t >= a[0] && t <= b[0]) {
-      const f = (t - a[0]) / Math.max(1e-6, b[0] - a[0]);
-      const r = Math.round(a[1] + (b[1] - a[1]) * f);
-      const g = Math.round(a[2] + (b[2] - a[2]) * f);
-      const bl = Math.round(a[3] + (b[3] - a[3]) * f);
-      return `rgb(${r},${g},${bl})`;
-    }
-  }
-  return "rgb(252,253,191)";
-}
-
-function createScalogramAnalysisPanel(traces, data) {
-  const panel = document.createElement("div");
-  panel.className = "scalogram-analysis-panel";
-  const title = document.createElement("div");
-  title.className = "scalogram-mode-title";
-  title.textContent = "Spike analysis";
-  panel.appendChild(title);
-  const rows = [
-    ["Spike anchor", data?.globalSpikeAnchor?.available ? `${formatSec(data.globalSpikeAnchor.time || 0)} · ${nkLabel(data.globalSpikeAnchor.traceLabel || data.globalSpikeAnchor.electrode || "Fz")}` : "-"],
-    ["After-slow anchor", data?.globalAfterSlowAnchor?.available ? `${formatSec(data.globalAfterSlowAnchor.time || 0)} · ${nkLabel(data.globalAfterSlowAnchor.traceLabel || data.globalAfterSlowAnchor.electrode || "Fz")}` : "-"],
-    ["Traces", String(Array.isArray(traces) ? traces.length : 0)],
-  ];
-  for (const [label, value] of rows) {
-    const row = document.createElement("div");
-    row.className = "scalogram-analysis-row";
-    row.innerHTML = `<span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>`;
-    panel.appendChild(row);
-  }
-  return panel;
-}
-
-function appendScwtLateralitySection(panel, data, showingSpike, showingSlow) {
-  const scwt = data?.scwtLaterality;
-  const title = document.createElement("div");
-  title.className = "scalogram-analysis-subtitle";
-  title.textContent = "sCWT-LI frontal ROI";
-  panel.appendChild(title);
-  if (!scwt?.available) {
-    const empty = document.createElement("div");
-    empty.className = "scalogram-analysis-empty";
-    empty.textContent = scwt?.reason || "Unavailable";
-    panel.appendChild(empty);
-    return;
-  }
-  const help = document.createElement("div");
-  help.className = "scalogram-analysis-help";
-  help.textContent = `L ${scwt.leftRoi?.join("/") || "Fp1/F3/F7"} · R ${scwt.rightRoi?.join("/") || "Fp2/F4/F8"} · ${metricNumber(scwt.eventWindowHalfMs, 0)} ms half-window`;
-  panel.appendChild(help);
-  const events = (scwt.events || []).filter((event) => (event.event === "spike" && showingSpike) || (event.event === "afterSlow" && showingSlow));
-  events.forEach((event) => {
-    const eventTitle = document.createElement("div");
-    eventTitle.className = "scalogram-analysis-row metric-header";
-    eventTitle.innerHTML = `<span>${escapeHtml(event.label || event.event || "event")}</span><strong>LI · VL / VR</strong>`;
-    panel.appendChild(eventTitle);
-    if (!event.available) {
-      const empty = document.createElement("div");
-      empty.className = "scalogram-analysis-empty";
-      empty.textContent = event.reason || "Unavailable";
-      panel.appendChild(empty);
-      return;
-    }
-    (event.bands || []).forEach((band) => {
-      const row = document.createElement("div");
-      row.className = "scalogram-analysis-row";
-      const role = band.role === "primary" ? "main" : "sens";
-      const value = Number(band.value);
-      const valueClass = Number.isFinite(value) && value < 0 ? " class=\"negative-latency\"" : "";
-      const actualHigh = Number.isFinite(Number(band.actualHighHz)) && Number(band.actualHighHz) !== Number(band.highHz)
-        ? `→${metricNumber(band.actualHighHz, 0)}`
-        : "";
-      row.innerHTML = `<span>${escapeHtml(band.label || "band")} ${actualHigh} · ${role}</span><strong${valueClass}>${band.available ? metricNumber(band.value, 3) : "-"} · ${band.available ? metricNumber(band.VL, 2) : "-"}/${band.available ? metricNumber(band.VR, 2) : "-"}</strong>`;
-      panel.appendChild(row);
-    });
-  });
-}
-
-function appendLatencySection(panel, titleText, pairs) {
-  const latencyTitle = document.createElement("div");
-  latencyTitle.className = "scalogram-analysis-subtitle";
-  latencyTitle.textContent = titleText;
-  panel.appendChild(latencyTitle);
-  if (!pairs.length) {
-    const empty = document.createElement("div");
-    empty.className = "scalogram-analysis-empty";
-    empty.textContent = "No paired traces";
-    panel.appendChild(empty);
-    return;
-  }
-  for (const pair of pairs.slice(0, 12)) {
-    const row = document.createElement("div");
-    const latency = Number(pair.latencyMsRightMinusLeft);
-    const latencyClass = Number.isFinite(latency) && latency < 0 ? " class=\"negative-latency\"" : "";
-    row.className = "scalogram-analysis-row";
-    row.innerHTML = `<span>${escapeHtml(nkLabel(pair.leftTraceLabel))} / ${escapeHtml(nkLabel(pair.rightTraceLabel))}</span><strong${latencyClass}>${Number.isFinite(latency) ? latency.toFixed(1) : "-"} ms</strong>`;
-    panel.appendChild(row);
-  }
-}
-
-function fzSpikeTrace(traces) {
-  const candidates = (traces || []).filter((trace) => /(^|[^A-Za-z])Fz([^A-Za-z]|$|-)/i.test(String(trace?.label || "")));
-  if (!candidates.length) return null;
-  return (
-    candidates.find((trace) => /^Fz-/i.test(String(trace.label || ""))) ||
-    candidates.find((trace) => /Fz-(AVG|Lap|C3\/C4)/i.test(String(trace.label || ""))) ||
-    candidates[0]
-  );
-}
-
-async function loadFzSpikeTopomap() {
-  const traces = state.scalogramData?.traces || [];
-  if (!state.recordingId || !state.scalogramSelection || !state.scalogramVisible || !traces.length) {
-    state.fzSpikeTopomap = null;
-    state.fzAfterSlowTopomap = null;
-    renderFzSpikeTopomap();
-    return;
-  }
-  const trace = fzSpikeTrace(traces);
-  const spikeTime = Number(state.scalogramData?.globalSpikeAnchor?.time ?? trace?.spikeMetrics?.peakTime);
-  const slowTime = Number(state.scalogramData?.globalAfterSlowAnchor?.time ?? trace?.spikeMetrics?.afterSlowTime);
-  const traceLabel = state.scalogramData?.globalSpikeAnchor?.traceLabel || trace?.label || "Fz";
-  const slowTraceLabel = state.scalogramData?.globalAfterSlowAnchor?.traceLabel || trace?.label || "Fz";
-  if (!trace || !Number.isFinite(spikeTime)) {
-    state.fzSpikeTopomap = { available: false, reason: "Fz spike peak unavailable", traceLabel };
-    state.fzAfterSlowTopomap = { available: false, reason: "Fz after-slow peak unavailable", traceLabel: slowTraceLabel };
-    renderFzSpikeTopomap();
-    return;
-  }
-  const requestId = ++state.fzSpikeTopomapRequestId;
-  state.fzSpikeTopomap = {
-    loading: true,
-    kind: "spike",
-    traceLabel,
-    peakTime: spikeTime,
-    zeroTime: spikeTime,
-    anchorType: anchorTypeLabel("fz_peak"),
-  };
-  state.fzAfterSlowTopomap = Number.isFinite(slowTime)
-    ? { loading: true, kind: "after-slow", traceLabel: slowTraceLabel, peakTime: slowTime, zeroTime: spikeTime }
-    : { available: false, kind: "after-slow", reason: "Fz after-slow peak unavailable", traceLabel: slowTraceLabel, zeroTime: spikeTime };
-  renderFzSpikeTopomap();
-  const baseParams = {
-    id: state.recordingId,
-    tc: els.tcSelect.value,
-    hf: els.hfSelect.value,
-    ac: els.acSelect.value,
-    halfWindowSec: normalizeFzPeakWindowMs(state.fzPeakWindowMs) / 1000,
-  };
-  try {
-    const spikeData = await fetchJson(`/api/topomap?${qs({ ...baseParams, time: spikeTime })}`);
-    if (requestId !== state.fzSpikeTopomapRequestId) return;
-    state.fzSpikeTopomap = {
-      ...spikeData,
-      kind: "spike",
-      traceLabel,
-      peakTime: spikeTime,
-      zeroTime: spikeTime,
-      anchorType: anchorTypeLabel("fz_peak"),
-      anchorElectrode: "Fz",
-    };
-  } catch (err) {
-    if (requestId !== state.fzSpikeTopomapRequestId) return;
-    state.fzSpikeTopomap = { available: false, kind: "spike", reason: err.message, traceLabel, peakTime: spikeTime, zeroTime: spikeTime };
-  }
-  if (Number.isFinite(slowTime)) {
-    try {
-      const slowData = await fetchJson(`/api/topomap?${qs({ ...baseParams, time: slowTime })}`);
-      if (requestId !== state.fzSpikeTopomapRequestId) return;
-      state.fzAfterSlowTopomap = { ...slowData, kind: "after-slow", traceLabel: slowTraceLabel, peakTime: slowTime, zeroTime: spikeTime };
-    } catch (err) {
-      if (requestId !== state.fzSpikeTopomapRequestId) return;
-      state.fzAfterSlowTopomap = { available: false, kind: "after-slow", reason: err.message, traceLabel: slowTraceLabel, peakTime: slowTime, zeroTime: spikeTime };
-    }
-  }
-  renderFzSpikeTopomap();
-}
-
-function renderFzSpikeTopomap(reason = "") {
-  if (els.fzSpikeTopomapTitle) {
-    els.fzSpikeTopomapTitle.textContent = "Fz spike topomap";
-  }
-  if (els.fzAfterSlowTopomapTitle) {
-    els.fzAfterSlowTopomapTitle.textContent = "Fz after-slow topomap";
-  }
-  renderFzEventTopomap({
-    canvas: els.fzSpikeTopomapCanvas,
-    readout: els.fzSpikeTopomapReadout,
-    ftliReadout: els.fzSpikeFtliReadout,
-    data: state.fzSpikeTopomap,
-    kind: "spike",
-    emptyText: "Drag waveform to select a spike",
-    unavailableText: "Fz spike topomap unavailable",
-    reason,
-  });
-  renderFzEventTopomap({
-    canvas: els.fzAfterSlowTopomapCanvas,
-    readout: els.fzAfterSlowTopomapReadout,
-    ftliReadout: els.fzAfterSlowFtliReadout,
-    data: state.fzAfterSlowTopomap,
-    kind: "after-slow",
-    emptyText: "Drag waveform to select after-slow",
-    unavailableText: "Fz after-slow topomap unavailable",
-    reason,
-  });
-}
-
-function renderFzEventTopomap({ canvas, readout, ftliReadout, data, kind, emptyText, unavailableText, reason = "" }) {
-  if (!canvas) return;
-  if (!state.scalogramSelection || !state.scalogramVisible) {
-    if (readout) readout.textContent = emptyText;
-    if (ftliReadout) ftliReadout.textContent = "FTLI -";
-    clearTopomap(canvas, "No selection");
-    return;
-  }
-  if (data?.loading) {
-    const relMs = Number.isFinite(Number(data.peakTime)) && Number.isFinite(Number(data.zeroTime))
-      ? (Number(data.peakTime) - Number(data.zeroTime)) * 1000
-      : 0;
-    if (readout) readout.textContent = `${nkLabel(data.traceLabel || "Fz")} ${kind} ${relMs.toFixed(0)} ms · loading ±${normalizeFzPeakWindowMs(state.fzPeakWindowMs)} ms`;
-    if (ftliReadout) ftliReadout.textContent = "FTLI loading";
-    clearTopomap(canvas, "Loading");
-    return;
-  }
-  if (!data?.available || !Array.isArray(data.channels)) {
-    if (readout) readout.textContent = reason || data?.reason || unavailableText;
-    if (ftliReadout) ftliReadout.textContent = "FTLI unavailable";
-    clearTopomap(canvas, "Unavailable");
-    return;
-  }
-  const channels = data.channels;
-  const earlobe = channels.map((ch) => Number(data.system?.[ch] || 0));
-  const scale = Math.max(5, ...earlobe.map((v) => Math.abs(v)));
-  if (readout) {
-    const trace = nkLabel(data.traceLabel || "Fz");
-    const relMs = Number.isFinite(Number(data.peakTime)) && Number.isFinite(Number(data.zeroTime))
-      ? (Number(data.peakTime) - Number(data.zeroTime)) * 1000
-      : 0;
-    const anchorText = data.anchorType ? ` · anchor: ${data.anchorType}` : "";
-    readout.textContent = `${trace} ${kind} ${relMs.toFixed(0)} ms · ${formatSec(data.peakTime ?? data.time)} · earlobe avg ±${Number(data.windowHalfMs || normalizeFzPeakWindowMs(state.fzPeakWindowMs)).toFixed(0)} ms${anchorText}`;
-  }
-  drawTopomap(canvas, channels, earlobe, scale, { mode: "voltage" });
-  renderFzSpikeFtli(data.ftli, ftliReadout);
-}
-
-function renderFzSpikeFtli(ftli, target = els.fzSpikeFtliReadout) {
-  if (!target) return;
-  if (!ftli?.available) {
-    target.textContent = "FTLI unavailable";
-    return;
-  }
-  target.textContent = `FTLI ${Number(ftli.value).toFixed(3)} · VL ${Number(ftli.VL).toFixed(1)}uV · VR ${Number(ftli.VR).toFixed(1)}uV`;
-}
-
-function scalogramDetectionMode() {
-  const mode = state.scalogramDetectionMode || "both";
-  return mode === "spike" || mode === "slow" ? mode : "both";
-}
-
-function detectionModeLabel(mode = scalogramDetectionMode()) {
-  if (mode === "spike") return "Spike peak";
-  if (mode === "slow") return "After-slow";
-  return "Spike + after-slow";
-}
-
-function scalogramDisplayScope() {
-  return "all";
-}
-
-function createScalogramModeGroup(mode, title, traces, data, scope = "all") {
-  const panel = document.createElement("div");
-  panel.className = `scalogram-mode-group ${mode}`;
-  const heading = document.createElement("div");
-  heading.className = "scalogram-mode-title";
-  heading.textContent = title;
-  panel.appendChild(heading);
-
-  const groups = groupScalogramTraces(traces);
-  const columns = document.createElement("div");
-  columns.className = "scalogram-columns";
-  const leftColumn = document.createElement("div");
-  leftColumn.className = "scalogram-column left";
-  const rightColumn = document.createElement("div");
-  rightColumn.className = "scalogram-column right";
-  columns.append(leftColumn, rightColumn);
-  panel.appendChild(columns);
-
-  groups.left.forEach((item) => leftColumn.appendChild(createScalogramRow(item.trace, item.index, data, mode)));
-  groups.right.forEach((item) => rightColumn.appendChild(createScalogramRow(item.trace, item.index, data, mode)));
-  groups.full.forEach((item, fullIndex) => {
-    const leftCount = groups.left.length + Math.ceil(fullIndex / 2);
-    const rightCount = groups.right.length + Math.floor(fullIndex / 2);
-    const target = leftCount <= rightCount ? leftColumn : rightColumn;
-    target.appendChild(createScalogramRow(item.trace, item.index, data, mode));
-  });
-  return panel;
-}
-
-function groupScalogramTraces(traces) {
-  const groups = { left: [], right: [], full: [] };
-  traces.forEach((trace, index) => {
-    const item = { trace, index };
-    const group = String(trace.group || "");
-    if (group === "left_temporal" || group === "left_parasagittal") {
-      groups.left.push(item);
-    } else if (group === "right_temporal" || group === "right_parasagittal") {
-      groups.right.push(item);
-    } else {
-      groups.full.push(item);
-    }
-  });
-  return groups;
-}
-
-function createScalogramRow(trace, index, data, mode = "signed") {
-  const row = document.createElement("div");
-  row.className = `scalogram-row${index === state.selectedScalogramIndex ? " active" : ""}`;
-  row.tabIndex = 0;
-  const metric = mode === "magnitude" ? "magnitude" : "signed";
-  row.innerHTML = `<span class="scalogram-label">${escapeHtml(nkLabel(trace.label))}<small>${escapeHtml(metric)}</small></span><canvas width="104" height="104"></canvas>`;
-  row.addEventListener("click", () => {
-    state.selectedScalogramIndex = index;
-    renderScalogram();
-  });
-  row.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" || ev.key === " ") {
-      ev.preventDefault();
-      state.selectedScalogramIndex = index;
-      renderScalogram();
-    }
-  });
-  drawScalogramCanvas(row.querySelector("canvas"), trace, data, false, mode);
-  return row;
-}
-
-function metricNumber(value, digits = 1) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number.toFixed(digits) : "-";
-}
-
-function topMetricTraceIndexes(traces, getter, limit = 3) {
-  return new Set(
-    traces
-      .map((trace, index) => ({ index, role: trace?.role || "", value: Number(getter(trace)) }))
-      .filter((item) => item.role !== "ecg" && Number.isFinite(item.value))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, limit)
-      .map((item) => item.index)
-  );
-}
-
-function spikeMetricText(trace, detailed) {
-  const m = trace?.spikeMetrics;
-  const mode = scalogramDetectionMode();
-  if (!m?.available) return detailed ? `${nkLabel(trace?.label || "")} · spike unavailable` : "score -";
-  if (detailed && mode === "slow") {
-    const slowLatency = m.afterSlowPairedLatency?.available ? ` · ΔR-L ${Number(m.afterSlowPairedLatency.latencyMsRightMinusLeft).toFixed(1)}ms vs ${nkLabel(m.afterSlowPairedLatency.pairedTraceLabel)}` : "";
-    if (!m.afterSlowAvailable) return `${nkLabel(trace.label)} · after-slow unavailable · ${m.afterSlowReason || ""}`;
-    const slowCurv = m.afterSlowCurvatureUvPerMs2 != null ? ` · curv ${Number(m.afterSlowCurvatureUvPerMs2).toFixed(4)}` : "";
-    return `${nkLabel(trace.label)} · after-slow abs ${Number(m.afterSlowAbsAmplitudeUv).toFixed(1)}uV · amp ${Number(m.afterSlowAmplitudeUv).toFixed(1)}uV · ${formatSec(m.afterSlowTime)} · +${Number(m.afterSlowLatencyMs).toFixed(1)}ms${slowCurv}${slowLatency}`;
-  }
-  if (detailed && mode === "both") {
-    const sharp = m.sharpnessAvailable ? ` · sharp ${Number(m.sharpnessUvPerMs).toFixed(2)}uV/ms · curv ${Number(m.curvatureUvPerMs2).toFixed(4)}` : "";
-    const slow = m.afterSlowAvailable ? ` · slow ${Number(m.afterSlowAbsAmplitudeUv).toFixed(1)}uV @ +${Number(m.afterSlowLatencyMs).toFixed(0)}ms${m.afterSlowCurvatureUvPerMs2 != null ? ` · slow curv ${Number(m.afterSlowCurvatureUvPerMs2).toFixed(4)}` : ""}` : "";
-    const latency = m.pairedLatency?.available ? ` · ΔR-L ${Number(m.pairedLatency.latencyMsRightMinusLeft).toFixed(1)}ms vs ${nkLabel(m.pairedLatency.pairedTraceLabel)}` : "";
-    const refined = m.peakRefined ? " · wf-refined" : "";
-    return `${nkLabel(trace.label)} · score ${Number(m.spikeScore).toFixed(2)} · ${formatSec(m.peakTime)} · ${Number(m.peakFreq).toFixed(0)}Hz${sharp}${slow}${latency}${refined}`;
-  }
-  if (detailed) {
-    const sharp = m.sharpnessAvailable ? ` · sharp ${Number(m.sharpnessUvPerMs).toFixed(2)}uV/ms · curv ${Number(m.curvatureUvPerMs2).toFixed(4)}` : "";
-    const latency = m.pairedLatency?.available ? ` · ΔR-L ${Number(m.pairedLatency.latencyMsRightMinusLeft).toFixed(1)}ms vs ${nkLabel(m.pairedLatency.pairedTraceLabel)}` : "";
-    const refined = m.peakRefined ? " · wf-refined" : "";
-    return `${nkLabel(trace.label)} · score ${Number(m.spikeScore).toFixed(2)} · neg-up ${Number(m.negativityPeak ?? m.negativePeak).toFixed(2)} · ${formatSec(m.peakTime)} · ${Number(m.peakFreq).toFixed(0)}Hz${sharp}${latency}${refined}`;
-  }
-  const sharp = m.sharpnessAvailable ? ` · sh ${Number(m.sharpnessUvPerMs).toFixed(1)}` : "";
-  const slow = mode === "both" && m.afterSlowAvailable ? ` · slow ${Number(m.afterSlowAbsAmplitudeUv).toFixed(0)}` : "";
-  const latency = m.pairedLatency?.available ? ` · Δ ${Number(m.pairedLatency.latencyMsRightMinusLeft).toFixed(0)}ms` : "";
-  const refined = m.peakRefined ? " · wf" : "";
-  return `score ${Number(m.spikeScore).toFixed(1)}${sharp}${slow}${latency}${refined}`;
-}
-
-function clearScalogramCanvas(canvas, text) {
-  sizeCanvasToDisplay(canvas, 180, 60);
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#68707c";
-  ctx.font = `${11 * (window.devicePixelRatio || 1)}px Arial`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-}
-
-function drawScalogramCanvas(canvas, trace, data, detailed, mode = "signed") {
-  sizeCanvasToDisplay(canvas, detailed ? 220 : 112, detailed ? 96 : 104);
-  const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
-  const w = canvas.width;
-  const h = canvas.height;
-  const left = detailed ? 34 * ratio : 0;
-  const right = detailed ? 7 * ratio : 0;
-  const top = 4 * ratio;
-  const bottom = detailed ? 12 * ratio : 2 * ratio;
-  const plotW = Math.max(1, w - left - right);
-  const plotH = Math.max(1, h - top - bottom);
-  const values = mode === "magnitude" ? trace.magnitudeValues || trace.values || [] : trace.values || [];
-  const freqs = data.freqs || [];
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#050509";
-  ctx.fillRect(0, 0, w, h);
-  if (!values.length || !freqs.length) return;
-
-  const rows = values.length;
-  const cols = values[0]?.length || 0;
-  for (let r = 0; r < rows; r++) {
-    const row = values[r] || [];
-    const y = top + ((rows - 1 - r) / rows) * plotH;
-    const y2 = top + ((rows - r) / rows) * plotH;
-    for (let c = 0; c < cols; c++) {
-      const x = left + (c / cols) * plotW;
-      const x2 = left + ((c + 1) / cols) * plotW;
-      ctx.fillStyle = mode === "magnitude" ? scalogramMagnitudeColor(Number(row[c] || 0)) : scalogramColor(Number(row[c] || 0));
-      ctx.fillRect(x, y, Math.max(1, x2 - x + 0.5), Math.max(1, y2 - y + 0.5));
-    }
-  }
-  drawScalogramWaveform(ctx, trace, data, left, top, plotW, plotH, ratio, detailed);
-  drawScalogramBands(ctx, data.bands || [], freqs, data.duration || 1, left, top, plotW, plotH, ratio, detailed);
-  drawScalogramDetectionMarkers(ctx, trace, data, left, top, plotW, plotH, ratio, detailed);
-}
-
-function drawScalogramWaveform(ctx, trace, data, left, top, plotW, plotH, ratio, detailed) {
-  const overlay = scalogramOverlayFromWaveViewer(trace, data);
-  const waveform = overlay.values.length >= 2
-    ? overlay.values
-    : (Array.isArray(trace?.waveformUv) ? trace.waveformUv : trace?.waveform || []);
-  if (!Array.isArray(waveform) || waveform.length < 2) return;
-  const sensitivity = sensitivityValue();
-  const uvPerMm = traceUvPerMm(trace, sensitivity, waveform);
-  const pxPerMm = 3.78 * ratio;
-  const yScale = pxPerMm / Math.max(1e-6, uvPerMm);
-  const centerY = top + plotH * 0.5;
-  const start = Number(data?.start || state.scalogramSelection?.start || state.start || 0);
-  const duration = Math.max(1e-6, Number(data?.duration || state.scalogramSelection?.duration || 1));
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(left, top, plotW, plotH);
-  ctx.clip();
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  waveform.forEach((raw, index) => {
-    const valueUv = Number(raw) || 0;
-    const t = overlay.times.length === waveform.length ? Number(overlay.times[index]) : start + (index / Math.max(1, waveform.length - 1)) * duration;
-    const x = left + ((t - start) / duration) * plotW;
-    const y = centerY - valueUv * yScale;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.strokeStyle = detailed ? "rgba(255,255,255,.92)" : "rgba(255,255,255,.82)";
-  ctx.lineWidth = (detailed ? 4.2 : 3.4) * ratio;
-  ctx.stroke();
-  ctx.strokeStyle = detailed ? "rgba(5,9,12,.9)" : "rgba(5,9,12,.78)";
-  ctx.lineWidth = (detailed ? 1.75 : 1.35) * ratio;
-  ctx.stroke();
-  if (detailed) {
-    ctx.fillStyle = "rgba(5,9,12,.78)";
-    ctx.font = `${8 * ratio}px Arial`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    const source = overlay.values.length >= 2 ? "viewer" : "api";
-    ctx.fillText(`overlay ${uvPerMm.toFixed(0)}uV/mm · ${source}`, left + 3 * ratio, top + 3 * ratio);
-  }
-  ctx.restore();
-}
-
-function scalogramOverlayFromWaveViewer(trace, data) {
-  const empty = { times: [], values: [] };
-  const windowData = state.windowData;
-  if (!windowData) return empty;
-  const times = Array.isArray(windowData.times) ? windowData.times : [];
-  if (times.length < 2) return empty;
-  const label = String(trace?.label || "");
-  const role = String(trace?.role || "eeg");
-  let sourceTraces = windowData.traces || [];
-  if (isMultiWindowData()) {
-    const active = data?.montage || activeMontageValue();
-    const view = (windowData.montageViews || []).find((item) => item.montage === active) || windowData.montageViews?.[0];
-    sourceTraces = view?.traces || [];
-  }
-  const source = sourceTraces.find((item) => String(item?.label || "") === label && String(item?.role || "eeg") === role)
-    || sourceTraces.find((item) => String(item?.label || "") === label);
-  const values = Array.isArray(source?.values) ? source.values : [];
-  if (values.length !== times.length) return empty;
-  const start = Number(data?.start || state.scalogramSelection?.start || state.start || 0);
-  const end = start + Math.max(1e-6, Number(data?.duration || state.scalogramSelection?.duration || 1));
-  const outTimes = [];
-  const outValues = [];
-  for (let i = 0; i < times.length; i++) {
-    const time = Number(times[i]);
-    if (!Number.isFinite(time) || time < start || time > end) continue;
-    outTimes.push(time);
-    outValues.push(Number(values[i]) || 0);
-  }
-  return outValues.length >= 2 ? { times: outTimes, values: outValues } : empty;
-}
-
-function drawScalogramDetectionMarkers(ctx, trace, data, left, top, plotW, plotH, ratio, detailed) {
-  const m = trace?.spikeMetrics;
-  if (!m) return;
-  const mode = scalogramDetectionMode();
-  if (mode === "spike" || mode === "both") {
-    drawSpikeMarker(ctx, m, data, left, top, plotW, plotH, ratio, detailed);
-  }
-  if (mode === "slow" || mode === "both") {
-    drawAfterSlowMarker(ctx, m, data, left, top, plotW, plotH, ratio, detailed);
-  }
-}
-
-function drawSpikeMarker(ctx, m, data, left, top, plotW, plotH, ratio, detailed) {
-  if (!m?.available || !Number.isFinite(Number(m.peakTime))) return;
-  const x = timeToScalogramX(m.peakTime, data, left, plotW);
-  if (x === null) return;
-  ctx.save();
-  ctx.strokeStyle = m.sharpnessAvailable ? "rgba(255,221,64,.95)" : "rgba(255,255,255,.7)";
-  ctx.lineWidth = (detailed ? 2.4 : 2.0) * ratio;
-  ctx.beginPath();
-  ctx.moveTo(x, top);
-  ctx.lineTo(x, top + plotH);
-  ctx.stroke();
-  ctx.fillStyle = ctx.strokeStyle;
-  ctx.beginPath();
-  ctx.moveTo(x, top + 2 * ratio);
-  ctx.lineTo(x - 4.5 * ratio, top + 9 * ratio);
-  ctx.lineTo(x + 4.5 * ratio, top + 9 * ratio);
-  ctx.closePath();
-  ctx.fill();
-  if (detailed && m.sharpnessAvailable) {
-    ctx.fillStyle = "rgba(31,37,42,.82)";
-    ctx.font = `${8 * ratio}px Arial`;
-    ctx.textAlign = "right";
-    ctx.textBaseline = "top";
-    ctx.fillText(`sharp ${Number(m.sharpnessUvPerMs).toFixed(2)}uV/ms`, left + plotW - 3 * ratio, top + 3 * ratio);
-  }
-  ctx.restore();
-}
-
-function drawAfterSlowMarker(ctx, m, data, left, top, plotW, plotH, ratio, detailed) {
-  if (!m?.afterSlowAvailable || !Number.isFinite(Number(m.afterSlowTime))) return;
-  const x = timeToScalogramX(m.afterSlowTime, data, left, plotW);
-  if (x === null) return;
-  ctx.save();
-  ctx.strokeStyle = "rgba(52,211,235,.95)";
-  ctx.lineWidth = (detailed ? 2.2 : 1.8) * ratio;
-  ctx.setLineDash([4 * ratio, 3 * ratio]);
-  ctx.beginPath();
-  ctx.moveTo(x, top);
-  ctx.lineTo(x, top + plotH);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = ctx.strokeStyle;
-  ctx.beginPath();
-  ctx.arc(x, top + plotH - 8 * ratio, 4 * ratio, 0, Math.PI * 2);
-  ctx.fill();
-  if (detailed) {
-    ctx.fillStyle = "rgba(31,37,42,.82)";
-    ctx.font = `${8 * ratio}px Arial`;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(`slow ${Number(m.afterSlowLatencyMs).toFixed(0)}ms`, left + 3 * ratio, top + plotH - 14 * ratio);
-  }
-  ctx.restore();
-}
-
-function drawScalogramBands(ctx, bands, freqs, duration, left, top, plotW, plotH, ratio, detailed) {
-  const minFreq = Number(freqs[0] || 1);
-  const maxFreq = Number(freqs[freqs.length - 1] || 70);
-  ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,.66)";
-  ctx.fillStyle = detailed ? "#37414a" : "rgba(42,48,54,.72)";
-  ctx.font = `${(detailed ? 8 : 7) * ratio}px Arial`;
-  ctx.textBaseline = "middle";
-  for (const band of bands) {
-    const low = Math.max(minFreq, Number(band.low));
-    const high = Math.min(maxFreq, Number(band.high));
-    if (high < minFreq || low > maxFreq) continue;
-    const yHigh = top + (1 - (high - minFreq) / Math.max(1, maxFreq - minFreq)) * plotH;
-    const yLow = top + (1 - (low - minFreq) / Math.max(1, maxFreq - minFreq)) * plotH;
-    ctx.beginPath();
-    ctx.moveTo(left, yLow);
-    ctx.lineTo(left + plotW, yLow);
-    ctx.stroke();
-    if (detailed) {
-      const labelY = Math.max(top + 5 * ratio, Math.min(top + plotH - 5 * ratio, (yHigh + yLow) / 2));
-      ctx.textAlign = "right";
-      ctx.fillText(band.label, left - 4 * ratio, labelY);
-    }
-  }
-  drawScalogramFreqTicks(ctx, minFreq, maxFreq, left, top, plotW, plotH, ratio, detailed);
-  if (detailed) {
-    ctx.strokeStyle = "#9da39a";
-    ctx.strokeRect(left, top, plotW, plotH);
-    ctx.fillStyle = "#4e555c";
-    ctx.textAlign = "left";
-    ctx.fillText("0s", left, top + plotH + 8 * ratio);
-    ctx.textAlign = "right";
-    ctx.fillText(`${Number(duration || 1).toFixed(3)}s`, left + plotW, top + plotH + 8 * ratio);
-  }
-  ctx.restore();
-}
-
-function drawScalogramFreqTicks(ctx, minFreq, maxFreq, left, top, plotW, plotH, ratio, detailed) {
-  const candidates = [5, 10, 20, 30, 50, 70, 100, 120];
-  const ticks = candidates.filter((freq) => freq >= minFreq && freq <= maxFreq);
-  if (!ticks.length) return;
-  ctx.save();
-  ctx.font = `${(detailed ? 8 : 7.5) * ratio}px Arial`;
-  ctx.textBaseline = "middle";
-  ctx.textAlign = detailed ? "left" : "right";
-  for (const freq of ticks) {
-    const y = top + (1 - (freq - minFreq) / Math.max(1, maxFreq - minFreq)) * plotH;
-    ctx.strokeStyle = detailed ? "rgba(45,54,60,.3)" : "rgba(255,255,255,.42)";
-    ctx.lineWidth = Math.max(1, 0.65 * ratio);
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(left + plotW, y);
-    ctx.stroke();
-    const label = `${freq}Hz`;
-    const labelX = detailed ? left + 3 * ratio : left + plotW - 3 * ratio;
-    const labelY = Math.max(top + 6 * ratio, Math.min(top + plotH - 6 * ratio, y));
-    ctx.fillStyle = detailed ? "rgba(31,37,42,.82)" : "rgba(5,9,12,.72)";
-    const textW = ctx.measureText(label).width;
-    ctx.fillRect(
-      detailed ? labelX - 2 * ratio : labelX - textW - 3 * ratio,
-      labelY - 5.5 * ratio,
-      textW + 4 * ratio,
-      10.5 * ratio
-    );
-    ctx.fillStyle = "rgba(255,255,255,.92)";
-    ctx.fillText(label, labelX, labelY);
-  }
-  ctx.restore();
-}
-
-function sizeCanvasToDisplay(canvas, minW, minH) {
-  const rect = canvas.getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
-  canvas.width = Math.max(minW, Math.floor((rect.width || minW) * ratio));
-  canvas.height = Math.max(minH, Math.floor((rect.height || minH) * ratio));
-}
-
-function scalogramColor(value) {
-  const v = Math.max(-1, Math.min(1, Number(value) || 0));
-  const neg = [36, 91, 170];
-  const mid = [248, 248, 244];
-  const pos = [190, 48, 48];
-  const t = Math.abs(v);
-  const a = v > 0 ? neg : pos;
-  const r = Math.round(mid[0] + (a[0] - mid[0]) * t);
-  const g = Math.round(mid[1] + (a[1] - mid[1]) * t);
-  const b = Math.round(mid[2] + (a[2] - mid[2]) * t);
-  return `rgb(${r},${g},${b})`;
-}
-
-function scalogramMagnitudeColor(value) {
-  const v = Math.max(0, Math.min(1, Number(value) || 0));
-  const low = [250, 249, 242];
-  const high = [44, 110, 92];
-  const r = Math.round(low[0] + (high[0] - low[0]) * v);
-  const g = Math.round(low[1] + (high[1] - low[1]) * v);
-  const b = Math.round(low[2] + (high[2] - low[2]) * v);
-  return `rgb(${r},${g},${b})`;
-}
-
-function jumpToAnnotation(row) {
-  const onset = Number(row.onset || 0);
-  const duration = visibleDuration();
-  state.start = clampStart(onset - duration / 2, duration);
-  state.cursorTime = onset;
-  hideContextMenu();
-  loadWindow();
-}
-
-function recordingDuration() {
-  return Number(
-    state.metadata?.raw?.durationSec ||
-      state.windowData?.metadata?.raw?.durationSec ||
-      state.metadata?.directReader?.durationSec ||
-      0
-  );
-}
-
-function clampStart(start, duration = visibleDuration()) {
-  const total = recordingDuration();
-  const minStart = 0;
-  if (!Number.isFinite(start)) return minStart;
-  if (total && total <= duration) return minStart;
-  if (!total) return Math.max(minStart, start);
-  return Math.min(Math.max(minStart, start), Math.max(minStart, total - duration));
-}
-
-function spectrogramColor(value) {
-  const t = Math.max(0, Math.min(1, Number(value || 0)));
-  const stops = [
-    [0.0, 0, 0, 131],
-    [0.125, 0, 60, 170],
-    [0.375, 5, 255, 255],
-    [0.625, 255, 255, 0],
-    [0.875, 250, 0, 0],
-    [1.0, 128, 0, 0],
-  ];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const a = stops[i];
-    const b = stops[i + 1];
-    if (t <= b[0]) {
-      const f = (t - a[0]) / Math.max(1e-6, b[0] - a[0]);
-      const r = Math.round(a[1] + (b[1] - a[1]) * f);
-      const g = Math.round(a[2] + (b[2] - a[2]) * f);
-      const blue = Math.round(a[3] + (b[3] - a[3]) * f);
-      return `rgb(${r},${g},${blue})`;
-    }
-  }
-  return "rgb(128,0,0)";
+function isMultiWindowData() {
+  return false;
 }
 
 function draw() {
+  resizeCanvas();
   const canvas = els.waveCanvas;
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
   const ratio = window.devicePixelRatio || 1;
-  const { left, right, top, bottom } = plotLayout(canvas);
-  const plotW = w - left - right;
-  const plotH = h - top - bottom;
-  ctx.clearRect(0, 0, w, h);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, w, h);
-
-  const data = state.windowData;
-  if (!data || !data.traces || !data.traces.length) {
-    ctx.fillStyle = "#333";
-    ctx.fillText("No decoded waveform data available.", left, top + 24);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const traces = displayTraces(state.windowData?.traces || []);
+  const times = state.windowData?.times || [];
+  const duration = visibleDuration();
+  const start = Number(state.start || 0);
+  if (els.timeReadout) {
+    els.timeReadout.textContent = `${formatSec(start)} - ${formatSec(start + duration)}`;
+  }
+  if (els.calReadout) {
+    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · AC ${els.acSelect?.value || ""} · ${els.paperSelect?.value || "30"} mm/s`;
+  }
+  if (!traces.length || !times.length) {
+    ctx.fillStyle = "#68707c";
+    ctx.font = `${13 * ratio}px Arial`;
+    ctx.textAlign = "center";
+    ctx.fillText("No waveform data", canvas.width / 2, canvas.height / 2);
     return;
   }
-
-  const duration = visibleDuration();
-  const start = state.start;
-  const pxPerMm = 3.78 * ratio;
+  const { left, right, top, bottom } = plotLayout(canvas);
+  const plotW = canvas.width - left - right;
+  const plotH = canvas.height - top - bottom;
   const sensitivity = sensitivityValue();
-
-  if (isMultiWindowData(data)) {
+  const pxPerMm = Math.max(3 * ratio, Number(els.paperSelect?.value || 30) * ratio / 10);
+  if (isMultiWindowData()) {
     const layouts = multiMontageColumnLayouts(left, top, plotW, plotH, ratio);
-    const views = data.montageViews || [];
-    layouts.forEach((layout, index) => {
-      const view = views[index];
-      if (!view) return;
-      drawWaveColumn(ctx, layout, displayTraces(view.traces || []), data.times || [], {
+    layouts.forEach((layout) => {
+      const view = layout.view || {};
+      drawWaveColumn(ctx, layout, displayTraces(view.traces || []), state.windowData?.times || [], {
         duration,
         start,
         pxPerMm,
         sensitivity,
         ratio,
-        montage: view.montage,
-        label: view.label || view.montage,
+        single: false,
         active: view.montage === activeMontageValue(),
+        montage: view.montage || activeMontageValue(),
       });
     });
-    drawEventStrip();
-    return;
+  } else {
+    drawWaveColumn(ctx, { left, top, plotW, plotH }, traces, times, {
+      duration,
+      start,
+      pxPerMm,
+      sensitivity,
+      ratio,
+      single: true,
+      active: true,
+      montage: activeMontageValue(),
+    });
   }
-
-  const traces = displayTraces(data.traces);
-  drawWaveColumn(ctx, { left, top, plotW, plotH, labelLeft: 45 * ratio, numberRight: 35 * ratio }, traces, data.times || [], {
-    duration,
-    start,
-    pxPerMm,
-    sensitivity,
-    ratio,
-    montage: activeMontageValue(),
-    label: labelForMontage(),
-    active: true,
-    single: true,
-  });
-  drawEventStrip();
-}
-
-
-function isMultiWindowData(data = state.windowData) {
-  return isMultiMontageMode() && Array.isArray(data?.montageViews) && data.montageViews.length > 0;
+  drawCursorLine(ctx, left, top, plotW, plotH, start, duration, ratio);
+  drawCalibration(ctx, left, top, plotW, plotH, duration, sensitivity, pxPerMm, ratio);
 }
 
 function multiMontageColumnLayouts(left, top, plotW, plotH, ratio) {
@@ -5147,6 +3535,18 @@ function drawViewerWaveformPath(ctx, values, times, options) {
   });
   if (started) ctx.stroke();
   ctx.restore();
+}
+
+function traceUvPerMm(trace, fallbackSensitivity) {
+  if (trace?.role !== "ecg") return fallbackSensitivity;
+  const values = (trace.values || [])
+    .map((value) => Math.abs(Number(value)))
+    .filter((value) => Number.isFinite(value));
+  if (!values.length) return ECG_UV_PER_MM;
+  values.sort((a, b) => a - b);
+  const p95 = values[Math.max(0, Math.min(values.length - 1, Math.round(values.length * 0.95)))];
+  const target = p95 / ECG_AUTO_TARGET_MM;
+  return Math.max(ECG_AUTO_MIN_UV_PER_MM, Math.min(ECG_AUTO_MAX_UV_PER_MM, target || ECG_UV_PER_MM));
 }
 
 function drawWaveColumn(ctx, layout, traces, times, options) {
@@ -5316,6 +3716,7 @@ function drawAnnotationLabels(ctx, left, top, plotW, plotH, start, duration, rat
 }
 
 function drawScalogramSelection(ctx, left, top, plotW, plotH, start, duration, ratio) {
+  if ((state.researchMode === "test" && state.researchSession) || (state.researchMode === "validation" && state.validationSession)) return;
   const selection = state.dragSelection || state.topomapSelection || state.scalogramSelection;
   if (!selection) return;
   const selStart = Number(selection.start || 0);
@@ -5324,9 +3725,9 @@ function drawScalogramSelection(ctx, left, top, plotW, plotH, start, duration, r
   const x1 = left + ((Math.max(selStart, start) - start) / duration) * plotW;
   const x2 = left + ((Math.min(selEnd, start + duration) - start) / duration) * plotW;
   ctx.save();
-  ctx.fillStyle = "rgba(79, 176, 104, .13)";
-  ctx.strokeStyle = "rgba(79, 176, 104, .72)";
-  ctx.lineWidth = Math.max(0.35, 0.35 * ratio);
+  ctx.fillStyle = "rgba(79, 176, 104, .08)";
+  ctx.strokeStyle = "rgba(79, 176, 104, .52)";
+  ctx.lineWidth = Math.max(0.25, 0.22 * ratio);
   ctx.fillRect(x1, top, Math.max(2 * ratio, x2 - x1), plotH);
   ctx.strokeRect(x1, top, Math.max(2 * ratio, x2 - x1), plotH);
   ctx.restore();
@@ -5337,8 +3738,8 @@ function drawCursorLine(ctx, left, top, plotW, plotH, start, duration, ratio) {
   if (state.cursorTime < start || state.cursorTime > start + duration) return;
   const x = left + ((state.cursorTime - start) / duration) * plotW;
   ctx.save();
-  ctx.strokeStyle = "rgba(79, 176, 104, .55)";
-  ctx.lineWidth = Math.max(0.35, 0.32 * ratio);
+  ctx.strokeStyle = "rgba(20, 150, 84, .92)";
+  ctx.lineWidth = Math.max(1.5, 1.4 * ratio);
   ctx.beginPath();
   ctx.moveTo(x, top);
   ctx.lineTo(x, top + plotH);
@@ -5393,239 +3794,35 @@ function drawEventStrip() {
   els.eventStrip.innerHTML = ticks;
 }
 
-const TOPO_POSITIONS = {
-  Fp1: [-0.32, 0.88],
-  Fp2: [0.32, 0.88],
-  F7: [-0.78, 0.48],
-  F8: [0.78, 0.48],
-  T7: [-0.94, 0.0],
-  T8: [0.94, 0.0],
-  P7: [-0.78, -0.48],
-  P8: [0.78, -0.48],
-  F3: [-0.43, 0.46],
-  F4: [0.43, 0.46],
-  C3: [-0.5, 0.0],
-  C4: [0.5, 0.0],
-  P3: [-0.43, -0.46],
-  P4: [0.43, -0.46],
-  O1: [-0.32, -0.88],
-  O2: [0.32, -0.88],
-  Fz: [0.0, 0.52],
-  Cz: [0.0, 0.0],
-  Pz: [0.0, -0.52],
-};
+const TOPO_POSITIONS = {};
 
 function renderTopomaps() {
-  applyTopomapLayout();
-  const sample = currentTopomapSample();
-  if (!sample) {
-    els.topomapReadout.textContent = "No topomap data";
-    clearTopomap(els.systemTopomapCanvas, "No data");
-    return;
-  }
-  const precise = preciseTopomapSample();
-  if (els.earlobeTopomapTitle) {
-    els.earlobeTopomapTitle.textContent = "System reference average";
-  }
-  const systemChannels = precise?.channels || sample.channels;
-  const systemValues = precise?.system || sample.system || [];
-  const systemScale = Math.max(5, ...systemValues.map((v) => Math.abs(v)));
-  const readoutParts = [`${formatSec(precise?.time ?? sample.time)}`, `mean scale ±${systemScale.toFixed(0)}uV`];
-  if (precise) {
-    readoutParts.push(`system ref ${precise.referenceChannels.join("/")}`);
-    if (Number.isFinite(Number(precise.windowStart)) && Number.isFinite(Number(precise.windowEnd))) {
-      readoutParts.push(`avg ${formatSec(Number(precise.windowStart))}-${formatSec(Number(precise.windowEnd))}`);
-    } else {
-      readoutParts.push(`avg ±${Number(precise.windowHalfMs || 10).toFixed(0)}ms`);
-    }
-  } else if (state.preciseTopomap?.available === false) {
-    readoutParts.push(state.preciseTopomap.reason || "system ref unavailable");
-  } else {
-    readoutParts.push("loading system ref");
-  }
-  els.topomapReadout.textContent = readoutParts.join(" · ");
-  drawTopomap(els.systemTopomapCanvas, systemChannels, systemValues, systemScale);
+  return;
 }
 
-function preciseTopomapSample() {
-  const data = state.preciseTopomap;
-  if (!data?.available || !Array.isArray(data.channels)) return null;
-  const channels = data.channels;
-  const system = channels.map((ch) => Number(data.system?.[ch] || 0));
-  if (!system.length) return null;
-  return {
-    channels,
-    system,
-    time: Number(data.time || state.cursorTime || 0),
-    windowHalfMs: Number(data.windowHalfMs || 10),
-    referenceChannels: data.referenceChannels || [],
-    windowStart: Number(data.windowStart),
-    windowEnd: Number(data.windowEnd),
-  };
+function renderFzSpikeTopomap() {
+  return;
 }
 
-function currentTopomapSample() {
-  const topomap = state.windowData?.topomap;
-  const times = state.windowData?.times || [];
-  if (!topomap?.channels?.length || !times.length) return null;
-  const duration = visibleDuration();
-  let target = state.cursorTime;
-  if (target === null || target < state.start || target > state.start + duration) {
-    target = state.start + duration / 2;
-  }
-  let index = 0;
-  let best = Infinity;
-  times.forEach((time, i) => {
-    const delta = Math.abs(Number(time) - target);
-    if (delta < best) {
-      best = delta;
-      index = i;
-    }
-  });
-  const system = valuesAtTopomapIndex(topomap.system, index);
-  const average = valuesAtTopomapIndex(topomap.average, index);
-  const earlobe = valuesAtTopomapIndex(topomap.earlobe || topomap.system, index);
-  const cz = valuesAtTopomapIndex(topomap.cz, index);
-  if (!system.length || system.length !== average.length) return null;
-  return {
-    channels: topomap.channels,
-    system,
-    average,
-    earlobe,
-    cz,
-    time: Number(times[index] || target),
-  };
+async function loadFzSpikeTopomap() {
+  return;
 }
 
-function valuesAtTopomapIndex(series, index) {
-  if (!Array.isArray(series)) return [];
-  return series.map((row) => Number(row?.[index] || 0));
+function loadPreciseTopomap() {
+  return;
 }
 
-function clearTopomap(canvas, text) {
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#68707c";
-  ctx.font = `${11 * (window.devicePixelRatio || 1)}px Arial`;
-  ctx.textAlign = "center";
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-}
-
-function drawTopomap(canvas, channels, values, scale, options = {}) {
-  const ctx = canvas.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
-  const w = canvas.width;
-  const h = canvas.height;
-  const cx = w * 0.5;
-  const cy = h * 0.54;
-  const radius = Math.min(w, h) * 0.36;
-  const electrodes = channels
-    .map((ch, i) => ({ ch, value: values[i], pos: TOPO_POSITIONS[ch] }))
-    .filter((item) => item.pos && Number.isFinite(item.value));
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.clip();
-  const step = Math.max(2, Math.round(3 * ratio));
-  for (let y = Math.floor(cy - radius); y <= cy + radius; y += step) {
-    for (let x = Math.floor(cx - radius); x <= cx + radius; x += step) {
-      const nx = (x - cx) / radius;
-      const ny = -(y - cy) / radius;
-      if (nx * nx + ny * ny > 1) continue;
-      const value = interpolateTopomapValue(nx, ny, electrodes);
-      ctx.fillStyle = topomapColor(value, scale);
-      ctx.fillRect(x, y, step + 0.5, step + 0.5);
-    }
-  }
-  ctx.restore();
-
-  ctx.strokeStyle = "#333a3f";
-  ctx.lineWidth = 1.2 * ratio;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx - radius * 0.12, cy - radius * 0.98);
-  ctx.lineTo(cx, cy - radius * 1.13);
-  ctx.lineTo(cx + radius * 0.12, cy - radius * 0.98);
-  ctx.stroke();
-
-  ctx.font = `${8.5 * ratio}px Arial`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  for (const electrode of electrodes) {
-    const [px, py] = electrode.pos;
-    const x = cx + px * radius;
-    const y = cy - py * radius;
-    ctx.fillStyle = "#1f252a";
-    ctx.beginPath();
-    ctx.arc(x, y, 1.8 * ratio, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#27324b";
-    ctx.fillText(nkLabel(electrode.ch), x, y - 6 * ratio);
-  }
-
-  drawTopomapScale(ctx, w, h, scale, ratio);
-}
-
-function interpolateTopomapValue(x, y, electrodes) {
-  let weighted = 0;
-  let weights = 0;
-  for (const electrode of electrodes) {
-    const [ex, ey] = electrode.pos;
-    const dx = x - ex;
-    const dy = y - ey;
-    const dist2 = dx * dx + dy * dy;
-    const weight = 1 / Math.max(0.015, dist2);
-    weighted += electrode.value * weight;
-    weights += weight;
-  }
-  return weights ? weighted / weights : 0;
-}
-
-function topomapColor(value, scale) {
-  const t = Math.max(-1, Math.min(1, value / Math.max(1, scale)));
-  if (t >= 0) {
-    const r = Math.round(255 - t * 190);
-    const g = Math.round(255 - t * 145);
-    const b = Math.round(255 - t * 35);
-    return `rgb(${r},${g},${b})`;
-  }
-  const p = -t;
-  const c = Math.round(255 - p * 92);
-  const g = Math.round(255 - p * 175);
-  const b = Math.round(255 - p * 190);
-  return `rgb(${c},${g},${b})`;
-}
-
-function drawTopomapScale(ctx, w, h, scale, ratio) {
-  const barW = 54 * ratio;
-  const barH = 6 * ratio;
-  const x = w - barW - 8 * ratio;
-  const y = h - 13 * ratio;
-  const grad = ctx.createLinearGradient(x, 0, x + barW, 0);
-  grad.addColorStop(0, topomapColor(-scale, scale));
-  grad.addColorStop(0.5, topomapColor(0, scale));
-  grad.addColorStop(1, topomapColor(scale, scale));
-  ctx.fillStyle = grad;
-  ctx.fillRect(x, y, barW, barH);
-  ctx.strokeStyle = "#9da39a";
-  ctx.strokeRect(x, y, barW, barH);
-  ctx.font = `${8 * ratio}px Arial`;
-  ctx.fillStyle = "#4e555c";
-  ctx.textAlign = "right";
-  ctx.fillText(`±${scale.toFixed(0)}uV`, x - 4 * ratio, y + barH);
+function setTopomapSelection() {
+  return false;
 }
 
 function onWaveMouseDown(ev) {
   if (ev.button !== 0 || !state.windowData?.traces?.length) return;
+  if ((state.researchMode === "test" && state.researchSession) || (state.researchMode === "validation" && state.validationSession)) {
+    state.dragSelection = null;
+    state.suppressNextClick = false;
+    return;
+  }
   const point = canvasToData(ev);
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
   const selection = draggedSelection(point.onset, point.onset);
@@ -5660,9 +3857,8 @@ function onWaveMouseUp(ev) {
   }
   state.suppressNextClick = true;
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
-  setTopomapSelection(selection);
-  setScalogramSelection(selection, { cursorTime: selection.start });
-  loadPreciseTopomap();
+  state.cursorTime = selection.start;
+  draw();
 }
 
 function onWaveMouseLeave(ev) {
@@ -5724,18 +3920,11 @@ function setScalogramSelection(selection, options = {}) {
   } else {
     state.cursorTime = normalized.start;
   }
-  if (els.scalogramReadout) {
-    els.scalogramReadout.textContent = `Loading ${formatSec(normalized.start)} + ${normalized.duration.toFixed(3)}s...`;
-  }
-  if (els.scalogramDetailTitle) els.scalogramDetailTitle.textContent = "Loading";
-  if (els.scalogramList) els.scalogramList.innerHTML = "<div class='annotation-row empty'><small>Loading scalogram...</small></div>";
-  if (els.exportSpikeCsvBtn) els.exportSpikeCsvBtn.disabled = true;
   if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = true;
   if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = true;
   if (els.rangeCancelBtn) els.rangeCancelBtn.disabled = false;
   showEventControls();
   if (options.drawWave !== false) draw();
-  if (options.load !== false) loadScalogram();
   return true;
 }
 
@@ -5758,11 +3947,8 @@ function openResearchRatingMenu(ev) {
   ev.stopPropagation();
   const point = canvasToData(ev);
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
-  state.context = { ...point, annotationId: "", annotation: null };
   state.cursorTime = point.onset;
-  const selection = defaultTopomapSelection(point.onset);
-  setTopomapSelection(selection);
-  setScalogramSelection(selection, { cursorTime: point.onset, load: false });
+  state.context = { ...point, annotationId: "", annotation: null };
   draw();
   renderResearchRatingContextMenu();
   setStatus(`Selected ${point.channel || point.montageChannel || "waveform"} at ${formatSec(point.onset)}`);
@@ -5799,11 +3985,7 @@ function onWaveClick(ev) {
   const point = canvasToData(ev);
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
   state.cursorTime = point.onset;
-  const selection = defaultTopomapSelection(point.onset);
-  setTopomapSelection(selection);
-  setScalogramSelection(selection, { cursorTime: point.onset, load: false });
-  renderTopomaps();
-  loadPreciseTopomap();
+  draw();
 }
 
 function onWaveDoubleClick(ev) {
@@ -5815,14 +3997,8 @@ function onWaveDoubleClick(ev) {
   state.dragSelection = null;
   state.suppressNextClick = true;
   hideContextMenu();
-  const halfWindow = 0.005;
-  const selection = { start: point.onset - halfWindow, duration: halfWindow * 2 };
-  setTopomapSelection(selection);
-  setScalogramSelection(
-    selection,
-    { cursorTime: point.onset }
-  );
-  loadPreciseTopomap();
+  state.cursorTime = point.onset;
+  draw();
 }
 
 function hideContextMenu() {
@@ -6043,198 +4219,8 @@ async function deleteAnnotation(id, options = {}) {
   applyManualAnnotationUpdate(manualAnnotations);
 }
 
-function currentTopomapExport() {
-  const data = state.preciseTopomap;
-  if (!data?.available) {
-    window.alert("Topomap data is not available yet.");
-    return null;
-  }
-  return {
-    recordingId: state.recordingId,
-    exportedAt: new Date().toISOString(),
-    selection: currentTopomapInterval(),
-    topomap: data,
-  };
-}
-
-function exportTopomapJson() {
-  const payload = currentTopomapExport();
-  if (!payload) return;
-  const start = Number(payload.selection.start || 0).toFixed(3);
-  const json = JSON.stringify(payload, null, 2);
-  downloadBlob(new Blob([json], { type: "application/json;charset=utf-8" }), `${state.recordingId}.topomap_${start}s.json`);
-}
-
-function exportTopomapCsv() {
-  const payload = currentTopomapExport();
-  if (!payload) return;
-  const topo = payload.topomap || {};
-  const channels = topo.channels || [];
-  const fields = [
-    "recordingId",
-    "time",
-    "windowStart",
-    "windowEnd",
-    "duration",
-    "sampleCount",
-    "sfreq",
-    "referenceChannels",
-    "tc",
-    "hf",
-    "ac",
-    "channel",
-    "earlobe_uV",
-    "cz_uV",
-    "average_uV",
-    "laplacian_uV",
-  ];
-  const rows = [fields.join(",")];
-  for (const ch of channels) {
-    const row = [
-      state.recordingId,
-      topo.time,
-      topo.windowStart,
-      topo.windowEnd,
-      Number(topo.windowEnd || 0) - Number(topo.windowStart || 0),
-      topo.sampleCount,
-      topo.sfreq,
-      (topo.referenceChannels || []).join("/"),
-      topo.filters?.tc || "",
-      topo.filters?.hf || "",
-      topo.filters?.ac || "",
-      ch,
-      topo.earlobe?.[ch] ?? topo.system?.[ch] ?? "",
-      topo.cz?.[ch] ?? "",
-      topo.average?.[ch] ?? "",
-      topo.laplacian?.[ch] ?? "",
-    ];
-    rows.push(row.map(csvCell).join(","));
-  }
-  const start = Number(payload.selection.start || 0).toFixed(3);
-  downloadBlob(new Blob([rows.join("\n") + "\n"], { type: "text/csv;charset=utf-8" }), `${state.recordingId}.topomap_${start}s.csv`);
-}
-
-function csvCell(value) {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
 function exportJson() {
   downloadFromUrl(`/api/annotations.json?${qs({ id: state.recordingId })}`, `${state.recordingId}.annotations.json`);
-}
-
-function exportCsv() {
-  downloadFromUrl(`/api/annotations.csv?${qs({ id: state.recordingId })}`, `${state.recordingId}.annotations.csv`);
-}
-
-function scalogramExportPayload(data, selection) {
-  return {
-    schema: "eeg-viewer.scalogram_event.v1",
-    exportedAt: new Date().toISOString(),
-    recordingId: state.recordingId,
-    selection: {
-      start: preciseNumber(selection.start),
-      duration: preciseNumber(selection.duration || 0),
-      end: preciseNumber((selection.start || 0) + (selection.duration || 0)),
-    },
-    viewer: {
-      montage: data.montage || els.montageSelect.value,
-      sensitivityUvPerMm: Number(els.sensitivitySelect.value),
-      timebaseSec: Number(els.durationSelect.value),
-      scalogramMode: state.scalogramMode,
-      detectionMode: scalogramDetectionMode(),
-    },
-    filters: {
-      tc: data.filters?.tc ?? els.tcSelect.value,
-      hf: data.filters?.hf ?? els.hfSelect.value,
-      ac: data.filters?.ac ?? els.acSelect.value,
-      ecgIncluded: Boolean(els.ecgToggle?.checked),
-      ecgFilter: Boolean(els.ecgFilterToggle?.checked),
-    },
-    sfreq: data.sfreq ?? null,
-    globalSpikeAnchor: data.globalSpikeAnchor || null,
-    globalAfterSlowAnchor: data.globalAfterSlowAnchor || null,
-    pairedLatencies: data.pairedLatencies || [],
-    afterSlowPairedLatencies: data.afterSlowPairedLatencies || [],
-    scwtLaterality: data.scwtLaterality || null,
-    traces: data.traces || [],
-    fzTopomap: {
-      spike: state.fzSpikeTopomap || null,
-      afterSlow: state.fzAfterSlowTopomap || null,
-    },
-  };
-}
-
-function exportAnalysisJson() {
-  const data = state.scalogramData;
-  const selection = state.scalogramSelection;
-  if (!data?.available || !selection) return;
-  const payload = scalogramExportPayload(data, selection);
-  const json = JSON.stringify(payload, null, 2) + "\n";
-  const start = Number.isFinite(Number(selection.start)) ? Number(selection.start).toFixed(3) : "selection";
-  downloadBlob(new Blob([json], { type: "application/json;charset=utf-8" }), `${state.recordingId}.scalogram_event_${start}s.json`);
-}
-
-function exportSpikeCsv() {
-  const data = state.scalogramData;
-  const selection = state.scalogramSelection;
-  if (!data?.available || !selection) return;
-  const headers = [
-    "recordingId",
-    "selectionStart",
-    "selectionDuration",
-    "selectionEnd",
-    "sfreq",
-    "tc",
-    "hf",
-    "ac",
-    "traceLabel",
-    "role",
-    "spikeAvailable",
-    "spikeScore",
-    "spikePeakTime",
-    "spikePeakFreq",
-    "sharpnessUvPerMs",
-    "curvatureUvPerMs2",
-    "afterSlowAvailable",
-    "afterSlowTime",
-    "afterSlowLatencyMs",
-    "afterSlowAmplitudeUv",
-    "afterSlowCurvatureUvPerMs2",
-  ];
-  const base = {
-    recordingId: state.recordingId,
-    selectionStart: preciseNumber(selection.start),
-    selectionDuration: preciseNumber(selection.duration || 0),
-    selectionEnd: preciseNumber((selection.start || 0) + (selection.duration || 0)),
-    sfreq: data.sfreq ?? "",
-    tc: data.filters?.tc ?? els.tcSelect.value,
-    hf: data.filters?.hf ?? els.hfSelect.value,
-    ac: data.filters?.ac ?? els.acSelect.value,
-  };
-  const rows = [headers.join(",")];
-  for (const trace of data.traces || []) {
-    const m = trace.spikeMetrics || {};
-    const row = {
-      ...base,
-      traceLabel: nkLabel(trace.label || ""),
-      role: trace.role || "",
-      spikeAvailable: m.available ?? "",
-      spikeScore: m.spikeScore ?? "",
-      spikePeakTime: m.peakTime ?? "",
-      spikePeakFreq: m.peakFreq ?? "",
-      sharpnessUvPerMs: m.sharpnessUvPerMs ?? "",
-      curvatureUvPerMs2: m.curvatureUvPerMs2 ?? "",
-      afterSlowAvailable: m.afterSlowAvailable ?? "",
-      afterSlowTime: m.afterSlowTime ?? "",
-      afterSlowLatencyMs: m.afterSlowLatencyMs ?? "",
-      afterSlowAmplitudeUv: m.afterSlowAmplitudeUv ?? "",
-      afterSlowCurvatureUvPerMs2: m.afterSlowCurvatureUvPerMs2 ?? "",
-    };
-    rows.push(headers.map((key) => csvCell(row[key])).join(","));
-  }
-  const start = Number.isFinite(Number(selection.start)) ? Number(selection.start).toFixed(3) : "selection";
-  downloadBlob(new Blob([rows.join("\n") + "\n"], { type: "text/csv;charset=utf-8" }), `${state.recordingId}.scalogram_event_${start}s.csv`);
 }
 
 function exportViewerJpeg() {
@@ -6309,7 +4295,7 @@ async function saveBlobToDesktop(blob, filename) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename, mimeType: blob.type || "application/octet-stream", contentBase64 }),
   });
-  setStatus(`Saved to Desktop: ${result.filename || filename}`);
+  setStatus(`Saved to Desktop: ${result.path || result.filename || filename}`);
   return result;
 }
 
@@ -6425,8 +4411,38 @@ function displayTraces(traces) {
 }
 
 function visibleDuration() {
-  const duration = Number(state.windowData?.duration || els.durationSelect.value);
+  const duration = Number(els.durationSelect?.value || state.windowData?.duration);
   return Number.isFinite(duration) && duration > 0 ? duration : 10;
+}
+
+function recordingDuration() {
+  const candidates = [
+    state.metadata?.raw?.durationSec,
+    state.windowData?.metadata?.raw?.durationSec,
+    state.windowData?.recordingDurationSec,
+    state.windowData?.totalDurationSec,
+    state.windowData?.rawDurationSec,
+  ];
+  for (const value of candidates) {
+    const duration = Number(value);
+    if (Number.isFinite(duration) && duration > 0) return duration;
+  }
+  const times = state.windowData?.times;
+  if (Array.isArray(times) && times.length) {
+    const last = Number(times[times.length - 1]);
+    if (Number.isFinite(last) && last > 0) return Math.max(last, Number(state.start || 0) + last);
+  }
+  return 0;
+}
+
+function clampStart(value, duration = visibleDuration()) {
+  const start = Number(value);
+  const safeStart = Number.isFinite(start) ? start : 0;
+  const total = recordingDuration();
+  const visible = Number(duration);
+  const safeDuration = Number.isFinite(visible) && visible > 0 ? visible : 10;
+  const maxStart = total > 0 ? Math.max(0, total - safeDuration) : Math.max(0, safeStart);
+  return Math.max(0, Math.min(safeStart, maxStart));
 }
 
 function snapTimeToSample(time) {
