@@ -1,23 +1,15 @@
 {
-  "project": "montage_analysis",
-  "githubRepository": "https://github.com/saitosatoshi-1/eeg-viewer-montage-analysis",
-  "projectRoot": "/Users/saitosatoshi/Desktop/montage/eeg_viewer_app_montage_analysis",
-  "appName": "EEG Viewer",
-  "runtimeInstallTarget": "/Users/Shared/EEG Viewer/app",
-  "launcherInstallTarget": "/Applications/EEG Viewer.app",
-  "port": 8765,
-  "updateCommand": "Update EEG Viewer.command",
-  "pullUpdateCommand": "Pull and Update EEG Viewer.command",
-  "syncOpenCommand": "Sync and Open EEG Viewer.command",
+  "project": "eeg-test-viewer-distribution",
+  "githubRepository": "https://github.com/saitosatoshi-1/eeg-test-viewer-distribution",
+  "projectRoot": "/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/配布用_viewer/github_repos/eeg-test-viewer-distribution",
+  "appName": "EEG Test Viewer",
+  "deployment": "Render web service",
+  "renderUrl": "https://eeg-test-viewer.onrender.com/",
+  "sharedTestLink": "https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1",
+  "dataset": "private:gakkai_v1",
   "codexInstructionFiles": [
     "AGENTS.md",
     "CODEX.md"
   ],
-  "separateProjects": [
-    {
-      "project": "EEG_viewer",
-      "path": "/Users/saitosatoshi/Desktop/神経/NCNP/研究/IEDs/eeg_viewer_app",
-      "note": "Separate design. Do not use for montage_analysis unless explicitly requested."
-    }
-  ]
+  "desktopDistribution": false
 }

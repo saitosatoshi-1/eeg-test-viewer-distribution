@@ -1,36 +1,15 @@
 # Codex Instructions
 
-This project is the `montage_analysis` EEG Viewer app.
+This repository is the web-hosted EEG Test Viewer distribution for Render. Read `AGENTS.md` before making changes.
 
-Also read `AGENTS.md`. It contains the durable workflow for cloud Codex, local
-Codex, GitHub sync, and local app reflection.
+Use this project root:
 
-Use this project root only:
+`/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/配布用_viewer/github_repos/eeg-test-viewer-distribution`
 
-`/Users/saitosatoshi/Desktop/montage/eeg_viewer_app_montage_analysis`
+Current shared test link:
 
-Do not inspect, modify, launch, or compare against this separate EEG Viewer project unless the user explicitly asks for it:
+`https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1`
 
-`/Users/saitosatoshi/Desktop/神経/NCNP/研究/IEDs/eeg_viewer_app`
+This repo should remain web-test focused. Do not add back Windows/macOS launcher bundles, installer scripts, packaged distribution folders, or private EDF data unless explicitly requested.
 
-Project identity:
-
-- Project: `montage_analysis`
-- App family: `EEG Viewer`
-- Runtime install target: `/Users/Shared/EEG Viewer/app`
-- Launcher install target: `/Applications/EEG Viewer.app`
-- Local server port: `8765`
-- Update command: `Update EEG Viewer.command`
-- Pull/update command: `Pull and Update EEG Viewer.command`
-- One-click sync/update/open command: `Sync and Open EEG Viewer.command`
-
-When the user says "this app" or "this project" in this folder, assume they mean the `montage_analysis` project above.
-
-Before saying an update is reflected, compare these source files with `/Users/Shared/EEG Viewer/app`:
-
-- `app.py`
-- `static/index.html`
-- `static/styles.css`
-- `static/app.js`
-
-Use direct file comparison or timestamps. Do not rely on any unrelated running EEG Viewer process, because another project may also run on port `8765`.
+For changes under `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/配布用_viewer`, update the parent `作業ログ.md`.

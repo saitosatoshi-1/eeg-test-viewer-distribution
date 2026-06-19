@@ -1,42 +1,31 @@
-# EEG Test Viewer 配布版
+# EEG Test Viewer Web配布版
 
-このフォルダは、読影テスト実施用に既存Viewerから作成したTest専用版です。
+このリポジトリは、読影テストをWeb上で実施するための配布版です。以前のWindows/macOSローカル配布パッケージは、Webテスト形式へ移行したため削除済みです。
 
-## 目的
+## 共同研究者用リンク
 
-- 読影者がテストだけを実施できるようにする
-- Cutモード、Validationモード、Right ON切替など、読影者に不要なUIを隠す
-- 将来的にGitHub上のテスト問題プールへアクセスして実施できる形へ拡張する
+```text
+https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1
+```
 
-## 重要: Python環境について
+共有時は必ず `access=ncnp` を付けます。アクセス成功後、サーバーはCookieを設定し、URLからアクセスコードを外します。
 
-配布者にPythonやconda環境を構築してもらう運用は現実的ではありません。
-このフォルダはTest専用UIのひな形です。実際に共同研究者へ広く配布する段階では、次のどちらかが必要です。
+## 残しているもの
 
-- macOS/Windows用インストーラを作成し、必要なPythonランタイムを自動導入する
-- Pythonランタイムを同梱したポータブル版として配布し、ダブルクリックだけで起動できるようにする
+- `app.py`: テストAPI、private dataset、結果保存
+- `static/`: テスト専用UI
+- `tools/`: private dataset作成・アップロード用スクリプト
+- `Dockerfile` / `render.yaml`: Renderデプロイ設定
+- `DEPLOY_WEB.md`: Web運用手順
 
-最終目標は「読影者はPythonを触らない」「GitHubやテスト問題プールの存在を意識しない」「アプリを開いて開始するだけ」です。
+## 削除したもの
 
-## 現在の使い方
+- Windows `.bat` / `.vbs` 起動ファイル
+- macOS `.app` ランチャー
+- installer作成用 `packaging/`
+- 共同研究者向けWindows配布フォルダ
+- 古い配布方針ドキュメント
 
-1. `EEG Viewer.app` を開く
-2. 上部の2つのData欄に、てんかん性異常あり/なしのEDFまたはフォルダパスを入力する
-3. テスト者情報を入力する
-4. `開始` を押す
-5. 練習サンプル後、本番テストを進める
-6. 終了画面で結果JSONをDesktopへ保存する
+## データ方針
 
-## この配布版で隠しているもの
-
-- Cutモード
-- Validationモード
-- 右パネル表示切替
-- 手動Open/Recent欄
-- JPEG出力ボタン
-
-内部処理は元Viewerをベースに残しているため、将来の更新やGitHub連携時に再利用できます。
-
-## macOS / Windows 両対応方針
-
-macOSとWindowsの両方で、最終的には「インストーラをクリックするとDesktopに起動アイコンが作られる」形を目指します。詳細は `配布方針_macOS_Windows.md` を参照してください。
+Temple University由来など再配布禁止の可能性があるEDFはGitHubに置きません。学会用データは `private:gakkai_v1` としてRenderの永続ディスク上に置く運用です。

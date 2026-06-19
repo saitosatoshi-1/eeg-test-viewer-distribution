@@ -2,139 +2,75 @@
 
 ## Project Identity
 
-This repository is the `montage_analysis` EEG Viewer app.
+This repository is the web-hosted EEG Test Viewer distribution. It is maintained for Render-based research testing, not for Windows/macOS desktop app distribution.
 
 GitHub repository:
 
-`https://github.com/saitosatoshi-1/eeg-viewer-montage-analysis`
+`https://github.com/saitosatoshi-1/eeg-test-viewer-distribution`
 
-Primary local project path on Saito's Mac:
+Primary local path on Saito's Mac:
 
-`/Users/saitosatoshi/Desktop/montage/eeg_viewer_app_montage_analysis`
+`/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/配布用_viewer/github_repos/eeg-test-viewer-distribution`
 
-Installed runtime target:
+Render URL:
 
-`/Users/Shared/EEG Viewer/app`
+`https://eeg-test-viewer.onrender.com/`
 
-Installed launcher:
+Shared test link:
 
-`/Applications/EEG Viewer.app`
+`https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1`
 
-Local server port:
+## Current Scope
 
-`8765`
+Keep this repository focused on the web test workflow:
 
-## Do Not Confuse With Other EEG Viewer Projects
+- `app.py` backend server and research test APIs
+- `static/` test-only frontend
+- `tools/` private dataset zip/upload scripts
+- `Dockerfile`, `render.yaml`, and `DEPLOY_WEB.md`
+- documentation for Render and private dataset operation
 
-This project is separate from other EEG Viewer projects. In particular, do not
-inspect, modify, launch, or compare against this folder unless the user
-explicitly asks for it:
+Do not reintroduce old Windows/macOS distribution bundles, launchers, installer scripts, or packaged collaborator folders unless the user explicitly asks to rebuild desktop distribution.
 
-`/Users/saitosatoshi/Desktop/神経/NCNP/研究/IEDs/eeg_viewer_app`
+## Security Rules
 
-If the user says "this app" or "this project" while working in this repository,
-assume they mean this `montage_analysis` repository.
-
-## Cloud Codex vs Local Codex
-
-Use cloud Codex or any Mac's Codex for repository code changes:
-
-- edit source files
-- review diffs
-- commit and push to GitHub
-- create PRs or branch-based changes
-- update documentation and scripts
-
-Use local Codex or the user's local Mac for machine-specific actions:
-
-- reflecting files into `/Users/Shared/EEG Viewer/app`
-- installing or updating `/Applications/EEG Viewer.app`
-- running `.command` files
-- approving macOS administrator prompts
-- testing local EDF/NKT files
-- testing `localhost:8765`
-- opening the macOS app
-
-Do not assume a cloud environment can verify local macOS app installation,
-local EEG data, or `/Users/Shared` state.
+- Keep access-code protection enabled for shared Render use.
+- Do not set `EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC=1` on the shared Render service.
+- Shared links should include `?access=ncnp`.
+- Do not commit Temple University-derived or otherwise redistribution-restricted EDF files.
+- Do not commit private EDF datasets to GitHub. Use the private dataset upload workflow.
 
 ## Standard Workflow
 
-For code changes:
-
 1. Work in this Git repository.
 2. Run focused checks when possible.
-3. Commit meaningful changes.
-4. Push to `origin/main` unless the user asks for a branch or PR.
+3. Update `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/配布用_viewer/作業ログ.md` for changes under the distribution folder.
+4. Commit meaningful changes.
+5. Push to `origin/main` unless the user asks for a branch or PR.
+6. If Render Auto Deploy does not start, ask the user to run Manual Deploy from the Render Dashboard.
 
-For syncing another Mac after changes were pushed:
+## Checks
 
-1. Open this repository on that Mac.
-2. Double-click `Sync and Open EEG Viewer.command`.
-
-That command should pull the latest GitHub changes, reflect the project into
-`/Users/Shared/EEG Viewer/app`, stop the old local server, and open
-`/Applications/EEG Viewer.app`.
-
-## Update Reflection Verification
-
-Before saying an update is reflected locally, compare these source files with
-`/Users/Shared/EEG Viewer/app`:
-
-- `app.py`
-- `static/index.html`
-- `static/styles.css`
-- `static/app.js`
-
-Use direct file comparison or timestamps. Do not rely on a running process alone,
-because another EEG Viewer project may also use port `8765`.
-
-## Git Policy
-
-Track source and reproducible project assets:
-
-- `app.py`
-- `static/`
-- `packaging/`
-- `launcher/`
-- `README.md`
-- `AGENTS.md`
-- `CODEX.md`
-- `APP_ID.json`
-- `requirements.txt`
-- `environment.yml`
-- `*.command`
-
-Do not track generated or local-only files:
-
-- `dist/`
-- `*.dmg`
-- `*.pkg`
-- `__pycache__/`
-- `.DS_Store`
-- `*.log`
-- `annotations/`
-- `_CodeSignature/`
-
-Do not manually copy source changes between Macs. Use GitHub push/pull.
-
-## Useful Commands
-
-Check Python syntax:
+Python syntax:
 
 ```bash
-PYTHONPYCACHEPREFIX=/private/tmp/eeg_viewer_pycache /Users/saitosatoshi/miniforge3/envs/eeg-tn22/bin/python -m py_compile app.py
+python3 -m py_compile app.py
 ```
 
-Check JavaScript syntax when the Codex bundled Node runtime is available:
+JavaScript syntax with Codex bundled Node, if local `node` is unavailable:
 
 ```bash
 /Users/saitosatoshi/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node --check static/app.js
 ```
 
-Reflect and open locally:
+## Files That Should Stay Out of Git
 
-```bash
-./Sync\ and\ Open\ EEG\ Viewer.command
-```
-
+- `dist/`
+- `__pycache__/`
+- `.DS_Store`
+- `annotations/`
+- `exports/`
+- `responses/`
+- `validation/`
+- `*.edf` / `*.EDF`
+- generated installers and desktop app bundles
