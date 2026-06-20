@@ -117,6 +117,7 @@ const state = {
   researchTestStartedAt: "",
   researchTestStartedMs: 0,
   researchTestCompletedAt: "",
+  researchResultAutoSubmitted: false,
   researchMontageTiming: null,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
@@ -562,7 +563,6 @@ async function handleMontageControlChange(source = "change") {
   if (!els.montageSelect) return;
   state.lastMontageSelectValue = els.montageSelect.value || "";
   state.activeMontage = state.lastMontageSelectValue || state.activeMontage;
-  state.windowData = null;
   updateResearchMontageTiming();
   renderStatus();
   setStatus(`Loading montage ${state.activeMontage} / ${labelForMontage()}...`, { busy: true, progress: 70 });
@@ -588,7 +588,6 @@ async function handleDurationControlChange(source = "change") {
 
 async function handleFilterControlChange(source = "change") {
   state.lastFilterControlKey = filterControlKey();
-  state.windowData = null;
   renderStatus();
   forceViewerRepaint();
   setStatus(`Loading filters TC ${tcText()} / HF ${hfText()}...`, { busy: true, progress: 70 });
@@ -631,6 +630,7 @@ function bindControls() {
   ].filter(Boolean).forEach((el) => el.addEventListener("change", onControlChange));
   [
     els.montageSelect,
+    els.sensitivitySelect,
     els.durationSelect,
     els.tcSelect,
     els.hfSelect,
@@ -644,6 +644,11 @@ function bindControls() {
     el.addEventListener("input", check);
     el.addEventListener("keyup", check);
     el.addEventListener("mouseup", check);
+  });
+  els.sensitivitySelect?.addEventListener("input", () => {
+    saveSettings();
+    renderStatus();
+    draw();
   });
   if (els.durationSelect) {
     els.durationSelect.addEventListener("focus", () => {
@@ -1254,20 +1259,21 @@ function showResearchCompletion() {
   if (els.researchCompleteMessage) {
     els.researchCompleteMessage.textContent = validationMode
       ? "結果ファイルをDesktopに保存してください。専門的な形式ですが、このボタンで作成されるファイルをそのまま送れば大丈夫です。"
-      : "結果はサーバーへ送信し、念のためJSONをダウンロードしてメールにも添付してください。";
+      : "結果は自動でサーバーへ送信しました。念のためJSONをダウンロードし、メールにも添付して送ってください。";
   }
   if (els.researchMailBox) els.researchMailBox.hidden = validationMode;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validationMode;
   if (els.researchCompleteExportCsvBtn) {
-    els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation結果ファイルをDesktopに保存" : "1. サーバーへ送信";
+    els.researchCompleteExportCsvBtn.hidden = !validationMode;
+    els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation結果ファイルをDesktopに保存" : "";
   }
   if (els.researchCompleteSaveDesktopBtn) {
     els.researchCompleteSaveDesktopBtn.hidden = validationMode;
-    if (!validationMode) els.researchCompleteSaveDesktopBtn.textContent = "2. JSONをダウンロード";
+    if (!validationMode) els.researchCompleteSaveDesktopBtn.textContent = "JSONをダウンロード";
   }
   if (!validationMode) updateResearchEmailBody();
   if (els.researchSavedCsvName) {
-    els.researchSavedCsvName.textContent = "結果ファイルはまだ保存されていません。";
+    els.researchSavedCsvName.textContent = validationMode ? "結果ファイルはまだ保存されていません。" : "サーバーへ自動送信中です。JSONもダウンロードしてください。";
   }
   hideResearchWaveProgress();
   if (validationMode) hideValidationWaveProgress();
@@ -1353,8 +1359,7 @@ function isResearchPracticeCase(item = currentResearchCase()) {
 function updateResearchTutorial(item = currentResearchCase()) {
   if (!els.researchTutorial) return;
   const phase = String(state.researchSession?.phase || "");
-  const hasAnswers = Number(state.researchSession?.answeredCount || 0) > 0;
-  const show = isResearchPracticeCase(item) && !state.researchTutorialDismissed && !state.researchSampleCompletedPhases[phase] && !hasAnswers;
+  const show = isResearchPracticeCase(item) && !state.researchTutorialDismissed && !state.researchSampleCompletedPhases[phase];
   els.researchTutorial.hidden = !show;
   els.researchTutorial.setAttribute("aria-hidden", show ? "false" : "true");
 }
@@ -1461,6 +1466,29 @@ function researchProgressSnapshot() {
   return { cases, current, total, answered, currentQuestion, remaining, pct, isPractice };
 }
 
+function firstUnansweredResearchCaseIndex() {
+  const cases = activeResearchCases();
+  const answeredIds = new Set((state.researchSession?.responses || []).map((row) => String(row.caseId || "")));
+  const index = cases.findIndex((row) => !row.sampleEpoch && !answeredIds.has(String(row.caseId || "")));
+  return index >= 0 ? index : -1;
+}
+
+async function completeResearchTest() {
+  hideResearchTutorial();
+  renderResearchPanel();
+  showResearchCompletion();
+  if (state.researchMode !== "test" || state.researchResultAutoSubmitted) return;
+  state.researchResultAutoSubmitted = true;
+  try {
+    await submitResearchJson({ automatic: true });
+  } catch (err) {
+    if (els.researchSavedCsvName) {
+      els.researchSavedCsvName.textContent = `サーバー自動送信に失敗しました: ${err.message}。JSONをダウンロードしてメールに添付してください。`;
+    }
+    setStatus(`Result auto submit failed: ${err.message}`, { error: true });
+  }
+}
+
 function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
   if (!els.researchWaveProgress) return;
   const session = state.researchSession;
@@ -1504,7 +1532,7 @@ function renderResearchInlineProgress(snapshot = null) {
   if (state.researchMode === "test" && state.researchSession) {
     const data = snapshot || researchProgressSnapshot();
     const label = data.isPractice
-      ? `本番 ${data.total || 0} 問`
+      ? `練習中 · 本番 ${data.total || 0} 問`
       : `残り ${data.remaining} 問`;
     hideResearchInlineProgress();
     if (els.researchInlineProgress) {
@@ -2173,6 +2201,7 @@ async function startResearchTest() {
   state.researchTestStartedAt = "";
   state.researchTestStartedMs = 0;
   state.researchTestCompletedAt = "";
+  state.researchResultAutoSubmitted = false;
   hideResearchTutorial();
   const profile = researchProfile();
   const readerId = researchReaderDisplayId(profile);
@@ -2234,9 +2263,8 @@ async function showResearchCase(index) {
   const cases = activeResearchCases();
   if (!cases.length) {
     hideResearchTutorial();
-    renderResearchPanel();
-    showResearchCompletion();
-    setStatus("Test complete. 結果ファイルを保存できます");
+    await completeResearchTest();
+    setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
     return;
   }
   state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, index));
@@ -2342,11 +2370,11 @@ async function saveResearchRating(rating) {
       } else {
         showResearchToast("Sample shown");
       }
-      const cases = activeResearchCases();
-      if (cases.length) await showResearchCase(0);
+      const nextIndex = firstUnansweredResearchCaseIndex();
+      if (nextIndex >= 0) await showResearchCase(nextIndex);
       else {
-        showResearchCompletion();
-        setStatus("Test complete. 結果ファイルを保存できます");
+        await completeResearchTest();
+        setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
       }
       return;
     }
@@ -2378,12 +2406,12 @@ async function saveResearchRating(rating) {
     renderRightResearchPanels();
     showResearchToast(`保存しました: ${researchRatingLabel(rating)} · やり直す場合は「前の問題をやりなおす」`, { undo: true });
     const cases = activeResearchCases();
-    if (cases.length) await showResearchCase(0);
+    const nextIndex = firstUnansweredResearchCaseIndex();
+    if (nextIndex >= 0) await showResearchCase(nextIndex);
     else {
       state.researchCaseIndex = cases.length ? cases.length - 1 : 0;
-      renderResearchPanel();
-      showResearchCompletion();
-      setStatus("Test complete. 結果ファイルを保存できます");
+      await completeResearchTest();
+      setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
     }
   } catch (err) {
     setStatus(`Save failed: ${err.message}`, { error: true });
@@ -2483,15 +2511,20 @@ async function exportResearchJson() {
   }
 }
 
-async function submitResearchJson() {
+async function submitResearchJson(options = {}) {
   if (state.researchMode === "validation") return exportValidationJson();
   const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
-  if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
+  if (!datasetPath) {
+    const err = new Error("Enter dataset folder path");
+    setStatus(err.message, { error: true });
+    if (options.automatic) throw err;
+    return;
+  }
   saveResearchProfile();
   const profile = researchProfile();
   const readerId = researchReaderDisplayId(profile);
   try {
-    setStatus("結果を送信中...", { busy: true });
+    setStatus(options.automatic ? "結果をサーバーへ自動送信中..." : "結果を送信中...", { busy: true });
     const jsonFilename = researchJsonFilename(readerId, profile);
     const result = await fetchJson("/api/research/test/submit-result", {
       method: "POST",
@@ -2500,11 +2533,13 @@ async function submitResearchJson() {
     });
     const label = result.submissionId || result.filename || jsonFilename;
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `送信しました: ${label}`;
+      els.researchSavedCsvName.textContent = `サーバーへ送信しました: ${label}。念のためJSONをダウンロードしてメールに添付してください。`;
     }
-    setStatus(`結果を送信しました: ${label}`);
+    setStatus(`結果をサーバーへ送信しました: ${label}`);
+    return result;
   } catch (err) {
     setStatus(`Submit failed: ${err.message}`, { error: true });
+    if (options.automatic) throw err;
   }
 }
 
