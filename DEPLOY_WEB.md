@@ -33,6 +33,10 @@ Required production environment variables:
 ```text
 EEG_VIEWER_PUBLIC_MODE=1
 EEG_VIEWER_ACCESS_CODE=ncnp
+EEG_VIEWER_ADMIN_CODE=<separate admin-only secret>
+EEG_VIEWER_ALLOWED_REMOTE_HOSTS=raw.githubusercontent.com,github.com
+EEG_VIEWER_MAX_REMOTE_EEG_MB=512
+EEG_VIEWER_MAX_RAW_CACHE_RECORDS=4
 ```
 
 If `EEG_VIEWER_ACCESS_CODE` is missing in public mode, the app returns `401 Unauthorized`.
@@ -51,7 +55,9 @@ To start with a dataset already filled in:
 https://<your-viewer-host>/?dataset=https%3A%2F%2Fraw.githubusercontent.com%2F<owner>%2F<repo>%2Fmain%2Fdatasets%2Fv1%2Fdataset.json
 ```
 
-After a valid password is submitted, the app stores an HTTP-only cookie and redirects to the requested URL.
+After a valid password is submitted, the app stores a signed HTTP-only cookie and redirects to the requested URL.
+
+Administrative APIs for private dataset upload and submitted result download require `EEG_VIEWER_ADMIN_CODE` in addition to normal viewer login. Do not share the admin code with test participants.
 
 Only use `EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC=1` for a temporary private test network. Do not set it on a shared deployment.
 
@@ -65,6 +71,8 @@ https://raw.githubusercontent.com/<owner>/<repo>/main/datasets/v1/dataset.json
 ```
 
 Each case should include `edfUrl`. Relative `edfUrl` values are resolved from the `dataset.json` URL.
+
+In public mode, remote dataset and EDF downloads are restricted to HTTPS URLs on `EEG_VIEWER_ALLOWED_REMOTE_HOSTS`. Redirects are rejected.
 
 ## Private Server Dataset
 
@@ -85,6 +93,7 @@ Upload it to the deployed viewer:
 python tools/upload_private_dataset.py \
   --viewer-url "https://<your-viewer-host>" \
   --access-code ncnp \
+  --admin-code "<admin-code>" \
   --dataset-id gakkai_v1 \
   --name "Gakkai EEG Test v1" \
   --zip /tmp/gakkai_v1_private.zip

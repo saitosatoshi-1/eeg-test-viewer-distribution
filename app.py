@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
+import ipaddress
 import importlib.util
 import json
 import math
@@ -15,6 +17,7 @@ import shutil
 import sys
 import secrets
 import shlex
+import socket
 import threading
 import zipfile
 
@@ -33,7 +36,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse, urlunparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -96,12 +99,21 @@ PUBLIC_MODE = os.environ.get("EEG_VIEWER_PUBLIC_MODE", "").lower() in {"1", "tru
 ACCESS_USER = os.environ.get("EEG_VIEWER_ACCESS_USER", "viewer")
 ACCESS_PASSWORD = os.environ.get("EEG_VIEWER_ACCESS_PASSWORD", "")
 ACCESS_CODE = os.environ.get("EEG_VIEWER_ACCESS_CODE", ACCESS_PASSWORD)
+ADMIN_CODE = os.environ.get("EEG_VIEWER_ADMIN_CODE", "")
 ALLOW_UNPROTECTED_PUBLIC = os.environ.get("EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC", "").lower() in {"1", "true", "yes", "on"}
+ACCESS_COOKIE_NAME = "eeg_viewer_access"
+ACCESS_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14
 MAX_WINDOW_DURATION_SEC = 120.0
 MAX_POST_BODY_BYTES = 20 * 1024 * 1024
 MAX_EXPORT_POST_BODY_BYTES = 150 * 1024 * 1024
 MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
-MAX_REMOTE_EEG_BYTES = 2 * 1024 * 1024 * 1024
+MAX_REMOTE_EEG_BYTES = int(float(os.environ.get("EEG_VIEWER_MAX_REMOTE_EEG_MB", "512")) * 1024 * 1024)
+MAX_RAW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_RAW_CACHE_RECORDS", "4"))))
+ALLOWED_REMOTE_HOSTS = {
+    host.strip().lower()
+    for host in os.environ.get("EEG_VIEWER_ALLOWED_REMOTE_HOSTS", "raw.githubusercontent.com,github.com").split(",")
+    if host.strip()
+}
 RESEARCH_GROUP_SCAN_MAX_DEPTH = 8
 RESEARCH_GROUP_SCAN_LIMIT = 2000
 PUBLIC_TEST_QUESTION_COUNT = 20
@@ -112,6 +124,7 @@ ALLOWED_RESEARCH_WRITE_ROOTS = (
     Path.home() / "Documents",
     Path.home() / "Downloads",
 )
+RESEARCH_RESPONSE_LOCK = threading.RLock()
 TOKEN_EXEMPT_GET_PATHS = {"/api/health"}
 MUTATING_PATHS = {
     "/api/open-file",
@@ -389,15 +402,49 @@ def remote_file_cache_path(url: str) -> Path:
     return REMOTE_DATASET_CACHE_DIR / "files" / url_cache_key(normalized)[:16] / suffix_name
 
 
-def download_remote_url(url: str, target: Path, max_bytes: int) -> Path:
+class NoRemoteRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError(f"Remote redirects are not allowed: {newurl}")
+
+
+REMOTE_OPENER = build_opener(NoRemoteRedirectHandler)
+
+
+def validate_remote_url(url: str) -> str:
     normalized = normalize_github_url(url)
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Remote URL must be HTTP or HTTPS.")
+    hostname = parsed.hostname.lower()
+    if PUBLIC_MODE and parsed.scheme != "https":
+        raise ValueError("Public remote datasets must use HTTPS.")
+    if PUBLIC_MODE and ALLOWED_REMOTE_HOSTS and hostname not in ALLOWED_REMOTE_HOSTS:
+        allowed = ", ".join(sorted(ALLOWED_REMOTE_HOSTS))
+        raise ValueError(f"Remote host is not allowed: {hostname}. Allowed hosts: {allowed}")
+    try:
+        infos = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve remote host: {hostname}") from exc
+    for info in infos:
+        address = info[4][0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            raise ValueError(f"Remote host resolves to a blocked address: {hostname}")
+    return normalized
+
+
+def download_remote_url(url: str, target: Path, max_bytes: int) -> Path:
+    normalized = validate_remote_url(url)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size > 0:
         return target
     request = Request(normalized, headers={"User-Agent": "EEG-Test-Viewer/1.0"})
     tmp = target.with_suffix(target.suffix + ".part")
     total = 0
-    with urlopen(request, timeout=60) as response, tmp.open("wb") as out:
+    with REMOTE_OPENER.open(request, timeout=60) as response, tmp.open("wb") as out:
         while True:
             chunk = response.read(1024 * 1024)
             if not chunk:
@@ -411,9 +458,9 @@ def download_remote_url(url: str, target: Path, max_bytes: int) -> Path:
 
 
 def read_remote_text(url: str, max_bytes: int = MAX_REMOTE_DATASET_BYTES) -> str:
-    normalized = normalize_github_url(url)
+    normalized = validate_remote_url(url)
     request = Request(normalized, headers={"User-Agent": "EEG-Test-Viewer/1.0"})
-    with urlopen(request, timeout=30) as response:
+    with REMOTE_OPENER.open(request, timeout=30) as response:
         raw = response.read(max_bytes + 1)
     if len(raw) > max_bytes:
         raise ValueError(f"Remote dataset is too large: {normalized}")
@@ -1362,9 +1409,11 @@ class RecordingStore:
 
     def raw(self, record_id: str):
         if record_id in self._raw_cache:
-            return self._raw_cache[record_id]
+            raw = self._raw_cache.pop(record_id)
+            self._raw_cache[record_id] = raw
+            return raw
         if ensure_mne() is None:
-            self._raw_cache[record_id] = None
+            self.remember_raw_cache(record_id, None)
             return None
         rec = self.get(record_id)
         if rec.file_format == "edf":
@@ -1399,8 +1448,14 @@ class RecordingStore:
             except Exception:
                 traceback.print_exc()
                 raw = None
-        self._raw_cache[record_id] = raw
+        self.remember_raw_cache(record_id, raw)
         return raw
+
+    def remember_raw_cache(self, record_id: str, raw: Any) -> None:
+        self._raw_cache[record_id] = raw
+        while len(self._raw_cache) > MAX_RAW_CACHE_RECORDS:
+            oldest = next(iter(self._raw_cache))
+            self._raw_cache.pop(oldest, None)
 
     def source_annotations(self, record_id: str) -> list[dict[str, Any]]:
         if record_id in self._source_annotation_cache:
@@ -2969,25 +3024,72 @@ def research_phase1_total_count(settings: dict[str, Any]) -> int:
     return RESEARCH_PHASE1_SAMPLE_TOTAL
 
 
+def research_order_group(row: dict[str, Any]) -> str:
+    return str(row.get("labelGroup") or "other")
+
+
+def research_max_consecutive_group_count(rows: list[dict[str, Any]]) -> int:
+    max_count = 0
+    last_group = None
+    current_count = 0
+    for row in rows:
+        group = research_order_group(row)
+        if group == last_group:
+            current_count += 1
+        else:
+            last_group = group
+            current_count = 1
+        max_count = max(max_count, current_count)
+    return max_count
+
+
 def stable_balanced_research_order(rows: list[dict[str, Any]], seed_parts: tuple[str, ...]) -> list[dict[str, Any]]:
     seed = hashlib.sha256("|".join(seed_parts).encode("utf-8")).hexdigest()
     rng = random.Random(seed)
-    grouped = {
-        "epileptiform": [row for row in rows if row.get("labelGroup") == "epileptiform"],
-        "non_epileptiform": [row for row in rows if row.get("labelGroup") == "non_epileptiform"],
-    }
-    other_rows = [row for row in rows if row.get("labelGroup") not in grouped]
+    shuffled = list(rows)
+    if len(shuffled) <= 2:
+        rng.shuffle(shuffled)
+        return shuffled
+
+    group_counts: dict[str, int] = {}
+    for row in shuffled:
+        group = research_order_group(row)
+        group_counts[group] = group_counts.get(group, 0) + 1
+    largest_group = max(group_counts.values(), default=0)
+    other_count = max(0, len(shuffled) - largest_group)
+    minimum_possible_run = math.ceil(largest_group / max(1, other_count + 1))
+    max_consecutive = max(3, minimum_possible_run)
+
+    for _ in range(500):
+        rng.shuffle(shuffled)
+        if research_max_consecutive_group_count(shuffled) <= max_consecutive:
+            return shuffled
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(research_order_group(row), []).append(row)
     for group_rows in grouped.values():
         rng.shuffle(group_rows)
-    rng.shuffle(other_rows)
-    group_order = ["epileptiform", "non_epileptiform"]
-    rng.shuffle(group_order)
+
     ordered: list[dict[str, Any]] = []
-    while any(grouped[group] for group in group_order):
-        for group in group_order:
-            if grouped[group]:
-                ordered.append(grouped[group].pop(0))
-    ordered.extend(other_rows)
+    while any(grouped.values()):
+        recent_group = research_order_group(ordered[-1]) if ordered else None
+        recent_count = 0
+        for row in reversed(ordered):
+            if research_order_group(row) != recent_group:
+                break
+            recent_count += 1
+
+        candidates = [
+            group for group, group_rows in grouped.items()
+            if group_rows and not (group == recent_group and recent_count >= max_consecutive)
+        ]
+        if not candidates:
+            candidates = [group for group, group_rows in grouped.items() if group_rows]
+        max_remaining = max(len(grouped[group]) for group in candidates)
+        candidates = [group for group in candidates if len(grouped[group]) == max_remaining]
+        group = rng.choice(candidates)
+        ordered.append(grouped[group].pop())
     return ordered
 
 
@@ -3279,6 +3381,11 @@ def save_validation_results_json_to_desktop(payload: dict[str, Any]) -> dict[str
 
 
 def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
+    with RESEARCH_RESPONSE_LOCK:
+        return save_research_response_unlocked(payload)
+
+
+def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
     dataset = load_research_dataset(str(dataset_dir))
     reader_id = research_reader_id(payload.get("readerId"))
@@ -3331,6 +3438,20 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
     if tutorial_to_test_completed_sec <= 0 and tutorial_to_test_completed_ms > 0:
         tutorial_to_test_completed_sec = round(tutorial_to_test_completed_ms / 1000, 3)
     test_date = iso_date_part(test_started_at or answered_at or now)
+    epoch_start = profile_value(payload, "epochStart")
+    if epoch_start == "":
+        epoch_start = profile_value(case, "epochStart")
+    event_time = profile_value(payload, "eventTime")
+    if event_time == "":
+        event_time = profile_value(case, "eventTime")
+    duration_sec = profile_value(payload, "durationSec")
+    if duration_sec == "":
+        duration_sec = profile_value(case, "durationSec")
+    if event_time == "" and epoch_start != "" and duration_sec != "":
+        try:
+            event_time = round(float(epoch_start) + float(duration_sec) / 2.0, 6)
+        except (TypeError, ValueError):
+            event_time = ""
     response_id = str(uuid.uuid4())
     for row in responses:
         if row.get("caseId") == case_id and str(row.get("phase")) == phase and not row.get("superseded") and not row.get("undoneAt"):
@@ -3350,6 +3471,9 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
         "answerOrder": answer_order,
         "rating": rating,
         "testDate": test_date,
+        "eventTime": event_time,
+        "epochStart": epoch_start,
+        "durationSec": duration_sec,
         "startedAt": started_at,
         "answeredAt": answered_at,
         "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
@@ -3401,6 +3525,11 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def undo_research_response(payload: dict[str, Any]) -> dict[str, Any]:
+    with RESEARCH_RESPONSE_LOCK:
+        return undo_research_response_unlocked(payload)
+
+
+def undo_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
     reader_id = research_reader_id(payload.get("readerId"))
     response_id = str(payload.get("responseId") or "")
@@ -3519,7 +3648,6 @@ def research_json_response_payload(response: dict[str, Any]) -> dict[str, Any] |
     if row.get("displayMode") == "phase2_4montage_topomap":
         row["displayMode"] = "phase1_single"
     for key in (
-        "epochStart", "eventTime", "durationSec",
         "spikeTime", "spikeSampleIndex", "spikeSfreq", "spikeChannel",
         "clickedElectrode", "clickedCanvasX", "clickedCanvasY", "clickedRowIndex",
         "spikeMontageChannel", "selectedWaveformStart", "selectedWaveformDuration",
@@ -3646,6 +3774,9 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
         "rating": rating,
         "correct": correct,
         "testDate": test_date,
+        "eventTime": row.get("eventTime", case.get("eventTime", "") if case else ""),
+        "epochStart": row.get("epochStart", case.get("epochStart", "") if case else ""),
+        "durationSec": row.get("durationSec", case.get("durationSec", "") if case else ""),
         "startedAt": row.get("startedAt", ""),
         "answeredAt": row.get("answeredAt", ""),
         "elapsedMs": row.get("elapsedMs", ""),
@@ -3733,6 +3864,8 @@ def research_reader_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def export_research_responses_json(dataset_dir: Path, reader_id: str | None = None) -> str:
+    if PUBLIC_MODE and not str(reader_id or "").strip():
+        raise ValueError("readerId is required for public result export.")
     dataset = load_research_dataset(str(dataset_dir))
     reader_ids = [research_reader_id(reader_id)] if reader_id else [p.stem for p in (dataset_dir / "responses").glob("*.json")]
     case_by_id = {str(row.get("caseId", "")): row for row in research_case_rows(dataset)}
@@ -3810,6 +3943,8 @@ def save_research_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
     dataset = load_research_dataset(str(dataset_dir))
     reader_id = str(payload.get("readerId") or "").strip() or None
+    if PUBLIC_MODE and not reader_id:
+        raise ValueError("readerId is required for public result submission.")
     json_text = export_research_responses_json(dataset_dir, reader_id)
     filename = str(payload.get("filename") or "").strip()
     if not filename:
@@ -3973,6 +4108,46 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return unquote(value)
         return ""
 
+    def access_cookie_signature(self, timestamp: str, nonce: str) -> str:
+        secret = f"{SERVER_TOKEN}|{ACCESS_CODE or ACCESS_PASSWORD}".encode("utf-8")
+        message = f"{timestamp}.{nonce}".encode("utf-8")
+        return hmac.new(secret, message, hashlib.sha256).hexdigest()
+
+    def make_access_cookie_value(self) -> str:
+        timestamp = str(int(time.time()))
+        nonce = secrets.token_urlsafe(16)
+        signature = self.access_cookie_signature(timestamp, nonce)
+        return f"{timestamp}.{nonce}.{signature}"
+
+    def access_cookie_valid(self) -> bool:
+        raw = self.cookie_value(ACCESS_COOKIE_NAME)
+        timestamp, sep, rest = raw.partition(".")
+        nonce, sep2, signature = rest.partition(".")
+        if not (timestamp and sep and nonce and sep2 and signature):
+            return False
+        try:
+            issued_at = int(timestamp)
+        except ValueError:
+            return False
+        now = int(time.time())
+        if issued_at > now + 60 or now - issued_at > ACCESS_COOKIE_MAX_AGE_SEC:
+            return False
+        expected = self.access_cookie_signature(timestamp, nonce)
+        return secrets.compare_digest(signature, expected)
+
+    def send_access_cookie_header(self) -> None:
+        value = self.make_access_cookie_value()
+        attrs = [
+            f"{ACCESS_COOKIE_NAME}={value}",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            f"Max-Age={ACCESS_COOKIE_MAX_AGE_SEC}",
+        ]
+        if PUBLIC_MODE:
+            attrs.append("Secure")
+        self.send_header("Set-Cookie", "; ".join(attrs))
+
     def access_code_from_query(self) -> str:
         return ""
 
@@ -3985,7 +4160,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         clean_url = urlunparse(("", "", parsed.path or "/", "", clean_query, ""))
         self.send_response(HTTPStatus.FOUND)
         self.send_header("Location", clean_url or "/")
-        self.send_header("Set-Cookie", "eeg_viewer_access=ok; Path=/; HttpOnly; SameSite=Lax")
+        self.send_access_cookie_header()
         self.send_security_headers()
         self.end_headers()
 
@@ -3995,7 +4170,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         query_code = self.access_code_from_query()
         if query_code and secrets.compare_digest(query_code, ACCESS_CODE):
             return True
-        return secrets.compare_digest(self.cookie_value("eeg_viewer_access"), "ok")
+        return self.access_cookie_valid()
 
     def access_allowed(self) -> tuple[bool, str]:
         if not PUBLIC_MODE:
@@ -4035,9 +4210,16 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
     def send_login_success(self, next_path: str) -> None:
         self.send_response(HTTPStatus.FOUND)
         self.send_header("Location", self.safe_return_path(next_path))
-        self.send_header("Set-Cookie", "eeg_viewer_access=ok; Path=/; HttpOnly; SameSite=Lax")
+        self.send_access_cookie_header()
         self.send_security_headers()
         self.end_headers()
+
+    def admin_allowed(self) -> bool:
+        if not PUBLIC_MODE:
+            return True
+        if not ADMIN_CODE:
+            return False
+        return secrets.compare_digest(self.headers.get("X-EEG-Viewer-Admin-Code", ""), ADMIN_CODE)
 
     def handle_login_post(self) -> bool:
         parsed = urlparse(self.path)
@@ -4141,10 +4323,16 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     }
                 )
             if path == "/api/admin/private-dataset/list":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_json(private_dataset_inventory())
             if path == "/api/admin/submitted-results/list":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_json(submitted_result_inventory())
             if path == "/api/admin/submitted-results/item":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_text(submitted_result_text(required(qs, "id")), "application/json; charset=utf-8")
             if path == "/api/recordings":
                 if qs.get("refresh", ["0"])[0] == "1":
@@ -4247,6 +4435,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/research/validation/export-file":
                 return self.send_json(save_validation_results_json_to_desktop(payload))
             if parsed.path == "/api/admin/private-dataset/upload":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_json(upload_private_dataset(payload))
             if parsed.path != "/api/annotations":
                 return self.send_error(HTTPStatus.NOT_FOUND, "Not found")

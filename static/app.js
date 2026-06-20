@@ -119,6 +119,7 @@ const state = {
   researchTestStartedMs: 0,
   researchTestCompletedAt: "",
   researchResultAutoSubmitted: false,
+  researchSaving: false,
   researchMontageTiming: null,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
@@ -2405,6 +2406,8 @@ function researchSpikeSelectionPayload() {
 async function saveResearchRating(rating) {
   const item = currentResearchCase();
   if (!item || !state.researchSession) return;
+  if (state.researchSaving) return;
+  state.researchSaving = true;
   const answeredAt = new Date().toISOString();
   const elapsedMs = state.researchCaseStartedAt ? Date.now() - Date.parse(state.researchCaseStartedAt) : 0;
   try {
@@ -2437,6 +2440,9 @@ async function saveResearchRating(rating) {
         readerProfile: researchProfile(),
         phase: state.researchSession.phase,
         caseId: item.caseId,
+        eventTime: item.eventTime ?? "",
+        epochStart: item.epochStart ?? "",
+        durationSec: item.durationSec ?? "",
         rating,
         startedAt: state.researchCaseStartedAt || answeredAt,
         answeredAt,
@@ -2465,6 +2471,8 @@ async function saveResearchRating(rating) {
   } catch (err) {
     setStatus(`Save failed: ${err.message}`, { error: true });
     showResearchToast(`保存できませんでした: ${err.message}`);
+  } finally {
+    state.researchSaving = false;
   }
 }
 

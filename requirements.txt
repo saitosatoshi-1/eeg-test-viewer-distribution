@@ -1,5 +1,5 @@
-mne>=1.11
-edfio
-numpy
-scipy
-pandas
+mne>=1.11,<1.12
+edfio>=0.4,<1
+numpy>=1.26,<3
+scipy>=1.11,<2
+pandas>=2.1,<3

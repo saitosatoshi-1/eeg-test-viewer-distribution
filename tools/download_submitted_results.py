@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -25,13 +26,17 @@ def viewer_opener(base: str, access_code: str) -> tuple[urllib.request.OpenerDir
     return opener, match.group(1)
 
 
-def get_json(opener: urllib.request.OpenerDirector, url: str, token: str) -> dict:
-    request = urllib.request.Request(url, headers={"X-EEG-Viewer-Token": token})
+def admin_headers(token: str, admin_code: str) -> dict[str, str]:
+    return {"X-EEG-Viewer-Token": token, "X-EEG-Viewer-Admin-Code": admin_code}
+
+
+def get_json(opener: urllib.request.OpenerDirector, url: str, token: str, admin_code: str) -> dict:
+    request = urllib.request.Request(url, headers=admin_headers(token, admin_code))
     return json.loads(opener.open(request).read().decode("utf-8"))
 
 
-def get_text(opener: urllib.request.OpenerDirector, url: str, token: str) -> str:
-    request = urllib.request.Request(url, headers={"X-EEG-Viewer-Token": token})
+def get_text(opener: urllib.request.OpenerDirector, url: str, token: str, admin_code: str) -> str:
+    request = urllib.request.Request(url, headers=admin_headers(token, admin_code))
     return opener.open(request).read().decode("utf-8")
 
 
@@ -48,6 +53,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="List or download submitted EEG test result JSON files.")
     parser.add_argument("--viewer-url", default="https://eeg-test-viewer.onrender.com")
     parser.add_argument("--access-code", default="ncnp")
+    parser.add_argument("--admin-code", default=os.environ.get("EEG_VIEWER_ADMIN_CODE", ""))
     parser.add_argument("--output", type=Path, default=Path.home() / "Downloads" / "eeg_test_results")
     parser.add_argument("--list-only", action="store_true")
     parser.add_argument("--id", dest="submission_id", default="", help="Download one submissionId instead of all results.")
@@ -55,7 +61,7 @@ def main() -> None:
 
     base = args.viewer_url.rstrip("/")
     opener, token = viewer_opener(base, args.access_code)
-    inventory = get_json(opener, f"{base}/api/admin/submitted-results/list", token)
+    inventory = get_json(opener, f"{base}/api/admin/submitted-results/list", token, args.admin_code)
     results = inventory.get("results") or []
 
     if args.list_only:
@@ -72,7 +78,7 @@ def main() -> None:
         if not submission_id:
             continue
         url = f"{base}/api/admin/submitted-results/item?{urllib.parse.urlencode({'id': submission_id})}"
-        text = get_text(opener, url, token)
+        text = get_text(opener, url, token, args.admin_code)
         target = safe_local_path(args.output, submission_id)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")

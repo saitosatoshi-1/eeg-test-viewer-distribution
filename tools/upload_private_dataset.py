@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -14,6 +15,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Upload a private EEG dataset zip to the deployed viewer.")
     parser.add_argument("--viewer-url", required=True, help="Example: https://eeg-test-viewer.onrender.com")
     parser.add_argument("--access-code", default="ncnp")
+    parser.add_argument("--admin-code", default=os.environ.get("EEG_VIEWER_ADMIN_CODE", ""))
     parser.add_argument("--dataset-id", required=True)
     parser.add_argument("--name", default="")
     parser.add_argument("--zip", required=True, type=Path)
@@ -41,7 +43,11 @@ def main() -> None:
     request = urllib.request.Request(
         f"{base}/api/admin/private-dataset/upload",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "X-EEG-Viewer-Token": token},
+        headers={
+            "Content-Type": "application/json",
+            "X-EEG-Viewer-Token": token,
+            "X-EEG-Viewer-Admin-Code": args.admin_code,
+        },
     )
     response = opener.open(request).read().decode("utf-8")
     print(response)

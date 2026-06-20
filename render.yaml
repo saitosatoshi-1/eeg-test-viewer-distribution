@@ -15,5 +15,13 @@ services:
         value: /data
       - key: EEG_VIEWER_ACCESS_CODE
         value: ncnp
+      - key: EEG_VIEWER_ADMIN_CODE
+        sync: false
+      - key: EEG_VIEWER_ALLOWED_REMOTE_HOSTS
+        value: raw.githubusercontent.com,github.com
+      - key: EEG_VIEWER_MAX_REMOTE_EEG_MB
+        value: "512"
+      - key: EEG_VIEWER_MAX_RAW_CACHE_RECORDS
+        value: "4"
       - key: PYTHONDONTWRITEBYTECODE
         value: "1"

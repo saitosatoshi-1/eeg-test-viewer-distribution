@@ -811,11 +811,12 @@ dd {
 }
 
 .research-complete-panel {
-  width: min(680px, calc(100% - 32px));
+  width: min(860px, calc(100% - 32px));
+  min-height: min(640px, calc(100% - 32px));
   grid-template-columns: 1fr;
   align-content: center;
-  gap: 8px;
-  padding: 14px;
+  gap: 10px;
+  padding: 20px;
   text-align: center;
 }
 
@@ -896,8 +897,8 @@ dd {
 
 .research-mail-box textarea {
   width: 100%;
-  height: 92px;
-  min-height: 92px;
+  height: 190px;
+  min-height: 190px;
   resize: none;
   border: 1px solid #aeb8c5;
   border-radius: 6px;
@@ -1769,8 +1770,9 @@ body.test-only-distribution .readout {
 
 @media (max-width: 700px) {
   .research-complete-panel {
-    width: min(520px, calc(100% - 20px));
-    padding: 12px;
+    width: min(640px, calc(100% - 20px));
+    min-height: min(600px, calc(100% - 20px));
+    padding: 14px;
   }
 
   .research-complete-actions {
@@ -1778,7 +1780,7 @@ body.test-only-distribution .readout {
   }
 
   .research-mail-box textarea {
-    height: 84px;
-    min-height: 84px;
+    height: 170px;
+    min-height: 170px;
   }
 }
