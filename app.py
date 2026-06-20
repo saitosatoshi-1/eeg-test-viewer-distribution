@@ -1193,7 +1193,6 @@ class RecordingStore:
                 self.user_files.append(path)
                 save_user_files(self.user_files)
             if existing:
-                self.invalidate_recording_cache(existing.record_id)
                 return existing
             self.refresh()
             rec = self.find_by_path(path)
@@ -1782,6 +1781,21 @@ def is_display_eeg_channel_name(name: str) -> bool:
     return normalize_label(name) in DISPLAY_EEG_LABELS
 
 
+def is_fallback_eeg_channel_name(name: str) -> bool:
+    clean = normalize_label(name)
+    key = channel_key(clean)
+    if not key or is_ecg_channel_name(clean):
+        return False
+    if clean in DISPLAY_EEG_LABELS:
+        return True
+    if "-" in clean:
+        left, right = [part.strip() for part in clean.split("-", 1)]
+        if left in DISPLAY_EEG_LABELS and right in DISPLAY_EEG_LABELS:
+            return True
+    aux_prefixes = ("DC", "TRIG", "MARK", "EVENT", "STATUS", "PHOTIC", "RESP", "PULSE", "SPO2", "ETCO2")
+    return not any(key.startswith(prefix) for prefix in aux_prefixes)
+
+
 def channel_group(ch_name: str) -> str:
     for group, names in CHANNEL_GROUPS.items():
         if ch_name in names:
@@ -2082,12 +2096,12 @@ def build_montage_traces(
             add(f"{ch}-Lap", values, group=channel_group(ch))
 
     if not traces:
-        warnings.append(f"Montage '{montage}' could not be derived from decoded channels; showing raw channels.")
+        warnings.append(f"Montage '{montage}' could not be derived from decoded channels; showing raw or pre-montaged EEG channels.")
         for ch in ch_names:
-            if is_display_eeg_channel_name(ch):
+            if is_fallback_eeg_channel_name(ch):
                 add(ch, data[index[ch]], group=channel_group(ch))
         if not traces:
-            warnings.append("No displayable scalp EEG channels were found after excluding non-EEG auxiliary channels.")
+            warnings.append("No displayable EEG channels were found after excluding non-EEG auxiliary channels.")
 
     if include_ecg:
         ecg_indices = ecg_channel_indices(ch_names)

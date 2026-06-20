@@ -1979,9 +1979,8 @@ async function showValidationCase(index) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: item.edfPath }),
     });
-    await loadRecordings(opened.id, { loadWindow: false });
-    state.recordingId = opened.id;
-    els.recordingSelect.value = opened.id;
+    applyOpenedRecording(opened);
+    await loadMetadata();
     state.start = 0;
     state.cursorTime = null;
     state.rangeStart = null;
@@ -2181,9 +2180,8 @@ async function showResearchCase(index) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: item.edfPath }),
     });
-    await loadRecordings(opened.id, { loadWindow: false });
-    state.recordingId = opened.id;
-    els.recordingSelect.value = opened.id;
+    applyOpenedRecording(opened);
+    await loadMetadata();
     state.start = 0;
     state.cursorTime = null;
     state.rangeStart = null;
@@ -3127,6 +3125,28 @@ function stepSensitivity(direction) {
   saveSettings();
   renderStatus();
   draw();
+}
+
+function applyOpenedRecording(opened) {
+  const rows = Array.isArray(opened?.recordings) ? opened.recordings : [];
+  const next = rows.length ? rows : [{ id: opened?.id, baseName: opened?.id, format: "EDF", eegPath: opened?.path || "", sizeMb: "" }];
+  const byId = new Map((state.recordings || []).map((rec) => [String(rec.id || ""), rec]));
+  for (const rec of next) {
+    if (rec?.id) byId.set(String(rec.id), rec);
+  }
+  state.recordings = Array.from(byId.values());
+  if (els.recordingSelect) {
+    els.recordingSelect.innerHTML = "";
+    for (const rec of state.recordings) {
+      const opt = document.createElement("option");
+      opt.value = rec.id;
+      opt.textContent = `${rec.baseName || rec.id} [${rec.format || "EEG"}]${rec.sizeMb !== undefined && rec.sizeMb !== "" ? ` (${rec.sizeMb} MB)` : ""}`;
+      opt.title = rec.eegPath || "";
+      els.recordingSelect.appendChild(opt);
+    }
+  }
+  state.recordingId = opened?.id || next[0]?.id || state.recordingId;
+  if (els.recordingSelect && state.recordingId) els.recordingSelect.value = state.recordingId;
 }
 
 async function loadRecordings(preferredId = "", options = {}) {
