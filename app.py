@@ -231,17 +231,21 @@ APP_ROOT = Path(__file__).resolve().parent
 
 
 def app_build_info() -> dict[str, str]:
+    info = {
+        "version": "",
+        "build": "",
+        "renderGitCommit": os.environ.get("RENDER_GIT_COMMIT", ""),
+        "renderServiceName": os.environ.get("RENDER_SERVICE_NAME", ""),
+        "renderServiceId": os.environ.get("RENDER_SERVICE_ID", ""),
+    }
     path = APP_ROOT / "build_info.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return {"version": "", "build": ""}
-    if not isinstance(payload, dict):
-        return {"version": "", "build": ""}
-    return {
-        "version": str(payload.get("version") or ""),
-        "build": str(payload.get("build") or ""),
-    }
+        return info
+    if isinstance(payload, dict):
+        info.update({key: str(value or "") for key, value in payload.items()})
+    return info
 
 
 def app_fingerprint() -> str:
@@ -3783,6 +3787,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         "scipyAvailable": package_available("scipy"),
                         "fdsDir": str(self.store.fds_dir),
                         "appRoot": str(APP_ROOT),
+                        "userDataDir": str(USER_DATA_DIR),
+                        "researchDir": str(RESEARCH_DIR),
+                        "privateDatasetDir": str(PRIVATE_DATASET_DIR),
+                        "allowedResearchWriteRoots": [str(root) for root in ALLOWED_RESEARCH_WRITE_ROOTS],
                         "buildInfo": app_build_info(),
                         "appFingerprint": app_fingerprint(),
                     }
@@ -3955,6 +3963,8 @@ def main() -> None:
     edf_dirs = [Path(path).expanduser().resolve() for path in args.edf_dir]
     ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
     RESEARCH_DATASET_DIR.mkdir(parents=True, exist_ok=True)
+    PRIVATE_DATASET_DIR.mkdir(parents=True, exist_ok=True)
+    SUBMITTED_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     store = RecordingStore(fds_dir, edf_dirs)
     store.refresh()
