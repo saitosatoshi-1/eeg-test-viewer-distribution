@@ -177,7 +177,7 @@
             <div class="research-setup-panel">
               <div class="research-setup-title">テスト設定</div>
               <div class="research-setup-message" id="researchSetupMessage" role="status" aria-live="polite"></div>
-              <label>GitHub dataset URL / local path<input id="researchSetupDatasetPathInput" placeholder="https://raw.githubusercontent.com/.../dataset.json" /></label>
+              <input id="researchSetupDatasetPathInput" type="hidden" value="private:gakkai_v1" />
               <label>回答者名<input id="researchSetupReaderNameInput" placeholder="氏名または識別名" /></label>
               <label>メール<input id="researchSetupReaderEmailInput" type="email" placeholder="メールアドレス" /></label>
               <label>所属<input id="researchSetupReaderAffiliationInput" placeholder="所属施設・部署" /></label>
@@ -189,16 +189,16 @@
               <label>月間EEG読影数<input id="researchMonthlyReadsInput" type="number" min="0" max="10000" step="1" placeholder="件/月" /></label>
               <label>てんかんセンター専従歴<select id="researchEpilepsyCenterTrainingSelect"><option value="">選択</option><option value="yes">あり</option><option value="no">なし</option></select></label>
               <label>専従期間<input id="researchEpilepsyCenterTrainingDurationInput" placeholder="例: 6か月、2年" /></label>
-              <label>テスト問題数<input id="researchSetupEpochCountInput" type="number" min="1" max="500" value="20" /></label>
+              <input id="researchSetupEpochCountInput" type="hidden" value="20" />
+              <div class="research-fixed-count" aria-label="テスト問題数">テスト問題数: <strong>20問</strong></div>
               <div class="research-privacy-note">入力いただいた個人情報は、論文化にあたり必要な連絡を行う場合にのみ使用します。研究計画終了後、速やかに破棄します。</div>
               <button class="export-button" id="researchSetupStartBtn" type="button">開始</button>
-              <button class="export-button secondary" id="researchSetupResetProfileBtn" type="button">初期化</button>
             </div>
           </div>
           <div class="research-complete-screen" id="researchCompleteScreen" hidden>
             <div class="research-complete-panel">
               <div class="research-complete-title" id="researchCompleteTitle">お疲れ様でした!</div>
-              <div class="research-complete-message" id="researchCompleteMessage">結果ファイルをDesktopに保存し、メールに添付して送信してください。JSONという専門的な形式ですが、このボタンで作成されるファイルをそのまま送れば大丈夫です。</div>
+              <div class="research-complete-message" id="researchCompleteMessage">結果はサーバーへ送信し、念のためJSONをダウンロードしてメールにも添付してください。</div>
               <div class="research-mail-box" id="researchMailBox">
                 <div class="research-mail-row"><span>宛先</span><strong>satoshi.saito@ncnp.go.jp</strong></div>
                 <textarea id="researchEmailBody" readonly>斉藤先生
@@ -212,9 +212,11 @@
 メールアドレス:</textarea>
                 <div class="research-saved-file" id="researchSavedCsvName">結果ファイルはまだ保存されていません。</div>
               </div>
-              <button class="export-button" id="researchCompleteExportCsvBtn" type="button">結果を送信</button>
-              <button class="export-button secondary" id="researchCompleteSaveDesktopBtn" type="button">結果ファイルをDesktopに保存</button>
-              <button class="export-button secondary" id="researchCopyEmailBtn" type="button">メール本文をコピー</button>
+              <div class="research-complete-actions">
+                <button class="export-button" id="researchCompleteExportCsvBtn" type="button">1. サーバーへ送信</button>
+                <button class="export-button secondary" id="researchCompleteSaveDesktopBtn" type="button">2. JSONをダウンロード</button>
+                <button class="export-button secondary" id="researchCopyEmailBtn" type="button">メール本文をコピー</button>
+              </div>
             </div>
           </div>
           <div class="research-tutorial" id="researchTutorial" hidden aria-hidden="true">

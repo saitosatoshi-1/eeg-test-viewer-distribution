@@ -5,6 +5,8 @@ const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
 const ANNOTATION_LIST_HEIGHT_KEY = "eegViewerAnnotationListHeight.v1";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
 const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
+const PUBLIC_TEST_QUESTION_COUNT = 20;
+const DEFAULT_PUBLIC_DATASET_PATH = "private:gakkai_v1";
 const RECENT_FILES_LIMIT = 8;
 const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
@@ -112,6 +114,9 @@ const state = {
   researchResponses: [],
   researchCaseIndex: 0,
   researchCaseStartedAt: "",
+  researchTestStartedAt: "",
+  researchTestStartedMs: 0,
+  researchTestCompletedAt: "",
   researchMontageTiming: null,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
@@ -317,6 +322,17 @@ async function fetchJson(url, options = {}) {
   return data;
 }
 
+async function fetchText(url, options = {}) {
+  const init = { ...options };
+  const headers = new Headers(init.headers || {});
+  if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
+  init.headers = headers;
+  const res = await fetch(url, init);
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || res.statusText);
+  return text;
+}
+
 function setStatus(message, options = {}) {
   if (!els.statusReadout) return;
   let textEl = els.statusReadout.querySelector(".status-text");
@@ -410,16 +426,24 @@ async function init() {
   await loadRecordings();
 }
 
+function fixedResearchQuestionCount() {
+  return PUBLIC_TEST_QUESTION_COUNT;
+}
+
+function applyFixedResearchQuestionCount() {
+  const value = String(fixedResearchQuestionCount());
+  if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = value;
+  if (els.researchEpochCountInput) els.researchEpochCountInput.value = value;
+  if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = value;
+}
+
 function applyLaunchParams() {
   const params = new URLSearchParams(window.location.search || "");
-  const dataset = params.get("dataset") || params.get("datasetUrl") || "";
+  const dataset = params.get("dataset") || params.get("datasetUrl") || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
   if (dataset && els.researchSetupDatasetPathInput) {
     els.researchSetupDatasetPathInput.value = dataset;
   }
-  const questions = params.get("questions") || params.get("count") || "";
-  if (questions && els.researchSetupEpochCountInput) {
-    els.researchSetupEpochCountInput.value = questions;
-  }
+  applyFixedResearchQuestionCount();
 }
 
 function scheduleLayoutRefresh() {
@@ -899,7 +923,6 @@ function validateResearchProfileForStart() {
     [els.researchClinicalNeurophysEegSpecialistSelect, "臨床神経生理 EEG専門医"],
     [els.researchMonthlyReadsInput, "月間EEG読影数"],
     [els.researchEpilepsyCenterTrainingSelect, "てんかんセンター専従歴"],
-    [els.researchSetupEpochCountInput, "テスト問題数"],
   ];
   if (els.researchEpilepsyCenterTrainingSelect?.value === "yes") {
     requiredFields.splice(requiredFields.length - 1, 0, [els.researchEpilepsyCenterTrainingDurationInput, "専従期間"]);
@@ -1191,6 +1214,37 @@ function updateResearchEmailBody() {
   if (els.researchEmailBody) els.researchEmailBody.value = researchEmailBodyText();
 }
 
+function markResearchTestStarted(at = new Date()) {
+  state.researchTestStartedAt = at.toISOString();
+  state.researchTestStartedMs = at.getTime();
+  state.researchTestCompletedAt = "";
+}
+
+function researchTestTimingPayload(completedAt = "") {
+  const startedAt = state.researchTestStartedAt || "";
+  const startMs = Number(state.researchTestStartedMs || (startedAt ? Date.parse(startedAt) : 0));
+  const endMs = completedAt ? Date.parse(completedAt) : Date.now();
+  const totalElapsedMs = startMs && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
+  return {
+    testStartedAt: startedAt,
+    testCompletedAt: completedAt || "",
+    totalElapsedMs,
+    totalElapsedSec: Math.round(totalElapsedMs / 100) / 10,
+  };
+}
+
+function downloadTextFile(filename, text, mime = "application/json") {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function showResearchCompletion() {
   if (!els.researchCompleteScreen) return;
   const validationMode = state.researchMode === "validation";
@@ -1200,14 +1254,17 @@ function showResearchCompletion() {
   if (els.researchCompleteMessage) {
     els.researchCompleteMessage.textContent = validationMode
       ? "結果ファイルをDesktopに保存してください。専門的な形式ですが、このボタンで作成されるファイルをそのまま送れば大丈夫です。"
-      : "結果を送信してください。ローカル配布で実施している場合は、Desktop保存もできます。";
+      : "結果はサーバーへ送信し、念のためJSONをダウンロードしてメールにも添付してください。";
   }
   if (els.researchMailBox) els.researchMailBox.hidden = validationMode;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validationMode;
   if (els.researchCompleteExportCsvBtn) {
-    els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation結果ファイルをDesktopに保存" : "結果を送信";
+    els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation結果ファイルをDesktopに保存" : "1. サーバーへ送信";
   }
-  if (els.researchCompleteSaveDesktopBtn) els.researchCompleteSaveDesktopBtn.hidden = validationMode;
+  if (els.researchCompleteSaveDesktopBtn) {
+    els.researchCompleteSaveDesktopBtn.hidden = validationMode;
+    if (!validationMode) els.researchCompleteSaveDesktopBtn.textContent = "2. JSONをダウンロード";
+  }
   if (!validationMode) updateResearchEmailBody();
   if (els.researchSavedCsvName) {
     els.researchSavedCsvName.textContent = "結果ファイルはまだ保存されていません。";
@@ -1351,19 +1408,15 @@ function syncResearchDesignControls(settings) {
   const sampleCount = researchConfiguredQuestionCount(settings);
   if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(sampleCount);
   if (els.researchEpochCountInput) els.researchEpochCountInput.value = String(sampleCount);
-  if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = String(sampleCount);
+  applyFixedResearchQuestionCount();
 }
 
-function researchConfiguredQuestionCount(settings = {}, session = null) {
-  const total = Number(settings.phase1TotalSampleCount || session?.requestedTotalCount || 0);
-  if (Number.isFinite(total) && total > 0) return Math.max(1, Math.min(500, total));
-  const legacyPerGroup = Number(settings.phase1SamplePerGroup || session?.samplePerGroup || 0);
-  if (Number.isFinite(legacyPerGroup) && legacyPerGroup > 0) return Math.max(1, Math.min(500, legacyPerGroup * 2));
-  return 20;
+function researchConfiguredQuestionCount(_settings = {}, _session = null) {
+  return fixedResearchQuestionCount();
 }
 
 function researchDesignSettings() {
-  const samplePerGroup = Math.max(1, Math.min(500, Number(els.researchDesignEpochCountInput?.value || els.researchSetupEpochCountInput?.value || els.researchEpochCountInput?.value || 20)));
+  const samplePerGroup = fixedResearchQuestionCount();
   return {
     phase1TotalSampleCount: samplePerGroup,
   };
@@ -1373,9 +1426,7 @@ async function saveResearchTestDesign(datasetPathOverride = "") {
   const datasetPath = datasetPathOverride || state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
   if (!datasetPath) return;
   const settings = researchDesignSettings();
-  if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(settings.phase1TotalSampleCount);
-  if (els.researchEpochCountInput) els.researchEpochCountInput.value = String(settings.phase1TotalSampleCount);
-  if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = String(settings.phase1TotalSampleCount);
+  applyFixedResearchQuestionCount();
   try {
     const data = await fetchJson("/api/research/dataset/item", {
       method: "POST",
@@ -1928,11 +1979,9 @@ async function cutCurrentResearchEpoch() {
 }
 
 async function saveResearchEpochCount() {
-  if (!state.researchDatasetPath || !els.researchEpochCountInput) return;
-  const value = Math.max(1, Math.min(500, Number(els.researchEpochCountInput.value || 20)));
-  els.researchEpochCountInput.value = String(value);
-  if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(value);
-  if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = String(value);
+  if (!state.researchDatasetPath) return;
+  const value = fixedResearchQuestionCount();
+  applyFixedResearchQuestionCount();
   try {
     const data = await fetchJson("/api/research/dataset/item", {
       method: "POST",
@@ -2121,17 +2170,18 @@ async function startResearchTest() {
   hideResearchCompletion();
   state.researchTutorialDismissed = false;
   state.researchSampleCompletedPhases = {};
+  state.researchTestStartedAt = "";
+  state.researchTestStartedMs = 0;
+  state.researchTestCompletedAt = "";
   hideResearchTutorial();
   const profile = researchProfile();
   const readerId = researchReaderDisplayId(profile);
   const phase = "1";
   const usualMontage = profile.usualMontage || activeMontageValue();
-  const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || "";
+  const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
   const iedsPresentPath = els.researchIedsPresentPathInput?.value.trim() || els.researchSetupIedsPresentPathInput?.value.trim() || "";
   const iedsAbsentPath = els.researchIedsAbsentPathInput?.value.trim() || els.researchSetupIedsAbsentPathInput?.value.trim() || "";
-  if (els.researchEpochCountInput && els.researchSetupEpochCountInput?.value) {
-    els.researchEpochCountInput.value = els.researchSetupEpochCountInput.value;
-  }
+  applyFixedResearchQuestionCount();
   if (els.researchReaderIdInput && readerId) els.researchReaderIdInput.value = readerId;
   if (els.montageSelect && usualMontage) {
     els.montageSelect.value = usualMontage;
@@ -2287,6 +2337,7 @@ async function saveResearchRating(rating) {
       state.researchSampleCompletedPhases[String(state.researchSession.phase || "")] = true;
       if (isResearchPracticeCase(item)) {
         const usualMontage = saveUsualResearchMontage(activeMontageValue());
+        markResearchTestStarted(new Date());
         showResearchToast("練習終了 · テスト開始");
       } else {
         showResearchToast("Sample shown");
@@ -2313,12 +2364,14 @@ async function saveResearchRating(rating) {
         startedAt: state.researchCaseStartedAt || answeredAt,
         answeredAt,
         elapsedMs,
+        ...researchTestTimingPayload(answeredAt),
         displayMode: "phase1_single",
         ...researchSpikeSelectionPayload(),
         ...researchMontageTimingPayload(),
       }),
     });
     state.researchSession = data.session;
+    state.researchTestCompletedAt = answeredAt;
     setResearchResponsesFromSession(data.session);
     state.lastResearchResponse = data.response;
     state.lastResearchResponseCaseIndex = state.researchCaseIndex;
@@ -2417,17 +2470,14 @@ async function exportResearchJson() {
   const profile = researchProfile();
   const readerId = researchReaderDisplayId(profile);
   try {
-    setStatus("結果ファイルをDesktopに保存中...", { busy: true });
+    setStatus("結果JSONをダウンロード中...", { busy: true });
     const jsonFilename = researchJsonFilename(readerId, profile);
-    const jsonResult = await fetchJson("/api/research/test/export-file", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datasetPath, readerId, filename: jsonFilename }),
-    });
+    const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId })}`);
+    downloadTextFile(jsonFilename, jsonText);
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `Desktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`;
+      els.researchSavedCsvName.textContent = `ダウンロードしました: ${jsonFilename}。メールに添付してください。`;
     }
-    setStatus(`結果ファイルをDesktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`);
+    setStatus(`結果JSONをダウンロードしました: ${jsonFilename}`);
   } catch (err) {
     setStatus(`Export failed: ${err.message}`, { error: true });
   }
@@ -2446,7 +2496,7 @@ async function submitResearchJson() {
     const result = await fetchJson("/api/research/test/submit-result", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datasetPath, readerId, filename: jsonFilename }),
+      body: JSON.stringify({ datasetPath, readerId, filename: jsonFilename, ...researchTestTimingPayload(state.researchTestCompletedAt) }),
     });
     const label = result.submissionId || result.filename || jsonFilename;
     if (els.researchSavedCsvName) {

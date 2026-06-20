@@ -104,6 +104,7 @@ MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_EEG_BYTES = 2 * 1024 * 1024 * 1024
 RESEARCH_GROUP_SCAN_MAX_DEPTH = 8
 RESEARCH_GROUP_SCAN_LIMIT = 2000
+PUBLIC_TEST_QUESTION_COUNT = 20
 ALLOWED_RESEARCH_WRITE_ROOTS = (
     RESEARCH_DATASET_DIR,
     PRIVATE_DATASET_DIR,
@@ -2888,6 +2889,8 @@ def stable_research_sample(rows: list[dict[str, Any]], limit: int, seed_parts: t
 
 
 def research_phase1_total_count(settings: dict[str, Any]) -> int:
+    if PUBLIC_MODE:
+        return PUBLIC_TEST_QUESTION_COUNT
     if "phase1TotalSampleCount" in settings:
         return max(1, int(float(settings.get("phase1TotalSampleCount") or RESEARCH_PHASE1_SAMPLE_TOTAL)))
     if "phase1SamplePerGroup" in settings:
@@ -3260,6 +3263,10 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
         "startedAt": payload.get("startedAt") or now,
         "answeredAt": payload.get("answeredAt") or now,
         "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
+        "testStartedAt": payload.get("testStartedAt") or "",
+        "testCompletedAt": payload.get("testCompletedAt") or payload.get("answeredAt") or now,
+        "totalElapsedMs": int(float(payload.get("totalElapsedMs") or 0)),
+        "totalElapsedSec": float(payload.get("totalElapsedSec") or 0),
         "displayMode": payload.get("displayMode") or "phase1_single",
         "usedMontage": payload.get("usedMontage") or "",
         "finalMontage": payload.get("finalMontage") or payload.get("usedMontage") or "",
@@ -3491,6 +3498,10 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
         "startedAt": row.get("startedAt", ""),
         "answeredAt": row.get("answeredAt", ""),
         "elapsedMs": row.get("elapsedMs", ""),
+        "testStartedAt": row.get("testStartedAt", ""),
+        "testCompletedAt": row.get("testCompletedAt", ""),
+        "totalElapsedMs": row.get("totalElapsedMs", ""),
+        "totalElapsedSec": row.get("totalElapsedSec", ""),
         "display": {
             "displayMode": row.get("displayMode", ""),
             "finalMontage": row.get("finalMontage") or row.get("usedMontage", ""),
@@ -3505,6 +3516,26 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
     }
 
 
+def research_reader_timing_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
+    starts = [str(row.get("testStartedAt") or "") for row in responses if str(row.get("testStartedAt") or "").strip()]
+    completions = [str(row.get("testCompletedAt") or row.get("answeredAt") or "") for row in responses if str(row.get("testCompletedAt") or row.get("answeredAt") or "").strip()]
+    elapsed_values = []
+    for row in responses:
+        try:
+            value = int(float(row.get("totalElapsedMs") or 0))
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            elapsed_values.append(value)
+    total_elapsed_ms = max(elapsed_values) if elapsed_values else 0
+    return {
+        "testStartedAt": min(starts) if starts else "",
+        "testCompletedAt": max(completions) if completions else "",
+        "totalElapsedMs": total_elapsed_ms,
+        "totalElapsedSec": round(total_elapsed_ms / 1000, 3) if total_elapsed_ms else 0,
+    }
+
+
 def research_reader_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(responses)
     correct_count = sum(1 for row in responses if row.get("correct") is True)
@@ -3516,6 +3547,7 @@ def research_reader_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
         "incorrect": incorrect_count,
         "unknown": unknown_count,
         "accuracy": round(correct_count / total, 4) if total else None,
+        "timing": research_reader_timing_summary(responses),
     }
 
 

@@ -801,7 +801,7 @@ dd {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   width: min(980px, calc(100% - 48px));
-  max-height: calc(100% - 32px);
+  max-height: calc(100% - 20px);
   overflow: auto;
   padding: 18px;
   border: 1px solid #c7d2df;
@@ -811,9 +811,19 @@ dd {
 }
 
 .research-complete-panel {
-  width: min(520px, calc(100% - 48px));
+  width: min(680px, calc(100% - 32px));
   grid-template-columns: 1fr;
+  align-content: center;
+  gap: 8px;
+  padding: 14px;
   text-align: center;
+}
+
+.research-setup-panel {
+  width: min(560px, calc(100% - 32px));
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 16px;
 }
 
 .research-setup-title,
@@ -825,7 +835,7 @@ dd {
 }
 
 .research-complete-title {
-  font-size: 24px;
+  font-size: 20px;
 }
 
 .research-setup-message,
@@ -886,8 +896,9 @@ dd {
 
 .research-mail-box textarea {
   width: 100%;
-  min-height: 118px;
-  resize: vertical;
+  height: 92px;
+  min-height: 92px;
+  resize: none;
   border: 1px solid #aeb8c5;
   border-radius: 6px;
   padding: 10px;
@@ -1657,4 +1668,45 @@ body.test-only-distribution .source-root-input {
 
 body.test-only-distribution .readout {
   min-width: 240px;
+}
+
+.research-fixed-count {
+  border: 1px solid #d7dde5;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  color: #263241;
+  font-size: 14px;
+}
+
+.research-fixed-count strong {
+  font-size: 16px;
+}
+
+.research-complete-actions {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.research-complete-panel .research-complete-actions button {
+  grid-column: auto;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+@media (max-width: 700px) {
+  .research-complete-panel {
+    width: min(520px, calc(100% - 20px));
+    padding: 12px;
+  }
+
+  .research-complete-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .research-mail-box textarea {
+    height: 84px;
+    min-height: 84px;
+  }
 }
