@@ -2581,8 +2581,8 @@ async function copyResearchEmailBody() {
     } else {
       throw new Error("Clipboard is unavailable");
     }
-    showResearchToast("メール本文をコピーできました");
-    setStatus("メール本文をコピーできました");
+    showResearchToast("メール例文をコピーできました");
+    setStatus("メール例文をコピーできました");
   } catch (err) {
     setStatus(`Copy failed: ${err.message}`, { error: true });
   }
