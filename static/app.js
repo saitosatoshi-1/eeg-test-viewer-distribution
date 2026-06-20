@@ -96,6 +96,7 @@ const state = {
   windowLoadInFlight: false,
   windowLoadPending: false,
   windowLoadPromise: null,
+  windowCache: new Map(),
   selectedScalogramIndex: 0,
   suppressNextClick: false,
   lastWaveWheelPageAt: 0,
@@ -1262,7 +1263,7 @@ function showResearchCompletion() {
   if (els.researchCompleteMessage) {
     els.researchCompleteMessage.textContent = validationMode
       ? "結果ファイルをDesktopに保存してください。専門的な形式ですが、このボタンで作成されるファイルをそのまま送れば大丈夫です。"
-      : "結果は自動でサーバーへ送信しました。念のためJSONをダウンロードし、メールにも添付して送ってください。";
+      : "JSONをダウンロードし、メールに添付して送ってください。";
   }
   if (els.researchMailBox) els.researchMailBox.hidden = validationMode;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validationMode;
@@ -1276,7 +1277,7 @@ function showResearchCompletion() {
   }
   if (!validationMode) updateResearchEmailBody();
   if (els.researchSavedCsvName) {
-    els.researchSavedCsvName.textContent = validationMode ? "結果ファイルはまだ保存されていません。" : "サーバーへ自動送信中です。JSONもダウンロードしてください。";
+    els.researchSavedCsvName.textContent = validationMode ? "結果ファイルはまだ保存されていません。" : "JSONはまだダウンロードされていません。";
   }
   hideResearchWaveProgress();
   if (validationMode) hideValidationWaveProgress();
@@ -1486,7 +1487,7 @@ async function completeResearchTest() {
     await submitResearchJson({ automatic: true });
   } catch (err) {
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `サーバー自動送信に失敗しました: ${err.message}。JSONをダウンロードしてメールに添付してください。`;
+      els.researchSavedCsvName.textContent = "JSONをダウンロードしてメールに添付してください。";
     }
     setStatus(`Result auto submit failed: ${err.message}`, { error: true });
   }
@@ -2527,7 +2528,7 @@ async function submitResearchJson(options = {}) {
   const profile = researchProfile();
   const readerId = researchReaderDisplayId(profile);
   try {
-    setStatus(options.automatic ? "結果をサーバーへ自動送信中..." : "結果を送信中...", { busy: true });
+    setStatus(options.automatic ? "テスト完了処理中..." : "結果を送信中...", { busy: true });
     const jsonFilename = researchJsonFilename(readerId, profile);
     const result = await fetchJson("/api/research/test/submit-result", {
       method: "POST",
@@ -2536,9 +2537,11 @@ async function submitResearchJson(options = {}) {
     });
     const label = result.submissionId || result.filename || jsonFilename;
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `サーバーへ送信しました: ${label}。念のためJSONをダウンロードしてメールに添付してください。`;
+      els.researchSavedCsvName.textContent = options.automatic
+        ? "JSONをダウンロードしてメールに添付してください。"
+        : `送信しました: ${label}`;
     }
-    setStatus(`結果をサーバーへ送信しました: ${label}`);
+    setStatus(options.automatic ? "テスト完了。JSONをダウンロードしてメールに添付してください。" : `結果を送信しました: ${label}`);
     return result;
   } catch (err) {
     setStatus(`Submit failed: ${err.message}`, { error: true });
@@ -3235,6 +3238,7 @@ function stepSensitivity(direction) {
 }
 
 function applyOpenedRecording(opened) {
+  state.windowCache.clear();
   const rows = Array.isArray(opened?.recordings) ? opened.recordings : [];
   const next = rows.length ? rows : [{ id: opened?.id, baseName: opened?.id, format: "EDF", eegPath: opened?.path || "", sizeMb: "" }];
   const byId = new Map((state.recordings || []).map((rec) => [String(rec.id || ""), rec]));
@@ -3331,6 +3335,43 @@ async function loadMetadata() {
   renderMetadata();
 }
 
+function windowCacheKey(params) {
+  return [
+    params.id,
+    Number(params.start || 0).toFixed(3),
+    Number(params.duration || 0).toFixed(3),
+    params.montage,
+    params.tc,
+    params.hf,
+    params.ac,
+    params.ecg,
+    params.ecgFilter,
+  ].join("|");
+}
+
+function rememberWindowCache(key, data) {
+  if (!key || !data) return;
+  state.windowCache.set(key, data);
+  while (state.windowCache.size > 24) {
+    const firstKey = state.windowCache.keys().next().value;
+    state.windowCache.delete(firstKey);
+  }
+}
+
+function applyWindowData(data, requestedMontage) {
+  state.windowData = data;
+  state.activeMontage = data.montage || requestedMontage;
+  state.allAnnotations = state.windowData.annotations || [];
+  state.annotations = visibleAnnotations();
+  state.start = state.windowData.start || 0;
+  state.scalogramData = null;
+  renderStatus();
+  updateWaveScrollbar();
+  renderWarnings();
+  renderAnnotations();
+  draw();
+}
+
 async function loadWindow() {
   if (!state.recordingId) return;
   if (state.windowLoadInFlight) {
@@ -3360,19 +3401,17 @@ async function loadWindow() {
           ecgFilter: els.ecgFilterToggle?.checked ? "1" : "0",
           topomap: "0",
         };
+        const cacheKey = windowCacheKey(params);
+        const cached = state.windowCache.get(cacheKey);
+        if (cached) {
+          applyWindowData(cached, requestedMontage);
+          setStatus("Ready");
+          return cached;
+        }
         const data = await fetchJson(`${endpoint}?${qs(params)}`);
         if (state.windowLoadPending) continue;
-        state.windowData = data;
-        state.activeMontage = data.montage || requestedMontage;
-        state.allAnnotations = state.windowData.annotations || [];
-        state.annotations = visibleAnnotations();
-        state.start = state.windowData.start || 0;
-        state.scalogramData = null;
-        renderStatus();
-        updateWaveScrollbar();
-        renderWarnings();
-        renderAnnotations();
-        draw();
+        rememberWindowCache(cacheKey, data);
+        applyWindowData(data, requestedMontage);
       } while (state.windowLoadPending);
     } catch (err) {
       if (!state.windowLoadPending) setStatus(`Waveform failed: ${err.message}`, { error: true });

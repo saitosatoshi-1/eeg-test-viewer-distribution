@@ -1700,6 +1700,13 @@ body.test-only-distribution .research-inline-progress {
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
 }
 
+body.test-only-distribution .primary-progress {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
 body.test-only-distribution .source-root-input {
   width: min(360px, 42vw);
 }

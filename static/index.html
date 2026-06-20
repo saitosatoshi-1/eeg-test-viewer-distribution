@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260620-public-test-flow4" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260620-public-test-flow5" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -126,6 +126,7 @@
           ECG filter
         </label>
         <div class="readout" id="statusReadout">Loading...</div>
+        <span class="research-inline-progress primary-progress" id="researchInlineProgress" hidden></span>
         </div>
         <div class="topbar-column topbar-secondary">
         <div class="research-mode-bar" id="researchModeBar">
@@ -159,7 +160,6 @@
             <button class="tool-button research-clear-path-button" id="researchClearIedsPresentPathBtn" type="button" title="Clear IEDs-present path" hidden>×</button>
             <input class="research-input source-root-input" id="researchIedsAbsentPathInput" placeholder="IEDs absent EDF/folder" title="IEDs-absent EDF file or folder" hidden />
             <button class="tool-button research-clear-path-button" id="researchClearIedsAbsentPathBtn" type="button" title="Clear IEDs-absent path" hidden>×</button>
-            <span class="research-inline-progress" id="researchInlineProgress" hidden></span>
           </div>
           <div class="research-toast hidden" id="researchToast"><span id="researchToastText"></span><button type="button" id="researchUndoBtn">前の問題をやりなおす</button></div>        </div>
         </div>
@@ -198,7 +198,7 @@
           <div class="research-complete-screen" id="researchCompleteScreen" hidden>
             <div class="research-complete-panel">
               <div class="research-complete-title" id="researchCompleteTitle">お疲れ様でした!</div>
-              <div class="research-complete-message" id="researchCompleteMessage">結果は自動でサーバーへ送信しました。念のためJSONをダウンロードし、メールにも添付して送ってください。</div>
+              <div class="research-complete-message" id="researchCompleteMessage">JSONをダウンロードし、メールに添付して送ってください。</div>
               <div class="research-mail-box" id="researchMailBox">
                 <div class="research-mail-row"><span>宛先</span><strong>satoshi.saito@ncnp.go.jp</strong></div>
                 <textarea id="researchEmailBody" readonly>斉藤先生
@@ -329,6 +329,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=20260620-public-test-flow4"></script>
+    <script src="/static/app.js?v=20260620-public-test-flow5"></script>
   </body>
 </html>
