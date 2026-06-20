@@ -3752,6 +3752,43 @@ def save_research_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def submitted_result_inventory() -> dict[str, Any]:
+    SUBMITTED_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for path in sorted(SUBMITTED_RESULTS_DIR.rglob("*.json")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(SUBMITTED_RESULTS_DIR).as_posix()
+        stat = path.stat()
+        rows.append({
+            "submissionId": rel,
+            "datasetId": path.parent.name,
+            "filename": path.name,
+            "sizeBytes": stat.st_size,
+            "updatedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        })
+    rows.sort(key=lambda row: row.get("updatedAt", ""), reverse=True)
+    return {
+        "ok": True,
+        "submittedResultsDir": str(SUBMITTED_RESULTS_DIR),
+        "resultCount": len(rows),
+        "results": rows,
+    }
+
+
+def submitted_result_text(submission_id: str) -> str:
+    text = str(submission_id or "").strip().lstrip("/")
+    if not text:
+        raise ValueError("submissionId is required.")
+    target = (SUBMITTED_RESULTS_DIR / text).resolve()
+    root = SUBMITTED_RESULTS_DIR.resolve()
+    if not path_is_relative_to(target, root) or target.suffix.lower() != ".json":
+        raise ValueError("Invalid submissionId.")
+    if not target.exists() or not target.is_file():
+        raise FileNotFoundError(f"Submitted result not found: {text}")
+    return target.read_text(encoding="utf-8")
+
+
 def required(qs: dict[str, list[str]], name: str) -> str:
     value = qs.get(name, [""])[0]
     if value == "":
@@ -4025,6 +4062,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 )
             if path == "/api/admin/private-dataset/list":
                 return self.send_json(private_dataset_inventory())
+            if path == "/api/admin/submitted-results/list":
+                return self.send_json(submitted_result_inventory())
+            if path == "/api/admin/submitted-results/item":
+                return self.send_text(submitted_result_text(required(qs, "id")), "application/json; charset=utf-8")
             if path == "/api/recordings":
                 if qs.get("refresh", ["0"])[0] == "1":
                     self.store.refresh()
