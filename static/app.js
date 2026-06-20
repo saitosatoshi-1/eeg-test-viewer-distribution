@@ -1003,6 +1003,17 @@ function researchReaderDisplayId(profile = researchProfile()) {
   );
 }
 
+function researchRunReaderId(baseReaderId = researchReaderDisplayId()) {
+  const base = safeResultFilenamePart(baseReaderId, "reader");
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  const random = Math.random().toString(36).slice(2, 8);
+  return `${base}_${stamp}_${random}`;
+}
+
+function activeResearchReaderId(profile = researchProfile()) {
+  return state.researchSession?.readerId || researchReaderDisplayId(profile);
+}
+
 function researchJsonFilename(readerId, profile = researchProfile()) {
   const readerName = safeResultFilenamePart(profile.readerName || profile.doctorName || readerId, "reader");
   return `${readerName}.json`;
@@ -2208,7 +2219,11 @@ async function startResearchTest() {
   state.researchResultAutoSubmitted = false;
   hideResearchTutorial();
   const profile = researchProfile();
-  const readerId = researchReaderDisplayId(profile);
+  const baseReaderId = researchReaderDisplayId(profile);
+  const readerId = researchRunReaderId(baseReaderId);
+  profile.baseReaderId = baseReaderId;
+  profile.testRunReaderId = readerId;
+  profile.testRunStartedAt = new Date().toISOString();
   const phase = "1";
   const usualMontage = profile.usualMontage || activeMontageValue();
   const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
@@ -2242,6 +2257,9 @@ async function startResearchTest() {
     }
     await saveResearchTestDesign(datasetPath);
     const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId, phase })}`);
+    if (!Array.isArray(session.cases) || !session.cases.length) {
+      throw new Error("No test cases are available for this run. Check the selected dataset or upload status.");
+    }
     state.researchSession = session;
     setResearchResponsesFromSession(session);
     state.researchDatasetPath = session.datasetPath || datasetPath;
@@ -2500,7 +2518,7 @@ async function exportResearchJson() {
   if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
   saveResearchProfile();
   const profile = researchProfile();
-  const readerId = researchReaderDisplayId(profile);
+  const readerId = activeResearchReaderId(profile);
   try {
     setStatus("結果JSONをダウンロード中...", { busy: true });
     const jsonFilename = researchJsonFilename(readerId, profile);
@@ -2526,7 +2544,7 @@ async function submitResearchJson(options = {}) {
   }
   saveResearchProfile();
   const profile = researchProfile();
-  const readerId = researchReaderDisplayId(profile);
+  const readerId = activeResearchReaderId(profile);
   try {
     setStatus(options.automatic ? "テスト完了処理中..." : "結果を送信中...", { busy: true });
     const jsonFilename = researchJsonFilename(readerId, profile);
