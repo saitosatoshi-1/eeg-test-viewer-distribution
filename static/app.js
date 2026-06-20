@@ -1014,8 +1014,8 @@ function activeResearchReaderId(profile = researchProfile()) {
   return state.researchSession?.readerId || researchReaderDisplayId(profile);
 }
 
-function researchJsonFilename(readerId, profile = researchProfile()) {
-  const readerName = safeResultFilenamePart(profile.readerName || profile.doctorName || readerId, "reader");
+function researchJsonFilename(_readerId, profile = researchProfile()) {
+  const readerName = safeResultFilenamePart(profile.readerName || profile.doctorName || "", "EEG_test_results");
   return `${readerName}.json`;
 }
 

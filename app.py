@@ -2881,12 +2881,10 @@ def research_reader_id(value: Any) -> str:
 
 
 def research_reader_json_filename(reader_id: str | None, profile: dict[str, Any] | None = None) -> str:
-    if not reader_id:
-        return "EEG_test_results.json"
     profile = profile if isinstance(profile, dict) else {}
     name = safe_filename_part(
-        str(profile.get("readerName") or profile.get("doctorName") or reader_id),
-        "reader",
+        str(profile.get("readerName") or profile.get("doctorName") or ""),
+        "EEG_test_results",
     )
     return f"{name}.json"
 
