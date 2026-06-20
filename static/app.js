@@ -1546,7 +1546,16 @@ function hideResearchInlineProgress() {
   }
 }
 
+function updateResearchUndoButton() {
+  if (!els.researchUndoBtn) return;
+  const hasUndoTarget = state.researchMode === "validation"
+    ? activeValidationResponses().length > 0
+    : activeResearchResponses().length > 0;
+  els.researchUndoBtn.disabled = !hasUndoTarget;
+}
+
 function renderResearchInlineProgress(snapshot = null) {
+  updateResearchUndoButton();
   if (els.researchCompleteScreen?.hidden === false && (state.researchMode === "test" || state.researchMode === "validation")) {
     const el = state.researchMode === "validation" ? els.validationInlineProgress : els.researchInlineProgress;
     hideResearchInlineProgress();
@@ -1690,6 +1699,7 @@ function researchRatingLabel(rating) {
 
 function setResearchResponsesFromSession(session = state.researchSession) {
   state.researchResponses = Array.isArray(session?.responses) ? [...session.responses] : [];
+  updateResearchUndoButton();
 }
 
 function activeResearchResponses() {
@@ -2461,7 +2471,7 @@ async function saveResearchRating(rating) {
 function showResearchToast(message, options = {}) {
   if (!els.researchToast || !els.researchToastText) return;
   els.researchToastText.textContent = message;
-  if (els.researchUndoBtn) els.researchUndoBtn.hidden = !options.undo;
+  updateResearchUndoButton();
   els.researchToast.classList.remove("hidden");
 }
 

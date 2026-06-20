@@ -1300,6 +1300,24 @@ dd {
   padding: 3px 8px;
 }
 
+.research-top-undo {
+  min-width: 132px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #9aa9bb;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.research-top-undo:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .research-tutorial {
   position: absolute;
   left: 18px;
@@ -1702,9 +1720,18 @@ body.test-only-distribution .research-inline-progress {
 
 body.test-only-distribution .primary-progress {
   flex: 0 0 auto;
-  margin-left: 6px;
+  margin-left: 2px;
   white-space: nowrap;
   box-shadow: none;
+}
+
+body.test-only-distribution .research-top-undo {
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+
+body.test-only-distribution .research-wave-progress {
+  display: none !important;
 }
 
 body.test-only-distribution .source-root-input {

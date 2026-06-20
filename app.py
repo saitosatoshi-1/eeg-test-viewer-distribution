@@ -3609,6 +3609,18 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
     montage_usage = row.get("montageUsage")
     if not isinstance(montage_usage, list) or not montage_usage:
         montage_usage = row.get("montageTimeline") if isinstance(row.get("montageTimeline"), list) else []
+    compact_montage_usage = [
+        {
+            "order": int(item.get("order") or item.get("index") or index),
+            "montage": str(item.get("montage") or "").strip(),
+            "montageLabel": RESEARCH_MONTAGE_LABELS.get(str(item.get("montage") or "").strip(), str(item.get("montage") or "").strip()),
+            "startSec": item.get("startSec", 0),
+            "endSec": item.get("endSec", 0),
+            "durationSec": item.get("durationSec", 0),
+        }
+        for index, item in enumerate(montage_usage, start=1)
+        if isinstance(item, dict) and str(item.get("montage") or "").strip()
+    ]
     test_date = row.get("testDate") or iso_date_part(row.get("testStartedAt") or row.get("answeredAt"))
     time_constant = row.get("timeConstant") or row.get("tc", "")
     high_cut_filter = row.get("highCutFilter") or row.get("hf", "")
@@ -3652,16 +3664,14 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
             **answer_display_settings,
         },
         "answerDisplaySettings": answer_display_settings,
-        "montageDurationsSec": row.get("montageDurationsSec", {}),
-        "montageDurationSummary": row.get("montageDurationSummary", ""),
-        "montageOrder": row.get("montageOrder", []),
-        "montageSequence": row.get("montageSequence", []),
-        "montageUsage": montage_usage,
-        "montageUsageSummary": row.get("montageUsageSummary", ""),
-        "montageTimeline": row.get("montageTimeline", []),
-        "montageTimelineSummary": row.get("montageTimelineSummary", ""),
-        "montageSwitches": row.get("montageSwitches", []),
-        "montageSwitchSummary": row.get("montageSwitchSummary", ""),
+        "montageLog": {
+            "initialMontage": row.get("initialMontage", ""),
+            "initialMontageLabel": RESEARCH_MONTAGE_LABELS.get(str(row.get("initialMontage") or ""), str(row.get("initialMontage") or "")),
+            "finalMontage": row.get("finalMontage") or row.get("usedMontage", ""),
+            "finalMontageLabel": RESEARCH_MONTAGE_LABELS.get(str(row.get("finalMontage") or row.get("usedMontage") or ""), str(row.get("finalMontage") or row.get("usedMontage") or "")),
+            "totalSecByMontage": row.get("montageDurationsSec", {}),
+            "usage": compact_montage_usage,
+        },
     }
 
 

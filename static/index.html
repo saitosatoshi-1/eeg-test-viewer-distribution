@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260620-public-test-flow6" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260620-public-test-flow7" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -85,6 +85,8 @@
             <option value="30">30s</option>
           </select>
         </label>
+        <button class="tool-button research-top-undo" id="researchUndoBtn" type="button" disabled title="前の回答を取り消して、その問題に戻ります">前の問題をやり直す</button>
+        <span class="research-inline-progress primary-progress" id="researchInlineProgress" hidden></span>
         <label class="nk-select paper-select">
           <select id="paperSelect">
             <option>15</option>
@@ -126,7 +128,6 @@
           ECG filter
         </label>
         <div class="readout" id="statusReadout">Loading...</div>
-        <span class="research-inline-progress primary-progress" id="researchInlineProgress" hidden></span>
         </div>
         <div class="topbar-column topbar-secondary">
         <div class="research-mode-bar" id="researchModeBar">
@@ -161,7 +162,7 @@
             <input class="research-input source-root-input" id="researchIedsAbsentPathInput" placeholder="IEDs absent EDF/folder" title="IEDs-absent EDF file or folder" hidden />
             <button class="tool-button research-clear-path-button" id="researchClearIedsAbsentPathBtn" type="button" title="Clear IEDs-absent path" hidden>×</button>
           </div>
-          <div class="research-toast hidden" id="researchToast"><span id="researchToastText"></span><button type="button" id="researchUndoBtn">前の問題をやりなおす</button></div>        </div>
+          <div class="research-toast hidden" id="researchToast"><span id="researchToastText"></span></div>        </div>
         </div>
       </header>
 
@@ -329,6 +330,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=20260620-public-test-flow6"></script>
+    <script src="/static/app.js?v=20260620-public-test-flow7"></script>
   </body>
 </html>
