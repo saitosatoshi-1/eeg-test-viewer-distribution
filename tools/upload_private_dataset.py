@@ -21,7 +21,13 @@ def main() -> None:
 
     base = args.viewer_url.rstrip("/")
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
-    opener.open(f"{base}/?access={urllib.parse.quote(args.access_code)}").read()
+    login_body = urllib.parse.urlencode({"password": args.access_code, "next": "/"}).encode("utf-8")
+    login_request = urllib.request.Request(
+        f"{base}/login",
+        data=login_body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    opener.open(login_request).read()
     html = opener.open(f"{base}/").read().decode("utf-8")
     match = re.search(r'name="eeg-viewer-token" content="([^"]+)"', html)
     if not match:

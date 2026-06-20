@@ -27,6 +27,7 @@ import webbrowser
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html import escape as html_escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -128,6 +129,7 @@ MUTATING_PATHS = {
     "/api/research/validation/response/undo",
     "/api/research/validation/export-file",
 }
+LOGIN_PATH = "/login"
 
 SCALP_ORDER = [
     "Fp1",
@@ -3633,7 +3635,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
             "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
         )
 
@@ -3655,18 +3657,55 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_auth_required(self, message: str = "Access link is required.") -> None:
+    def safe_return_path(self, value: str = "") -> str:
+        raw = str(value or self.path or "/")
+        parsed = urlparse(raw)
+        if parsed.scheme or parsed.netloc:
+            return "/"
+        if parsed.path == LOGIN_PATH:
+            return "/"
+        path = parsed.path or "/"
+        query = f"?{parsed.query}" if parsed.query else ""
+        return f"{path}{query}"
+
+    def login_page_html(self, message: str = "") -> str:
+        next_path = self.safe_return_path()
+        error_html = f"<p class='error'>{message}</p>" if message else ""
+        return f"""<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EEG Test Viewer Login</title>
+<style>
+  :root {{ color-scheme: light; }}
+  body {{ margin:0; min-height:100vh; display:grid; place-items:center; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f4f6f8; color:#162033; }}
+  main {{ width:min(420px, calc(100vw - 32px)); background:#fff; border:1px solid #d7dde5; border-radius:8px; padding:28px; box-shadow:0 12px 32px rgba(20,31,47,.10); }}
+  h1 {{ margin:0 0 8px; font-size:24px; }}
+  p {{ margin:0 0 18px; color:#4d5a6a; line-height:1.5; }}
+  label {{ display:block; font-size:13px; font-weight:700; color:#263241; margin-bottom:8px; }}
+  input {{ width:100%; box-sizing:border-box; border:1px solid #b8c2cf; border-radius:6px; padding:12px; font-size:18px; }}
+  button {{ width:100%; margin-top:16px; border:0; border-radius:6px; padding:12px 14px; background:#174ea6; color:white; font-weight:700; font-size:16px; cursor:pointer; }}
+  button:hover {{ background:#123f86; }}
+  .error {{ color:#b42318; background:#fff1f0; border:1px solid #ffccc7; border-radius:6px; padding:10px 12px; }}
+</style>
+<main>
+  <h1>EEG Test Viewer</h1>
+  <p>テストを開始するにはパスワードを入力してください。</p>
+  {error_html}
+  <form method="post" action="{LOGIN_PATH}">
+    <input type="hidden" name="next" value="{html_escape(next_path)}">
+    <label for="password">パスワード</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+    <button type="submit">開始する</button>
+  </form>
+</main>
+"""
+
+    def send_auth_required(self, message: str = "Password is required.") -> None:
         if self.path.startswith("/api/"):
             body = json.dumps({"error": message}, ensure_ascii=False).encode("utf-8")
             content_type = "application/json; charset=utf-8"
         else:
-            body = (
-                "<!doctype html><meta charset='utf-8'><title>EEG Test Viewer</title>"
-                "<body style='font-family:system-ui,sans-serif;margin:32px'>"
-                "<h1>EEG Test Viewer</h1>"
-                "<p>このテストには専用リンクが必要です。</p>"
-                "</body>"
-            ).encode("utf-8")
+            body = self.login_page_html("" if message == "Password is required." else message).encode("utf-8")
             content_type = "text/html; charset=utf-8"
         self.send_response(HTTPStatus.UNAUTHORIZED)
         self.send_header("Content-Type", content_type)
@@ -3684,9 +3723,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         return ""
 
     def access_code_from_query(self) -> str:
-        parsed = urlparse(self.path)
-        qs = parse_qs(parsed.query)
-        return qs.get("access", [""])[0] or qs.get("code", [""])[0]
+        return ""
 
     def redirect_without_access_code(self) -> None:
         parsed = urlparse(self.path)
@@ -3719,10 +3756,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         if not ACCESS_PASSWORD:
             if ALLOW_UNPROTECTED_PUBLIC:
                 return True, ""
-            return False, "Access link is required."
+            return False, "Password is required."
         header = self.headers.get("Authorization", "")
         if not header.startswith("Basic "):
-            return False, "Access link is required."
+            return False, "Password is required."
         try:
             decoded = base64.b64decode(header.removeprefix("Basic ").strip(), validate=True).decode("utf-8")
         except Exception:
@@ -3743,6 +3780,49 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             self.redirect_without_access_code()
             return True
         return False
+
+    def send_login_success(self, next_path: str) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", self.safe_return_path(next_path))
+        self.send_header("Set-Cookie", "eeg_viewer_access=ok; Path=/; HttpOnly; SameSite=Lax")
+        self.send_security_headers()
+        self.end_headers()
+
+    def handle_login_post(self) -> bool:
+        parsed = urlparse(self.path)
+        if parsed.path != LOGIN_PATH:
+            return False
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length > 8192:
+            return self.send_auth_required("Request is too large.") or True
+        ctype = self.headers.get("Content-Type", "")
+        raw = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
+        if "application/json" in ctype:
+            try:
+                payload = json.loads(raw or "{}")
+            except Exception:
+                payload = {}
+            password = str(payload.get("password") or payload.get("accessCode") or "")
+            next_path = self.safe_return_path(str(payload.get("next") or "/"))
+        else:
+            form = parse_qs(raw, keep_blank_values=True)
+            password = form.get("password", [""])[0]
+            next_path = self.safe_return_path(form.get("next", ["/"])[0])
+        expected = ACCESS_CODE or ACCESS_PASSWORD
+        if expected and secrets.compare_digest(password, expected):
+            self.send_login_success(next_path)
+            return True
+        body = self.login_page_html("パスワードが違います。").encode("utf-8")
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_security_headers()
+        self.end_headers()
+        self.wfile.write(body)
+        return True
 
     def local_request_allowed(self) -> tuple[bool, str]:
         if PUBLIC_MODE:
@@ -3865,6 +3945,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             if self.handle_access_link():
+                return
+            if self.handle_login_post():
                 return
             allowed, reason = self.access_allowed()
             if not allowed:

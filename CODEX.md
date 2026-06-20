@@ -8,7 +8,7 @@ Use this project root:
 
 Current shared test link:
 
-`https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1`
+`https://eeg-test-viewer.onrender.com/?dataset=private%3Agakkai_v1`
 
 This repo should remain web-test focused. Do not add back Windows/macOS launcher bundles, installer scripts, packaged distribution folders, or private EDF data unless explicitly requested.
 

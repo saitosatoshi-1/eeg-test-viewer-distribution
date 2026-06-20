@@ -5,10 +5,10 @@
 ## 共同研究者用リンク
 
 ```text
-https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1
+https://eeg-test-viewer.onrender.com/?dataset=private%3Agakkai_v1
 ```
 
-共有時は必ず `access=ncnp` を付けます。アクセス成功後、サーバーはCookieを設定し、URLからアクセスコードを外します。
+共有時は `access=ncnp` を付けません。リンクを開くとパスワード入力画面が表示され、`ncnp` 入力後にテスト画面へ進みます。
 
 ## 残しているもの
 

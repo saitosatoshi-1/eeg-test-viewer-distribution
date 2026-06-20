@@ -22,11 +22,11 @@ For Docker/Render, `EEG_VIEWER_DATA_DIR` is `/data`.
 3. Render will use `render.yaml` and `Dockerfile`.
 4. Confirm `EEG_VIEWER_ACCESS_CODE=ncnp` is set in Render environment variables.
 5. Keep the persistent disk mounted at `/data`.
-6. Share a test link that includes `access=ncnp` and, optionally, a `dataset` URL.
+6. Share a test link without the password in the URL. Users enter `ncnp` on the password screen.
 
 ## Access Control
 
-Public mode requires an access-code link unless explicitly disabled. No username is required.
+Public mode requires the password screen unless explicitly disabled. No username is required.
 
 Required production environment variables:
 
@@ -40,16 +40,18 @@ If `EEG_VIEWER_ACCESS_CODE` is missing in public mode, the app returns `401 Unau
 Share links in this form:
 
 ```text
-https://<your-viewer-host>/?access=ncnp
+https://<your-viewer-host>/
 ```
+
+The viewer will show a password screen. Enter `ncnp`.
 
 To start with a dataset already filled in:
 
 ```text
-https://<your-viewer-host>/?access=ncnp&dataset=https%3A%2F%2Fraw.githubusercontent.com%2F<owner>%2F<repo>%2Fmain%2Fdatasets%2Fv1%2Fdataset.json
+https://<your-viewer-host>/?dataset=https%3A%2F%2Fraw.githubusercontent.com%2F<owner>%2F<repo>%2Fmain%2Fdatasets%2Fv1%2Fdataset.json
 ```
 
-After a valid access link is opened, the app stores an HTTP-only cookie and redirects to a clean URL without the access code.
+After a valid password is submitted, the app stores an HTTP-only cookie and redirects to the requested URL.
 
 Only use `EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC=1` for a temporary private test network. Do not set it on a shared deployment.
 
@@ -91,7 +93,7 @@ python tools/upload_private_dataset.py \
 Then share this link:
 
 ```text
-https://<your-viewer-host>/?access=ncnp&dataset=private:gakkai_v1
+https://<your-viewer-host>/?dataset=private:gakkai_v1
 ```
 
 This keeps EDF files off GitHub. They are stored only in the Render persistent disk at `/data`.
@@ -112,6 +114,6 @@ http://127.0.0.1:8765/
 ## Important Notes
 
 - Only public, fully anonymized EEG data should be referenced from public GitHub URLs.
-- The access-code link protects the viewer URL.
+- The password screen protects the viewer URL. Do not put the password in shared URLs.
 - The per-page token also protects API calls after login.
 - For a large study, rotate the access code periodically or add per-user accounts.

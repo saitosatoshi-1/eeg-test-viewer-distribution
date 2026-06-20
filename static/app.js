@@ -4,6 +4,7 @@ const RECENT_FILES_KEY = "eegViewerRecentFiles.v1";
 const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
 const ANNOTATION_LIST_HEIGHT_KEY = "eegViewerAnnotationListHeight.v1";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
+const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
 const RECENT_FILES_LIMIT = 8;
 const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
@@ -353,7 +354,18 @@ function setOpenFileBusy(isBusy) {
   if (els.recentFileSelect) els.recentFileSelect.disabled = isBusy;
 }
 
+function clearSharedBrowserResearchState() {
+  if (!PUBLIC_WEB_MODE) return;
+  try {
+    localStorage.removeItem(RESEARCH_PROFILE_KEY);
+    localStorage.removeItem(RECENT_FILES_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 async function init() {
+  clearSharedBrowserResearchState();
   bindControls();
   bindPanelResizers();
   try {
@@ -932,6 +944,7 @@ function researchProfile() {
 }
 
 function storedResearchProfile() {
+  if (PUBLIC_WEB_MODE) return {};
   try {
     const profile = JSON.parse(localStorage.getItem(RESEARCH_PROFILE_KEY) || "{}");
     return profile && typeof profile === "object" ? profile : {};
@@ -967,6 +980,10 @@ function researchJsonFilename(readerId, profile = researchProfile()) {
 }
 
 function saveResearchProfile() {
+  if (PUBLIC_WEB_MODE) {
+    clearSharedBrowserResearchState();
+    return;
+  }
   try {
     localStorage.setItem(RESEARCH_PROFILE_KEY, JSON.stringify(researchProfile()));
   } catch {
@@ -977,11 +994,13 @@ function saveResearchProfile() {
 function saveUsualResearchMontage(montage) {
   const value = String(montage || "").trim() || activeMontageValue();
   if (!value) return "";
-  try {
-    const profile = { ...storedResearchProfile(), ...researchProfile(), usualMontage: value };
-    localStorage.setItem(RESEARCH_PROFILE_KEY, JSON.stringify(profile));
-  } catch {
-    // Ignore private-mode storage failures.
+  if (!PUBLIC_WEB_MODE) {
+    try {
+      const profile = { ...storedResearchProfile(), ...researchProfile(), usualMontage: value };
+      localStorage.setItem(RESEARCH_PROFILE_KEY, JSON.stringify(profile));
+    } catch {
+      // Ignore private-mode storage failures.
+    }
   }
   if (els.researchSetupMontageSelect) els.researchSetupMontageSelect.value = value;
   return value;

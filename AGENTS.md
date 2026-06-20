@@ -18,7 +18,7 @@ Render URL:
 
 Shared test link:
 
-`https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1`
+`https://eeg-test-viewer.onrender.com/?dataset=private%3Agakkai_v1`
 
 ## Current Scope
 
@@ -36,7 +36,7 @@ Do not reintroduce old Windows/macOS distribution bundles, launchers, installer 
 
 - Keep access-code protection enabled for shared Render use.
 - Do not set `EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC=1` on the shared Render service.
-- Shared links should include `?access=ncnp`.
+- Shared links should not include the password. Users enter `ncnp` on the password screen.
 - Do not commit Temple University-derived or otherwise redistribution-restricted EDF files.
 - Do not commit private EDF datasets to GitHub. Use the private dataset upload workflow.
 

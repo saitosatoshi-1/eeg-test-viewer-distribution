@@ -4,13 +4,13 @@ Web-based EEG reading test viewer for research use. This repository is now maint
 
 ## Current Test Link
 
-Use the access-code link when sharing the viewer:
+Use the password-protected link when sharing the viewer:
 
 ```text
-https://eeg-test-viewer.onrender.com/?access=ncnp&dataset=private%3Agakkai_v1
+https://eeg-test-viewer.onrender.com/?dataset=private%3Agakkai_v1
 ```
 
-The `access=ncnp` parameter sets an HTTP-only access cookie and is then removed from the visible URL. Do not publish an unprotected public link.
+The link shows a password screen. Enter `ncnp` to set an HTTP-only access cookie. Do not place the password in the URL.
 
 ## What This Repo Contains
 
