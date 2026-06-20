@@ -2242,6 +2242,17 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def iso_date_part(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        normalized = text.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized).date().isoformat()
+    except Exception:
+        return text[:10]
+
+
 def iso_to_epoch_ms(value: Any) -> int:
     text = str(value or "").strip()
     if not text:
@@ -3302,14 +3313,24 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
         montage_order = [str(row.get("montage") or "").strip() for row in montage_sequence if str(row.get("montage") or "").strip()]
     displayed_montages = [str(item) for item in payload.get("displayedMontages", []) if str(item or "").strip()] if isinstance(payload.get("displayedMontages"), list) else list(montage_durations.keys())
     now = utc_now_iso()
+    started_at = str(payload.get("startedAt") or now).strip()
+    answered_at = str(payload.get("answeredAt") or now).strip()
     test_started_at = str(payload.get("testStartedAt") or "").strip()
-    test_completed_at = str(payload.get("testCompletedAt") or payload.get("answeredAt") or now).strip()
+    test_completed_at = str(payload.get("testCompletedAt") or answered_at or now).strip()
     total_elapsed_ms = int(float(payload.get("totalElapsedMs") or 0))
     if total_elapsed_ms <= 0:
         total_elapsed_ms = elapsed_ms_between(test_started_at, test_completed_at)
     total_elapsed_sec = float(payload.get("totalElapsedSec") or 0)
     if total_elapsed_sec <= 0 and total_elapsed_ms > 0:
         total_elapsed_sec = round(total_elapsed_ms / 1000, 3)
+    tutorial_completed_at = str(payload.get("tutorialCompletedAt") or test_started_at).strip()
+    tutorial_to_test_completed_ms = int(float(payload.get("tutorialToTestCompletedMs") or 0))
+    if tutorial_to_test_completed_ms <= 0:
+        tutorial_to_test_completed_ms = elapsed_ms_between(tutorial_completed_at, test_completed_at)
+    tutorial_to_test_completed_sec = float(payload.get("tutorialToTestCompletedSec") or 0)
+    if tutorial_to_test_completed_sec <= 0 and tutorial_to_test_completed_ms > 0:
+        tutorial_to_test_completed_sec = round(tutorial_to_test_completed_ms / 1000, 3)
+    test_date = iso_date_part(test_started_at or answered_at or now)
     response_id = str(uuid.uuid4())
     for row in responses:
         if row.get("caseId") == case_id and str(row.get("phase")) == phase and not row.get("superseded") and not row.get("undoneAt"):
@@ -3328,11 +3349,15 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
         "phase": phase,
         "answerOrder": answer_order,
         "rating": rating,
-        "startedAt": payload.get("startedAt") or now,
-        "answeredAt": payload.get("answeredAt") or now,
+        "testDate": test_date,
+        "startedAt": started_at,
+        "answeredAt": answered_at,
         "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
         "testStartedAt": test_started_at,
         "testCompletedAt": test_completed_at,
+        "tutorialCompletedAt": tutorial_completed_at,
+        "tutorialToTestCompletedMs": tutorial_to_test_completed_ms,
+        "tutorialToTestCompletedSec": tutorial_to_test_completed_sec,
         "totalElapsedMs": total_elapsed_ms,
         "totalElapsedSec": total_elapsed_sec,
         "displayMode": payload.get("displayMode") or "phase1_single",
@@ -3355,8 +3380,13 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
         "montageTimelineSummary": payload.get("montageTimelineSummary") or "",
         "montageSwitchSummary": payload.get("montageSwitchSummary") or "",
         "sensitivity": payload.get("sensitivity") or "",
+        "sensitivityUvPerMm": payload.get("sensitivityUvPerMm") or "",
         "tc": payload.get("tc") or "",
+        "timeConstant": payload.get("timeConstant") or payload.get("tc") or "",
+        "timeConstantLabel": payload.get("timeConstantLabel") or "",
         "hf": payload.get("hf") or "",
+        "highCutFilter": payload.get("highCutFilter") or payload.get("hf") or "",
+        "highCutFilterLabel": payload.get("highCutFilterLabel") or "",
         "timebaseSec": payload.get("timebaseSec") or "",
         "spikeMontage": payload.get("spikeMontage") or "",
         "readerProfile": reader_profile,
@@ -3579,6 +3609,20 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
     montage_usage = row.get("montageUsage")
     if not isinstance(montage_usage, list) or not montage_usage:
         montage_usage = row.get("montageTimeline") if isinstance(row.get("montageTimeline"), list) else []
+    test_date = row.get("testDate") or iso_date_part(row.get("testStartedAt") or row.get("answeredAt"))
+    time_constant = row.get("timeConstant") or row.get("tc", "")
+    high_cut_filter = row.get("highCutFilter") or row.get("hf", "")
+    answer_display_settings = {
+        "sensitivity": row.get("sensitivity", ""),
+        "sensitivityUvPerMm": row.get("sensitivityUvPerMm", ""),
+        "tc": row.get("tc", ""),
+        "timeConstant": time_constant,
+        "timeConstantLabel": row.get("timeConstantLabel", ""),
+        "hf": row.get("hf", ""),
+        "highCutFilter": high_cut_filter,
+        "highCutFilterLabel": row.get("highCutFilterLabel", ""),
+        "timebaseSec": row.get("timebaseSec", ""),
+    }
     return {
         "answerOrder": row.get("answerOrder", ""),
         "caseId": row.get("caseId", ""),
@@ -3589,11 +3633,15 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
         "referenceLabel": case.get("referenceLabel", "") if case else "",
         "rating": rating,
         "correct": correct,
+        "testDate": test_date,
         "startedAt": row.get("startedAt", ""),
         "answeredAt": row.get("answeredAt", ""),
         "elapsedMs": row.get("elapsedMs", ""),
         "testStartedAt": row.get("testStartedAt", ""),
         "testCompletedAt": row.get("testCompletedAt", ""),
+        "tutorialCompletedAt": row.get("tutorialCompletedAt", "") or row.get("testStartedAt", ""),
+        "tutorialToTestCompletedMs": row.get("tutorialToTestCompletedMs", "") or row.get("totalElapsedMs", ""),
+        "tutorialToTestCompletedSec": row.get("tutorialToTestCompletedSec", "") or row.get("totalElapsedSec", ""),
         "totalElapsedMs": row.get("totalElapsedMs", ""),
         "totalElapsedSec": row.get("totalElapsedSec", ""),
         "display": {
@@ -3601,22 +3649,30 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
             "initialMontage": row.get("initialMontage", ""),
             "finalMontage": row.get("finalMontage") or row.get("usedMontage", ""),
             "displayedMontages": row.get("displayedMontages", []),
-            "sensitivity": row.get("sensitivity", ""),
-            "tc": row.get("tc", ""),
-            "hf": row.get("hf", ""),
-            "timebaseSec": row.get("timebaseSec", ""),
+            **answer_display_settings,
         },
+        "answerDisplaySettings": answer_display_settings,
+        "montageDurationsSec": row.get("montageDurationsSec", {}),
+        "montageDurationSummary": row.get("montageDurationSummary", ""),
+        "montageOrder": row.get("montageOrder", []),
+        "montageSequence": row.get("montageSequence", []),
         "montageUsage": montage_usage,
         "montageUsageSummary": row.get("montageUsageSummary", ""),
+        "montageTimeline": row.get("montageTimeline", []),
+        "montageTimelineSummary": row.get("montageTimelineSummary", ""),
+        "montageSwitches": row.get("montageSwitches", []),
+        "montageSwitchSummary": row.get("montageSwitchSummary", ""),
     }
 
 
 def research_reader_timing_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
     starts = [str(row.get("testStartedAt") or "") for row in responses if str(row.get("testStartedAt") or "").strip()]
     completions = [str(row.get("testCompletedAt") or row.get("answeredAt") or "") for row in responses if str(row.get("testCompletedAt") or row.get("answeredAt") or "").strip()]
+    tutorial_completions = [str(row.get("tutorialCompletedAt") or "") for row in responses if str(row.get("tutorialCompletedAt") or "").strip()]
     if not starts:
         starts = [str(row.get("startedAt") or "") for row in responses if str(row.get("startedAt") or "").strip()]
     elapsed_values = []
+    tutorial_elapsed_values = []
     for row in responses:
         try:
             value = int(float(row.get("totalElapsedMs") or 0))
@@ -3626,10 +3682,26 @@ def research_reader_timing_summary(responses: list[dict[str, Any]]) -> dict[str,
             value = elapsed_ms_between(row.get("testStartedAt") or row.get("startedAt"), row.get("testCompletedAt") or row.get("answeredAt"))
         if value > 0:
             elapsed_values.append(value)
+        try:
+            tutorial_value = int(float(row.get("tutorialToTestCompletedMs") or 0))
+        except (TypeError, ValueError):
+            tutorial_value = 0
+        if tutorial_value <= 0:
+            tutorial_value = elapsed_ms_between(row.get("tutorialCompletedAt") or row.get("testStartedAt") or row.get("startedAt"), row.get("testCompletedAt") or row.get("answeredAt"))
+        if tutorial_value > 0:
+            tutorial_elapsed_values.append(tutorial_value)
     total_elapsed_ms = max(elapsed_values) if elapsed_values else elapsed_ms_between(min(starts) if starts else "", max(completions) if completions else "")
+    tutorial_elapsed_ms = max(tutorial_elapsed_values) if tutorial_elapsed_values else total_elapsed_ms
+    test_started_at = min(starts) if starts else ""
+    test_completed_at = max(completions) if completions else ""
+    tutorial_completed_at = min(tutorial_completions) if tutorial_completions else test_started_at
     return {
-        "testStartedAt": min(starts) if starts else "",
-        "testCompletedAt": max(completions) if completions else "",
+        "testDate": iso_date_part(test_started_at or test_completed_at),
+        "testStartedAt": test_started_at,
+        "testCompletedAt": test_completed_at,
+        "tutorialCompletedAt": tutorial_completed_at,
+        "tutorialToTestCompletedMs": tutorial_elapsed_ms,
+        "tutorialToTestCompletedSec": round(tutorial_elapsed_ms / 1000, 3) if tutorial_elapsed_ms else 0,
         "totalElapsedMs": total_elapsed_ms,
         "totalElapsedSec": round(total_elapsed_ms / 1000, 3) if total_elapsed_ms else 0,
     }

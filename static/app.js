@@ -560,15 +560,24 @@ function filterControlKey() {
   ].join("|");
 }
 
+function preferredWindowMontages(activeMontage = activeMontageValue()) {
+  return [...new Set([activeMontage, ...DEFAULT_MULTI_MONTAGES].filter(Boolean))].slice(0, 4);
+}
+
 async function handleMontageControlChange(source = "change") {
   if (!els.montageSelect) return;
   state.lastMontageSelectValue = els.montageSelect.value || "";
   state.activeMontage = state.lastMontageSelectValue || state.activeMontage;
   updateResearchMontageTiming();
   renderStatus();
+  if (syncActiveMontageData({ requireExact: true })) {
+    draw();
+    setStatus("Ready");
+    return;
+  }
   setStatus(`Loading montage ${state.activeMontage} / ${labelForMontage()}...`, { busy: true, progress: 70 });
   await loadWindow();
-  forceViewerRepaint();
+  draw();
 }
 
 async function handleDurationControlChange(source = "change") {
@@ -1248,6 +1257,9 @@ function researchTestTimingPayload(completedAt = "") {
   return {
     testStartedAt: startedAt,
     testCompletedAt: completedAt || "",
+    tutorialCompletedAt: startedAt,
+    tutorialToTestCompletedMs: totalElapsedMs,
+    tutorialToTestCompletedSec: Math.round(totalElapsedMs / 100) / 10,
     totalElapsedMs,
     totalElapsedSec: Math.round(totalElapsedMs / 100) / 10,
   };
@@ -2357,8 +2369,13 @@ function researchSpikeSelectionPayload() {
     usedMontage: activeMontageValue(),
     finalMontage: activeMontageValue(),
     sensitivity: els.sensitivitySelect?.value || "",
+    sensitivityUvPerMm: sensitivityValue(),
     tc: els.tcSelect?.value || "",
+    timeConstant: els.tcSelect?.value || "",
+    timeConstantLabel: tcText(),
     hf: els.hfSelect?.value || "",
+    highCutFilter: els.hfSelect?.value || "",
+    highCutFilterLabel: hfText(),
     timebaseSec: Number(els.durationSelect?.value || visibleDuration() || 0),
     spikeTime: Number.isFinite(onset) ? onset : "",
     spikeSampleIndex: Number.isFinite(Number(context.sampleIndex)) ? Number(context.sampleIndex) : "",
@@ -2942,16 +2959,19 @@ function setViewMode(mode, montageCount = state.multiMontageCount) {
   loadWindow();
 }
 
-function syncActiveMontageData() {
+function syncActiveMontageData(options = {}) {
   const data = state.windowData;
-  if (!data || !Array.isArray(data.montageViews)) return;
+  if (!data || !Array.isArray(data.montageViews)) return false;
   const active = activeMontageValue();
-  const view = data.montageViews.find((item) => item.montage === active) || data.montageViews[0];
-  if (!view) return;
+  const exact = data.montageViews.find((item) => item.montage === active);
+  if (options.requireExact && !exact) return false;
+  const view = exact || data.montageViews[0];
+  if (!view) return false;
   data.montage = view.montage;
   data.traces = view.traces || [];
   state.activeMontage = view.montage;
   if (els.montageSelect.value !== view.montage) els.montageSelect.value = view.montage;
+  return true;
 }
 
 function setActiveMontage(montage, options = {}) {
@@ -3359,6 +3379,7 @@ function windowCacheKey(params) {
     Number(params.start || 0).toFixed(3),
     Number(params.duration || 0).toFixed(3),
     params.montage,
+    params.montages || "",
     params.tc,
     params.hf,
     params.ac,
@@ -3411,7 +3432,7 @@ async function loadWindow() {
           start: state.start,
           duration: requestedDuration,
           montage: requestedMontage,
-          montages: "",
+          montages: preferredWindowMontages(requestedMontage).join(","),
           tc: els.tcSelect.value,
           hf: els.hfSelect.value,
           ac: els.acSelect.value,
