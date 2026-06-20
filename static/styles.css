@@ -1643,8 +1643,10 @@ body.test-only-distribution #recentFileSelect,
 body.test-only-distribution .recent-file-select,
 body.test-only-distribution .top-file-panel,
 body.test-only-distribution [data-research-section="mode"],
+body.test-only-distribution [data-research-section="dataset"],
 body.test-only-distribution [data-research-section="cut"],
-body.test-only-distribution [data-research-section="validation"] {
+body.test-only-distribution [data-research-section="validation"],
+body.test-only-distribution [data-research-section="output"] {
   display: none !important;
 }
 
