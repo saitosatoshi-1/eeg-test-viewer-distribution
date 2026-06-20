@@ -125,6 +125,7 @@ ALLOWED_RESEARCH_WRITE_ROOTS = (
     Path.home() / "Downloads",
 )
 RESEARCH_RESPONSE_LOCK = threading.RLock()
+RESEARCH_SESSION_TOKEN_TTL_SEC = 60 * 60 * 24
 TOKEN_EXEMPT_GET_PATHS = {"/api/health"}
 MUTATING_PATHS = {
     "/api/open-file",
@@ -2987,6 +2988,9 @@ def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[d
         "readerProfile": reader_profile or {},
         "responses": responses,
     }
+    cookie_hash = next((str(row.get("accessCookieHash") or "") for row in responses if row.get("accessCookieHash")), "")
+    if cookie_hash:
+        payload["accessCookieHash"] = cookie_hash
     json_write(research_response_path(dataset_dir, reader_id), payload)
     output_dir = research_output_dir(dataset_dir, output_path)
     if output_dir is not None:
@@ -2995,6 +2999,50 @@ def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[d
 
 def active_research_responses(responses: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row for row in responses if not row.get("superseded") and not row.get("undoneAt")]
+
+
+def research_response_cookie_hash(dataset_dir: Path, reader_id: str) -> str:
+    payload = json_read(research_response_path(dataset_dir, reader_id), {})
+    if isinstance(payload, dict):
+        value = str(payload.get("accessCookieHash") or "")
+        if value:
+            return value
+        for row in payload.get("responses") or []:
+            if isinstance(row, dict) and row.get("accessCookieHash"):
+                return str(row.get("accessCookieHash") or "")
+    return ""
+
+
+def research_session_signature(dataset_path: str, reader_id: str, phase: str, cookie_hash: str, issued_at: str) -> str:
+    secret = f"{SERVER_TOKEN}|{ACCESS_CODE or ACCESS_PASSWORD}".encode("utf-8")
+    message = f"{dataset_path}|{reader_id}|{phase}|{cookie_hash}|{issued_at}".encode("utf-8")
+    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+
+
+def make_research_session_token(dataset_path: str, reader_id: str, phase: str, cookie_hash: str) -> str:
+    issued_at = str(int(time.time()))
+    signature = research_session_signature(dataset_path, reader_id, phase, cookie_hash, issued_at)
+    return f"{issued_at}.{signature}"
+
+
+def verify_research_session_token(payload: dict[str, Any], dataset_path: str, reader_id: str, phase: str) -> None:
+    if not PUBLIC_MODE:
+        return
+    cookie_hash = str(payload.get("accessCookieHash") or "")
+    token = str(payload.get("sessionToken") or payload.get("researchSessionToken") or "")
+    issued_at, sep, signature = token.partition(".")
+    if not (cookie_hash and issued_at and sep and signature):
+        raise PermissionError("Research session token is required.")
+    try:
+        issued = int(issued_at)
+    except ValueError as exc:
+        raise PermissionError("Invalid research session token.") from exc
+    now = int(time.time())
+    if issued > now + 60 or now - issued > RESEARCH_SESSION_TOKEN_TTL_SEC:
+        raise PermissionError("Research session token expired.")
+    expected = research_session_signature(dataset_path, reader_id, phase, cookie_hash, issued_at)
+    if not secrets.compare_digest(signature, expected):
+        raise PermissionError("Invalid research session token.")
 
 
 def active_response_map(responses: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
@@ -3163,8 +3211,14 @@ def research_phase_cases(dataset: dict[str, Any], reader_id: str, phase: str) ->
 
 def research_session(payload: dict[str, Any]) -> dict[str, Any]:
     dataset = load_research_dataset(payload.get("datasetPath") or payload.get("dataset"))
+    dataset_dir = research_dataset_path(dataset.get("datasetPath"))
+    dataset_path = str(dataset_dir)
     reader_id = research_reader_id(payload.get("readerId"))
     phase = "1"
+    access_cookie_hash = str(payload.get("accessCookieHash") or "")
+    existing_cookie_hash = research_response_cookie_hash(dataset_dir, reader_id)
+    if PUBLIC_MODE and existing_cookie_hash and access_cookie_hash and not secrets.compare_digest(existing_cookie_hash, access_cookie_hash):
+        raise PermissionError("This readerId is already linked to another browser session.")
     cases, responses, active = research_phase_cases(dataset, reader_id, phase)
     all_cases = research_phase_case_pool(dataset, reader_id, phase, active)
     active_rows = list(active.values())
@@ -3172,11 +3226,12 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
     requested_total = research_phase1_total_count(settings)
     return {
-        "datasetPath": dataset.get("datasetPath"),
+        "datasetPath": dataset_path,
         "datasetId": dataset.get("datasetId"),
         "name": dataset.get("name"),
         "readerId": reader_id,
         "phase": phase,
+        "sessionToken": make_research_session_token(dataset_path, reader_id, phase, access_cookie_hash) if PUBLIC_MODE and access_cookie_hash else "",
         "cases": cases,
         "responses": active_rows,
         "answeredCount": sum(1 for row in non_sample_cases if active.get((str(row.get("caseId")), phase))),
@@ -3390,6 +3445,7 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     dataset = load_research_dataset(str(dataset_dir))
     reader_id = research_reader_id(payload.get("readerId"))
     phase = "1"
+    verify_research_session_token(payload, str(dataset_dir), reader_id, phase)
     case_id = str(payload.get("caseId") or "")
     raw_rating = str(payload.get("rating") or "")
     rating = RESEARCH_RATING_ALIASES.get(raw_rating.strip().lower(), raw_rating)
@@ -3513,6 +3569,7 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         "highCutFilterLabel": payload.get("highCutFilterLabel") or "",
         "timebaseSec": payload.get("timebaseSec") or "",
         "spikeMontage": payload.get("spikeMontage") or "",
+        "accessCookieHash": str(payload.get("accessCookieHash") or ""),
         "readerProfile": reader_profile,
         "superseded": False,
         "undoneAt": "",
@@ -3520,7 +3577,12 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     }
     responses.append(response)
     save_research_responses(dataset_dir, reader_id, responses, payload.get("outputPath"), reader_profile)
-    session = research_session({"datasetPath": str(dataset_dir), "readerId": reader_id, "phase": phase})
+    session = research_session({
+        "datasetPath": str(dataset_dir),
+        "readerId": reader_id,
+        "phase": phase,
+        "accessCookieHash": str(payload.get("accessCookieHash") or ""),
+    })
     return {"response": response, "session": session}
 
 
@@ -3532,6 +3594,7 @@ def undo_research_response(payload: dict[str, Any]) -> dict[str, Any]:
 def undo_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
     reader_id = research_reader_id(payload.get("readerId"))
+    verify_research_session_token(payload, str(dataset_dir), reader_id, "1")
     response_id = str(payload.get("responseId") or "")
     responses = load_research_responses(dataset_dir, reader_id)
     candidates = [row for row in responses if not row.get("superseded") and not row.get("undoneAt")]
@@ -3544,7 +3607,12 @@ def undo_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("No active response to undo.")
     target["undoneAt"] = utc_now_iso()
     save_research_responses(dataset_dir, reader_id, responses, payload.get("outputPath"))
-    return {"undone": target, "session": research_session({"datasetPath": str(dataset_dir), "readerId": reader_id, "phase": target.get("phase", "1")})}
+    return {"undone": target, "session": research_session({
+        "datasetPath": str(dataset_dir),
+        "readerId": reader_id,
+        "phase": target.get("phase", "1"),
+        "accessCookieHash": str(payload.get("accessCookieHash") or ""),
+    })}
 
 
 def research_rating_correct(rating: str, label_group: str) -> bool | str:
@@ -3863,9 +3931,11 @@ def research_reader_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def export_research_responses_json(dataset_dir: Path, reader_id: str | None = None) -> str:
+def export_research_responses_json(dataset_dir: Path, reader_id: str | None = None, auth_payload: dict[str, Any] | None = None) -> str:
     if PUBLIC_MODE and not str(reader_id or "").strip():
         raise ValueError("readerId is required for public result export.")
+    if PUBLIC_MODE and reader_id:
+        verify_research_session_token(auth_payload or {}, str(dataset_dir), research_reader_id(reader_id), "1")
     dataset = load_research_dataset(str(dataset_dir))
     reader_ids = [research_reader_id(reader_id)] if reader_id else [p.stem for p in (dataset_dir / "responses").glob("*.json")]
     case_by_id = {str(row.get("caseId", "")): row for row in research_case_rows(dataset)}
@@ -3905,7 +3975,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
 def save_research_responses_json_to_desktop(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
     reader_id = str(payload.get("readerId") or "").strip() or None
-    json_text = export_research_responses_json(dataset_dir, reader_id)
+    json_text = export_research_responses_json(dataset_dir, reader_id, payload)
     filename = str(payload.get("filename") or "").strip()
     if not filename:
         profile = {}
@@ -3945,7 +4015,7 @@ def save_research_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
     reader_id = str(payload.get("readerId") or "").strip() or None
     if PUBLIC_MODE and not reader_id:
         raise ValueError("readerId is required for public result submission.")
-    json_text = export_research_responses_json(dataset_dir, reader_id)
+    json_text = export_research_responses_json(dataset_dir, reader_id, payload)
     filename = str(payload.get("filename") or "").strip()
     if not filename:
         profile = {}
@@ -4134,6 +4204,12 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             return False
         expected = self.access_cookie_signature(timestamp, nonce)
         return secrets.compare_digest(signature, expected)
+
+    def access_cookie_hash(self) -> str:
+        raw = self.cookie_value(ACCESS_COOKIE_NAME)
+        if not raw:
+            return ""
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def send_access_cookie_header(self) -> None:
         value = self.make_access_cookie_value()
@@ -4365,11 +4441,15 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
                     "readerId": qs.get("readerId", ["reader"])[0],
                     "phase": qs.get("phase", ["1"])[0],
+                    "accessCookieHash": self.access_cookie_hash(),
                 }))
             if path == "/api/research/test/export.json":
                 dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
                 reader = qs.get("readerId", [""])[0] or None
-                return self.send_text(export_research_responses_json(dataset_dir, reader), "application/json; charset=utf-8")
+                return self.send_text(export_research_responses_json(dataset_dir, reader, {
+                    "sessionToken": qs.get("sessionToken", [""])[0],
+                    "accessCookieHash": self.access_cookie_hash(),
+                }), "application/json; charset=utf-8")
             if path == "/api/research/validation/session":
                 return self.send_json(validation_session({
                     "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
@@ -4410,6 +4490,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             if length > max_body:
                 return self.send_json({"error": "Request body is too large."}, status=413)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            payload.setdefault("accessCookieHash", self.access_cookie_hash())
             if parsed.path == "/api/open-file":
                 return self.send_json(self.store.add_path(normalize_path_input(payload.get("path", ""))))
             if parsed.path in {"/api/export-file", "/api/save-desktop"}:

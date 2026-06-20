@@ -2440,6 +2440,7 @@ async function saveResearchRating(rating) {
         readerProfile: researchProfile(),
         phase: state.researchSession.phase,
         caseId: item.caseId,
+        sessionToken: state.researchSession.sessionToken || "",
         eventTime: item.eventTime ?? "",
         epochStart: item.epochStart ?? "",
         durationSec: item.durationSec ?? "",
@@ -2498,6 +2499,7 @@ async function undoResearchResponse() {
         readerId: state.researchSession.readerId,
         outputPath: researchProfile().outputPath,
         responseId: state.lastResearchResponse.responseId,
+        sessionToken: state.researchSession.sessionToken || "",
       }),
     });
     state.researchSession = data.session;
@@ -2557,7 +2559,7 @@ async function exportResearchJson() {
   try {
     setStatus("結果JSONをダウンロード中...", { busy: true });
     const jsonFilename = researchJsonFilename(readerId, profile);
-    const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId })}`);
+    const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
     downloadTextFile(jsonFilename, jsonText);
     if (els.researchSavedCsvName) {
       els.researchSavedCsvName.textContent = `ダウンロードしました: ${jsonFilename}。メールに添付してください。`;
@@ -2586,7 +2588,7 @@ async function submitResearchJson(options = {}) {
     const result = await fetchJson("/api/research/test/submit-result", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datasetPath, readerId, filename: jsonFilename, ...researchTestTimingPayload(state.researchTestCompletedAt) }),
+      body: JSON.stringify({ datasetPath, readerId, filename: jsonFilename, sessionToken: state.researchSession?.sessionToken || "", ...researchTestTimingPayload(state.researchTestCompletedAt) }),
     });
     const label = result.submissionId || result.filename || jsonFilename;
     if (els.researchSavedCsvName) {
