@@ -2495,6 +2495,35 @@ def upload_private_dataset(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def private_dataset_inventory() -> dict[str, Any]:
+    datasets = []
+    PRIVATE_DATASET_DIR.mkdir(parents=True, exist_ok=True)
+    for dataset_dir in sorted([p for p in PRIVATE_DATASET_DIR.iterdir() if p.is_dir() and not p.name.startswith(".")]):
+        dataset_file = dataset_dir / "dataset.json"
+        dataset = json_read(dataset_file, {}) if dataset_file.exists() else {}
+        cases = dataset.get("cases") if isinstance(dataset.get("cases"), list) else []
+        edf_files = sorted({*dataset_dir.rglob("*.edf"), *dataset_dir.rglob("*.EDF")})
+        datasets.append({
+            "datasetId": dataset.get("datasetId") or dataset_dir.name,
+            "name": dataset.get("name") or dataset_dir.name,
+            "privatePath": f"private:{dataset_dir.name}",
+            "serverPath": str(dataset_dir),
+            "datasetJsonExists": dataset_file.exists(),
+            "caseCount": len(cases),
+            "edfFileCount": len(edf_files),
+            "epilepsyCount": sum(1 for row in cases if row.get("labelGroup") == "epileptiform"),
+            "noEpilepsyCount": sum(1 for row in cases if row.get("labelGroup") == "non_epileptiform"),
+            "totalBytes": sum(path.stat().st_size for path in edf_files if path.exists()),
+            "updatedAt": datetime.fromtimestamp(dataset_dir.stat().st_mtime, timezone.utc).isoformat(),
+        })
+    return {
+        "ok": True,
+        "privateDatasetDir": str(PRIVATE_DATASET_DIR),
+        "datasetCount": len(datasets),
+        "datasets": datasets,
+    }
+
+
 def resolve_remote_case_url(dataset_url: str, value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -3994,6 +4023,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         "appFingerprint": app_fingerprint(),
                     }
                 )
+            if path == "/api/admin/private-dataset/list":
+                return self.send_json(private_dataset_inventory())
             if path == "/api/recordings":
                 if qs.get("refresh", ["0"])[0] == "1":
                     self.store.refresh()
