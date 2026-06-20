@@ -2223,12 +2223,45 @@ RESEARCH_RATING_ALIASES = {
     "てんかん性異常あり": RESEARCH_RATING_POSITIVE,
 }
 RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse", "c3c4", "laplacian"]
+RESEARCH_MONTAGE_LABELS = {
+    "longitudinal": "縦双極誘導",
+    "a1a2": "耳朶参照基準2",
+    "conventional": "耳朶参照基準1",
+    "conventional_average": "平均参照基準1",
+    "average": "平均参照基準2",
+    "cz": "Cz参照基準",
+    "transverse": "横双極誘導",
+    "c3c4": "C3/C4参照基準",
+    "laplacian": "SD参照基準",
+}
 RESEARCH_PHASE1_SAMPLE_TOTAL = 20
 RESEARCH_PHASE1_SAMPLE_PER_GROUP = 20
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def iso_to_epoch_ms(value: Any) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        normalized = text.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except Exception:
+        return 0
+
+
+def elapsed_ms_between(start_value: Any, end_value: Any) -> int:
+    start_ms = iso_to_epoch_ms(start_value)
+    end_ms = iso_to_epoch_ms(end_value)
+    if start_ms and end_ms and end_ms >= start_ms:
+        return end_ms - start_ms
+    return 0
 
 
 def json_read(path: Path, default: Any) -> Any:
@@ -3242,6 +3275,14 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
         montage_order = [str(row.get("montage") or "").strip() for row in montage_sequence if str(row.get("montage") or "").strip()]
     displayed_montages = [str(item) for item in payload.get("displayedMontages", []) if str(item or "").strip()] if isinstance(payload.get("displayedMontages"), list) else list(montage_durations.keys())
     now = utc_now_iso()
+    test_started_at = str(payload.get("testStartedAt") or "").strip()
+    test_completed_at = str(payload.get("testCompletedAt") or payload.get("answeredAt") or now).strip()
+    total_elapsed_ms = int(float(payload.get("totalElapsedMs") or 0))
+    if total_elapsed_ms <= 0:
+        total_elapsed_ms = elapsed_ms_between(test_started_at, test_completed_at)
+    total_elapsed_sec = float(payload.get("totalElapsedSec") or 0)
+    if total_elapsed_sec <= 0 and total_elapsed_ms > 0:
+        total_elapsed_sec = round(total_elapsed_ms / 1000, 3)
     response_id = str(uuid.uuid4())
     for row in responses:
         if row.get("caseId") == case_id and str(row.get("phase")) == phase and not row.get("superseded") and not row.get("undoneAt"):
@@ -3263,11 +3304,12 @@ def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
         "startedAt": payload.get("startedAt") or now,
         "answeredAt": payload.get("answeredAt") or now,
         "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
-        "testStartedAt": payload.get("testStartedAt") or "",
-        "testCompletedAt": payload.get("testCompletedAt") or payload.get("answeredAt") or now,
-        "totalElapsedMs": int(float(payload.get("totalElapsedMs") or 0)),
-        "totalElapsedSec": float(payload.get("totalElapsedSec") or 0),
+        "testStartedAt": test_started_at,
+        "testCompletedAt": test_completed_at,
+        "totalElapsedMs": total_elapsed_ms,
+        "totalElapsedSec": total_elapsed_sec,
         "displayMode": payload.get("displayMode") or "phase1_single",
+        "initialMontage": payload.get("initialMontage") or payload.get("usedMontage") or "",
         "usedMontage": payload.get("usedMontage") or "",
         "finalMontage": payload.get("finalMontage") or payload.get("usedMontage") or "",
         "displayedMontages": displayed_montages,
@@ -3455,16 +3497,41 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
 def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path) -> dict[str, Any]:
     cases = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
+    extraction_sources: dict[str, int] = {}
+    extraction_rows = []
+    for row in cases:
+        source_annotation = str(row.get("sourceAnnotation") or "")
+        extraction_sources[source_annotation or "unknown"] = extraction_sources.get(source_annotation or "unknown", 0) + 1
+        extraction_rows.append({
+            "caseId": row.get("caseId", ""),
+            "recordingId": row.get("recordingId", ""),
+            "edfFile": Path(str(row.get("edfPath") or "")).name,
+            "sourceGroup": row.get("sourceGroup", ""),
+            "referenceLabel": row.get("referenceLabel", ""),
+            "labelGroup": row.get("labelGroup", ""),
+            "eventTime": row.get("eventTime", ""),
+            "epochStart": row.get("epochStart", ""),
+            "durationSec": row.get("durationSec", ""),
+            "sourceAnnotation": source_annotation,
+            "phase1Montage": row.get("phase1Montage", ""),
+        })
     return {
         "datasetId": dataset.get("datasetId", ""),
         "name": dataset.get("name", ""),
         "createdAt": dataset.get("createdAt", ""),
         "version": dataset.get("version", ""),
+        "datasetPath": str(dataset.get("datasetPath") or dataset_dir),
         "questionCount": research_phase1_total_count(settings),
         "includedCaseCount": len(cases),
         "groupCounts": {
             group: sum(1 for row in cases if row.get("labelGroup") == group)
             for group in ("epileptiform", "non_epileptiform")
+        },
+        "montageMap": RESEARCH_MONTAGE_LABELS,
+        "extractionLog": {
+            "sourceRoots": dataset.get("sourceRoots", []),
+            "sourceAnnotationCounts": extraction_sources,
+            "cases": extraction_rows,
         },
         "settings": {
             "epochDurationSec": settings.get("epochDurationSec", 10),
@@ -3504,6 +3571,7 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
         "totalElapsedSec": row.get("totalElapsedSec", ""),
         "display": {
             "displayMode": row.get("displayMode", ""),
+            "initialMontage": row.get("initialMontage", ""),
             "finalMontage": row.get("finalMontage") or row.get("usedMontage", ""),
             "displayedMontages": row.get("displayedMontages", []),
             "sensitivity": row.get("sensitivity", ""),
@@ -3519,15 +3587,19 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
 def research_reader_timing_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
     starts = [str(row.get("testStartedAt") or "") for row in responses if str(row.get("testStartedAt") or "").strip()]
     completions = [str(row.get("testCompletedAt") or row.get("answeredAt") or "") for row in responses if str(row.get("testCompletedAt") or row.get("answeredAt") or "").strip()]
+    if not starts:
+        starts = [str(row.get("startedAt") or "") for row in responses if str(row.get("startedAt") or "").strip()]
     elapsed_values = []
     for row in responses:
         try:
             value = int(float(row.get("totalElapsedMs") or 0))
         except (TypeError, ValueError):
             value = 0
+        if value <= 0:
+            value = elapsed_ms_between(row.get("testStartedAt") or row.get("startedAt"), row.get("testCompletedAt") or row.get("answeredAt"))
         if value > 0:
             elapsed_values.append(value)
-    total_elapsed_ms = max(elapsed_values) if elapsed_values else 0
+    total_elapsed_ms = max(elapsed_values) if elapsed_values else elapsed_ms_between(min(starts) if starts else "", max(completions) if completions else "")
     return {
         "testStartedAt": min(starts) if starts else "",
         "testCompletedAt": max(completions) if completions else "",
@@ -3580,6 +3652,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
     payload = {
         "exportVersion": "compact-1",
         "exportedAt": utc_now_iso(),
+        "montageMap": RESEARCH_MONTAGE_LABELS,
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "readers": readers,
     }

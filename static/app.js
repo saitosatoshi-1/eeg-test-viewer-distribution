@@ -1069,6 +1069,7 @@ function startResearchMontageTiming() {
   state.researchMontageTiming = {
     startedAtMs: now,
     lastAtMs: now,
+    initialMontages: [...activeMontages],
     activeMontages,
     totalsSec: {},
     timeline: [],
@@ -1116,6 +1117,7 @@ function researchMontageTimingPayload() {
   updateResearchMontageTiming();
   const totals = {};
   const timing = state.researchMontageTiming;
+  const initialMontage = (timing?.initialMontages || []).filter(Boolean).join("+") || state.researchCaseInitialMontage || "";
   for (const [montage, seconds] of Object.entries(timing?.totalsSec || {})) {
     totals[montage] = Number(Number(seconds || 0).toFixed(3));
   }
@@ -1141,6 +1143,7 @@ function researchMontageTimingPayload() {
     .filter((row) => row.montage);
   const montageOrder = montageSequence.map((row) => row.montage);
   return {
+    initialMontage,
     displayedMontages: Object.keys(totals),
     montageDurationsSec: totals,
     montageDurationSummary: summary,
@@ -1226,7 +1229,7 @@ function markResearchTestStarted(at = new Date()) {
 }
 
 function researchTestTimingPayload(completedAt = "") {
-  const startedAt = state.researchTestStartedAt || "";
+  const startedAt = state.researchTestStartedAt || state.researchCaseStartedAt || completedAt || "";
   const startMs = Number(state.researchTestStartedMs || (startedAt ? Date.parse(startedAt) : 0));
   const endMs = completedAt ? Date.parse(completedAt) : Date.now();
   const totalElapsedMs = startMs && Number.isFinite(endMs) ? Math.max(0, endMs - startMs) : 0;
