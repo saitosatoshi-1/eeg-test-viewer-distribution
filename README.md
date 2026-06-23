@@ -22,21 +22,9 @@ The link shows a password screen. Enter `ncnp` to set an HTTP-only access cookie
 
 Old Windows/macOS installer bundles, desktop launchers, and packaged distribution folders were intentionally removed after switching to the web test workflow.
 
-## Deployment
 
-Render reads `render.yaml` from the `main` branch. Required environment values are documented in `DEPLOY_WEB.md`; the shared deployment should keep:
-
-```text
-EEG_VIEWER_PUBLIC_MODE=1
-EEG_VIEWER_DATA_DIR=/data
-EEG_VIEWER_ACCESS_CODE=ncnp
-```
-
-`EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC=1` must not be enabled on the shared Render service.
 
 ## Private Dataset Policy
-
-Temple University-derived or otherwise redistribution-restricted EDF files must not be committed to GitHub. Use the private dataset upload workflow so EDFs live only on the private Render persistent disk.
 
 Typical dataset path for the viewer:
 
