@@ -2975,27 +2975,88 @@ def load_research_responses(dataset_dir: Path, reader_id: str) -> list[dict[str,
     return []
 
 
-def research_case_exposure_counts(dataset_dir: Path, phase: str = "1") -> dict[str, int]:
+def research_assignment_path(dataset_dir: Path, phase: str = "1") -> Path:
+    return dataset_dir / "assignments" / f"phase{safe_filename_part(phase, '1')}.json"
+
+
+def load_research_assignments(dataset_dir: Path, phase: str = "1") -> dict[str, Any]:
+    payload = json_read(research_assignment_path(dataset_dir, phase), {"assignments": []})
+    return payload if isinstance(payload, dict) else {"assignments": []}
+
+
+def research_case_assignment_counts(dataset_dir: Path, phase: str = "1") -> dict[str, int]:
+    payload = load_research_assignments(dataset_dir, phase)
+    assignments = payload.get("assignments") if isinstance(payload, dict) else []
     counts: dict[str, int] = {}
-    responses_dir = dataset_dir / "responses"
-    if not responses_dir.exists():
+    if not isinstance(assignments, list):
         return counts
-    for path in responses_dir.glob("*.json"):
-        payload = json_read(path, {"responses": []})
-        responses = payload.get("responses") if isinstance(payload, dict) else payload
-        if not isinstance(responses, list):
+    for row in assignments:
+        if not isinstance(row, dict):
             continue
-        seen_for_reader: set[str] = set()
-        for row in active_research_responses(responses):
-            if str(row.get("phase", "1")) != phase:
-                continue
-            case_id = str(row.get("caseId") or "").strip()
+        case_ids = row.get("caseIds") if isinstance(row.get("caseIds"), list) else []
+        for raw_case_id in case_ids:
+            case_id = str(raw_case_id or "").strip()
             if not case_id or case_id.startswith("sample:"):
                 continue
-            seen_for_reader.add(case_id)
-        for case_id in seen_for_reader:
             counts[case_id] = counts.get(case_id, 0) + 1
     return counts
+
+
+def research_case_exposure_counts(dataset_dir: Path, phase: str = "1") -> dict[str, int]:
+    response_counts: dict[str, int] = {}
+    responses_dir = dataset_dir / "responses"
+    if responses_dir.exists():
+        for path in responses_dir.glob("*.json"):
+            payload = json_read(path, {"responses": []})
+            responses = payload.get("responses") if isinstance(payload, dict) else payload
+            if not isinstance(responses, list):
+                continue
+            seen_for_reader: set[str] = set()
+            for row in active_research_responses(responses):
+                if str(row.get("phase", "1")) != phase:
+                    continue
+                case_id = str(row.get("caseId") or "").strip()
+                if not case_id or case_id.startswith("sample:"):
+                    continue
+                seen_for_reader.add(case_id)
+            for case_id in seen_for_reader:
+                response_counts[case_id] = response_counts.get(case_id, 0) + 1
+    assignment_counts = research_case_assignment_counts(dataset_dir, phase)
+    counts: dict[str, int] = {}
+    for case_id in set(response_counts) | set(assignment_counts):
+        counts[case_id] = max(response_counts.get(case_id, 0), assignment_counts.get(case_id, 0))
+    return counts
+
+
+def save_research_assignment(dataset_dir: Path, reader_id: str, phase: str, cases: list[dict[str, Any]]) -> None:
+    case_ids = [str(row.get("caseId") or "").strip() for row in cases if not row.get("sampleEpoch") and str(row.get("caseId") or "").strip()]
+    if not case_ids:
+        return
+    payload = load_research_assignments(dataset_dir, phase)
+    assignments = payload.get("assignments") if isinstance(payload, dict) else []
+    if not isinstance(assignments, list):
+        assignments = []
+    assignment_id = f"{research_reader_id(reader_id)}|{phase}"
+    next_row = {
+        "assignmentId": assignment_id,
+        "readerId": research_reader_id(reader_id),
+        "phase": phase,
+        "assignedAt": utc_now_iso(),
+        "caseIds": case_ids,
+    }
+    replaced = False
+    for index, row in enumerate(assignments):
+        if isinstance(row, dict) and row.get("assignmentId") == assignment_id:
+            assignments[index] = next_row
+            replaced = True
+            break
+    if not replaced:
+        assignments.append(next_row)
+    json_write(research_assignment_path(dataset_dir, phase), {
+        "updatedAt": utc_now_iso(),
+        "phase": phase,
+        "assignments": assignments,
+    })
 
 
 def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[dict[str, Any]], output_path: Any = None, reader_profile: dict[str, Any] | None = None) -> None:
@@ -3278,11 +3339,14 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
     reader_id = research_reader_id(payload.get("readerId"))
     phase = "1"
     access_cookie_hash = str(payload.get("accessCookieHash") or "")
-    existing_cookie_hash = research_response_cookie_hash(dataset_dir, reader_id)
-    if PUBLIC_MODE and existing_cookie_hash and access_cookie_hash and not secrets.compare_digest(existing_cookie_hash, access_cookie_hash):
-        raise PermissionError("This readerId is already linked to another browser session.")
-    cases, responses, active = research_phase_cases(dataset, reader_id, phase)
-    all_cases = research_phase_case_pool(dataset, reader_id, phase, active)
+    with RESEARCH_RESPONSE_LOCK:
+        existing_cookie_hash = research_response_cookie_hash(dataset_dir, reader_id)
+        if PUBLIC_MODE and existing_cookie_hash and access_cookie_hash and not secrets.compare_digest(existing_cookie_hash, access_cookie_hash):
+            raise PermissionError("This readerId is already linked to another browser session.")
+        cases, responses, active = research_phase_cases(dataset, reader_id, phase)
+        all_cases = research_phase_case_pool(dataset, reader_id, phase, active)
+        save_research_assignment(dataset_dir, reader_id, phase, all_cases)
+        exposure_counts = research_case_exposure_counts(dataset_dir, phase)
     active_rows = list(active.values())
     non_sample_cases = [row for row in all_cases if not row.get("sampleEpoch")]
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
@@ -3302,6 +3366,8 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         "requestedTotalCount": requested_total,
         "samplePerGroup": max(1, math.ceil(requested_total / 2)),
         "groupCounts": {group: sum(1 for row in non_sample_cases if row.get("labelGroup") == group) for group in ("epileptiform", "non_epileptiform")},
+        "samplingMethod": "balanced_random_sampling_with_assignment_exposure_counts",
+        "assignmentExposureCounts": {str(row.get("caseId")): exposure_counts.get(str(row.get("caseId")), 0) for row in non_sample_cases},
         "ratings": [RESEARCH_RATING_POSITIVE, RESEARCH_RATING_NEGATIVE, RESEARCH_RATING_UNKNOWN],
     }
 
