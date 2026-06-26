@@ -254,6 +254,7 @@ const els = {
   researchEmailBody: document.getElementById("researchEmailBody"),
   researchSavedCsvName: document.getElementById("researchSavedCsvName"),
   researchCopyEmailBtn: document.getElementById("researchCopyEmailBtn"),
+  researchShareJsonBtn: document.getElementById("researchShareJsonBtn"),
   researchTutorial: document.getElementById("researchTutorial"),
   researchTutorialDismissBtn: document.getElementById("researchTutorialDismissBtn"),
   researchTutorialLead: document.getElementById("researchTutorialLead"),
@@ -801,6 +802,7 @@ function bindResearchControls() {
   els.researchEpochCountInput?.addEventListener("change", saveResearchEpochCount);
   els.researchCompleteExportCsvBtn?.addEventListener("click", submitResearchJson);
   els.researchCompleteSaveDesktopBtn?.addEventListener("click", exportResearchJson);
+  els.researchShareJsonBtn?.addEventListener("click", shareResearchJsonByEmail);
   els.researchCopyEmailBtn?.addEventListener("click", copyResearchEmailBody);
   els.researchTutorialDismissBtn?.addEventListener("click", () => {
     state.researchTutorialDismissed = true;
@@ -1308,6 +1310,10 @@ function downloadTextFile(filename, text, mime = "application/json") {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function isMobileViewport() {
+  return window.matchMedia?.("(max-width: 700px)")?.matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+}
+
 function showResearchCompletion() {
   if (!els.researchCompleteScreen) return;
   const validationMode = state.researchMode === "validation";
@@ -1321,6 +1327,7 @@ function showResearchCompletion() {
   }
   if (els.researchMailBox) els.researchMailBox.hidden = validationMode;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validationMode;
+  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = validationMode || !isMobileViewport();
   if (els.researchCompleteExportCsvBtn) {
     els.researchCompleteExportCsvBtn.hidden = !validationMode;
     els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation結果ファイルをDesktopに保存" : "";
@@ -1343,6 +1350,7 @@ function hideResearchCompletion() {
   els.researchCompleteScreen.setAttribute("aria-hidden", "true");
   if (els.researchMailBox) els.researchMailBox.hidden = false;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = false;
+  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = false;
 }
 
 function setResearchSetupMessage(message = "", isError = false) {
@@ -2619,6 +2627,49 @@ async function exportResearchJson() {
     setStatus(`結果JSONをダウンロードしました: ${jsonFilename}`);
   } catch (err) {
     setStatus(`Export failed: ${err.message}`, { error: true });
+  }
+}
+
+async function shareResearchJsonByEmail() {
+  if (state.researchMode === "validation") return;
+  const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
+  if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
+  saveResearchProfile();
+  const profile = researchProfile();
+  const readerId = activeResearchReaderId(profile);
+  const jsonFilename = researchJsonFilename(readerId, profile);
+  try {
+    setStatus("結果JSONを共有準備中...", { busy: true });
+    const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
+    const file = new File([jsonText], jsonFilename, { type: "application/json" });
+    const shareData = {
+      title: "脳波読影テスト結果",
+      text: researchEmailBodyText(profile),
+      files: [file],
+    };
+    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+      await navigator.share(shareData);
+      if (els.researchSavedCsvName) {
+        els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
+      }
+      setStatus(`結果JSONを共有しました: ${jsonFilename}`);
+      return;
+    }
+    downloadTextFile(jsonFilename, jsonText);
+    window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent("脳波読影テスト結果")}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
+    if (els.researchSavedCsvName) {
+      els.researchSavedCsvName.textContent = `この端末では直接添付共有できません。${jsonFilename}をダウンロードした後、メールに添付してください。`;
+    }
+    setStatus("JSONをダウンロードしました。メールに添付してください");
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      setStatus("JSON共有をキャンセルしました");
+      return;
+    }
+    setStatus(`Share failed: ${err.message}`, { error: true });
+    if (els.researchSavedCsvName) {
+      els.researchSavedCsvName.textContent = "共有できませんでした。JSONをダウンロードしてメールに添付してください。";
+    }
   }
 }
 

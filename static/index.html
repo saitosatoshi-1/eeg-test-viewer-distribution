@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-mobile1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-mobile-share1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -219,6 +219,7 @@
                 <div class="research-saved-file" id="researchSavedCsvName">結果ファイルはまだ保存されていません。</div>
               </div>
               <div class="research-complete-actions">
+                <button class="export-button mobile-share" id="researchShareJsonBtn" type="button" hidden>JSONをメールで送る</button>
                 <button class="export-button" id="researchCompleteSaveDesktopBtn" type="button">JSONをダウンロード</button>
                 <button class="export-button secondary" id="researchCopyEmailBtn" type="button">メール例文をコピー</button>
               </div>
@@ -335,6 +336,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=20260626-mobile1"></script>
+    <script src="/static/app.js?v=20260626-mobile-share1"></script>
   </body>
 </html>
