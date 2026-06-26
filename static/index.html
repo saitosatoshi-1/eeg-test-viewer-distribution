@@ -179,10 +179,10 @@
               <label>メール<input id="researchSetupReaderEmailInput" type="email" placeholder="メールアドレス" /></label>
               <label>所属 (English)<input id="researchSetupReaderAffiliationInput" placeholder="例: National Center of Neurology and Psychiatry" autocomplete="organization" /></label>
               <label>診療科<select id="researchSetupReaderSpecialtySelect"><option value="">選択</option><option value="neurologist">脳神経内科</option><option value="psychiatrist">精神科</option><option value="neurosurgeon">脳神経外科</option><option value="other">その他</option></select></label>
-              <label>診療科専門医・指導医資格<select id="researchPositionSelect"><option value="">選択</option><option value="yes">有</option><option value="no">無</option></select></label>
+              <label>診療科専門医・指導医資格<select id="researchPositionSelect"><option value="">選択</option><option value="specialist_instructor">専門医有り・指導医有り</option><option value="specialist_no_instructor">専門医有り・指導医なし</option><option value="no_specialist_no_instructor">専門医なし・指導医なし</option></select></label>
               <label>診療科目年数<input id="researchMedicalYearsInput" type="number" min="0" max="80" step="0.5" placeholder="年数" /></label>
-              <label>てんかん専門医・指導医資格<select id="researchEpilepsySpecialistSelect"><option value="">選択</option><option value="yes_instructor">有 (指導医資格有り)</option><option value="yes_no_instructor">有 (指導医資格無し)</option><option value="no">無</option></select></label>
-              <label>臨床神経生理学会脳波専門医・指導医資格<select id="researchClinicalNeurophysEegSpecialistSelect"><option value="">選択</option><option value="yes_instructor">有 (指導医資格有り)</option><option value="yes_no_instructor">有 (指導医資格無し)</option><option value="no">無</option></select></label>
+              <label>てんかん専門医・指導医資格<select id="researchEpilepsySpecialistSelect"><option value="">選択</option><option value="specialist_instructor">専門医有り・指導医有り</option><option value="specialist_no_instructor">専門医有り・指導医なし</option><option value="no_specialist_no_instructor">専門医なし・指導医なし</option></select></label>
+              <label>臨床神経生理学会脳波専門医・指導医資格<select id="researchClinicalNeurophysEegSpecialistSelect"><option value="">選択</option><option value="specialist_instructor">専門医有り・指導医有り</option><option value="specialist_no_instructor">専門医有り・指導医なし</option><option value="no_specialist_no_instructor">専門医なし・指導医なし</option></select></label>
               <label>てんかんセンター勤務歴<select id="researchEpilepsyCenterTrainingSelect"><option value="">選択</option><option value="yes">あり</option><option value="no">なし</option></select></label>
               <label>勤務期間<input id="researchEpilepsyCenterTrainingDurationInput" placeholder="例: 6か月、2年" /></label>
               <input id="researchSetupEpochCountInput" type="hidden" value="20" />
@@ -224,13 +224,13 @@
           </div>
           <div class="research-tutorial" id="researchTutorial" hidden aria-hidden="true">
             <div class="research-tutorial-head">
-              <strong>練習サンプル</strong>
+              <strong id="researchTutorialTitle">練習サンプル1</strong>
               <button type="button" id="researchTutorialDismissBtn" aria-label="チュートリアルを閉じる">閉じる</button>
             </div>
             <p id="researchTutorialLead">これは操作説明用の練習問題です。回答は記録されません。</p>
             <p id="researchTutorialMontageNote">波形の感度、時定数、表示スケール、モンタージュは自由に変更して構いません。</p>
-            <p>判定していただきたい波形は、画面の真ん中にくるように表示してあります。</p>
-            <ol>
+            <p id="researchTutorialTargetNote">判定していただきたい波形は、画面の真ん中にくるように表示してあります。</p>
+            <ol id="researchTutorialSteps">
               <li>波形を確認します。</li>
               <li>波形上を左クリックし、表示された三択から てんかん性異常あり / てんかん性異常なし / 判断困難 を選びます。</li>
               <li>本番も同じ操作で、選択後に次の問題へ進みます。</li>

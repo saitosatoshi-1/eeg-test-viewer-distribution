@@ -260,8 +260,11 @@ const els = {
   researchShareJsonBtn: document.getElementById("researchShareJsonBtn"),
   researchTutorial: document.getElementById("researchTutorial"),
   researchTutorialDismissBtn: document.getElementById("researchTutorialDismissBtn"),
+  researchTutorialTitle: document.getElementById("researchTutorialTitle"),
   researchTutorialLead: document.getElementById("researchTutorialLead"),
   researchTutorialMontageNote: document.getElementById("researchTutorialMontageNote"),
+  researchTutorialTargetNote: document.getElementById("researchTutorialTargetNote"),
+  researchTutorialSteps: document.getElementById("researchTutorialSteps"),
   researchCompleteExportCsvBtn: document.getElementById("researchCompleteExportCsvBtn"),
   researchCompleteSaveDesktopBtn: document.getElementById("researchCompleteSaveDesktopBtn"),
   researchSetupIedsPresentPathInput: document.getElementById("researchSetupIedsPresentPathInput"),
@@ -1542,7 +1545,7 @@ function activeResearchCases() {
   if (state.researchMode === "validation" && state.validationSession) return state.validationSession.cases || [];
   if (state.researchMode === "test" && state.researchSession) {
     const phase = String(state.researchSession.phase || "");
-    const cases = state.researchSession.cases || [];
+    const cases = cappedResearchSessionCases(state.researchSession.cases || []);
     if (Number(state.researchSession.answeredCount || 0) > 0) {
       return cases.filter((row) => !row.sampleEpoch);
     }
@@ -1550,6 +1553,38 @@ function activeResearchCases() {
     return cases.filter((row) => !row.sampleEpoch || !completed[String(row.caseId || "")]);
   }
   return state.researchDataset?.cases || [];
+}
+
+function cappedResearchSessionCases(cases) {
+  const samples = [];
+  const groups = { epileptiform: [], non_epileptiform: [], other: [] };
+  for (const row of cases || []) {
+    if (row?.sampleEpoch) {
+      samples.push(row);
+      continue;
+    }
+    const group = row?.labelGroup === "epileptiform" || row?.labelGroup === "non_epileptiform"
+      ? row.labelGroup
+      : "other";
+    groups[group].push(row);
+  }
+  const perGroup = Math.floor(fixedResearchQuestionCount() / 2);
+  const selected = [
+    ...groups.epileptiform.slice(0, perGroup),
+    ...groups.non_epileptiform.slice(0, perGroup),
+  ];
+  if (selected.length < fixedResearchQuestionCount()) {
+    const selectedIds = new Set(selected.map((row) => String(row.caseId || "")));
+    for (const row of [...groups.epileptiform, ...groups.non_epileptiform, ...groups.other]) {
+      if (selected.length >= fixedResearchQuestionCount()) break;
+      const id = String(row.caseId || "");
+      if (!selectedIds.has(id)) {
+        selected.push(row);
+        selectedIds.add(id);
+      }
+    }
+  }
+  return [...samples, ...selected];
 }
 
 function currentResearchCase() {
@@ -1567,19 +1602,34 @@ function isResearchMontageSetupPractice(item = currentResearchCase()) {
   return isResearchPracticeCase(item) && String(item?.sampleStep || "") === "montage_setup";
 }
 
+function researchPracticeSampleNumber(item = currentResearchCase()) {
+  if (!isResearchPracticeCase(item)) return 0;
+  const sampleCases = (state.researchSession?.cases || []).filter((row) => row.sampleEpoch);
+  const index = sampleCases.findIndex((row) => row.caseId === item?.caseId);
+  return index >= 0 ? index + 1 : (isResearchMontageSetupPractice(item) ? 2 : 1);
+}
+
+function researchPracticeLabel(item = currentResearchCase()) {
+  const number = researchPracticeSampleNumber(item);
+  return number ? `練習サンプル${number}` : "練習サンプル";
+}
+
 function updateResearchTutorial(item = currentResearchCase()) {
   if (!els.researchTutorial) return;
   const show = isResearchPracticeCase(item) && !state.researchTutorialDismissed;
+  const isMontageSetup = isResearchMontageSetupPractice(item);
+  if (els.researchTutorialTitle) els.researchTutorialTitle.textContent = researchPracticeLabel(item);
   if (els.researchTutorialLead) {
-    els.researchTutorialLead.textContent = isResearchMontageSetupPractice(item)
-      ? "これは2回目の練習問題です。普段最も使用するモンタージュに切り替えてから判定してください。回答は記録されません。"
+    els.researchTutorialLead.textContent = isMontageSetup
+      ? "普段最も使用するモンタージュに切り替えてから判定してください。回答は記録されません。"
       : "これは操作説明用の練習問題です。回答は記録されません。";
   }
   if (els.researchTutorialMontageNote) {
-    els.researchTutorialMontageNote.textContent = isResearchMontageSetupPractice(item)
-      ? "ここで選択したモンタージュを、本番20問の各エポックの初期表示に使用します。感度、時定数、表示スケールも自由に変更できます。"
-      : "波形の感度、時定数、表示スケール、モンタージュは自由に変更して構いません。";
+    els.researchTutorialMontageNote.hidden = isMontageSetup;
+    els.researchTutorialMontageNote.textContent = "波形の感度、時定数、表示スケール、モンタージュは自由に変更して構いません。";
   }
+  if (els.researchTutorialTargetNote) els.researchTutorialTargetNote.hidden = isMontageSetup;
+  if (els.researchTutorialSteps) els.researchTutorialSteps.hidden = isMontageSetup;
   els.researchTutorial.hidden = !show;
   els.researchTutorial.setAttribute("aria-hidden", show ? "false" : "true");
 }
@@ -1717,7 +1767,7 @@ function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
     return;
   }
   const { total, answered, currentQuestion, remaining, pct, isPractice } = snapshot;
-  const title = isPractice ? "練習サンプル" : `本番 ${currentQuestion}/${total || 0}`;
+  const title = isPractice ? researchPracticeLabel(currentResearchCase()) : `本番 ${currentQuestion}/${total || 0}`;
   const detail = isPractice ? `本番は未開始 · 全 ${total || 0} 問` : `回答済み ${answered}/${total || 0} · 残り ${remaining} 問`;
   els.researchWaveProgress.hidden = false;
   els.researchWaveProgress.setAttribute("aria-hidden", "false");
@@ -1795,7 +1845,7 @@ function renderResearchProgress() {
   const snapshot = researchProgressSnapshot();
   const { cases, current, total, answered, currentQuestion, remaining, pct, isPractice } = snapshot;
   const displayIndex = cases.length ? state.researchCaseIndex + 1 : 0;
-  const currentLabel = isPractice ? "練習サンプル" : `本番 ${currentQuestion}/${total || 0}`;
+  const currentLabel = isPractice ? researchPracticeLabel(current) : `本番 ${currentQuestion}/${total || 0}`;
   els.researchTestProgress.innerHTML = `
     <div class="research-progress-card">
       <div class="research-progress-head"><strong>${escapeHtml(currentLabel)}</strong><span>${pct}%</span></div>
@@ -2537,7 +2587,7 @@ async function showResearchCase(index) {
     state.researchCaseStartedAt = new Date().toISOString();
     startResearchMontageTiming();
     renderResearchInlineProgress();
-    setStatus(isResearchPracticeCase(item) ? "練習サンプル: 波形を左クリックして三択から回答してください" : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`));
+    setStatus(isResearchPracticeCase(item) ? `${researchPracticeLabel(item)}: 波形を左クリックして三択から回答してください` : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`));
     renderRightResearchPanels();
   } catch (err) {
     hideResearchTutorial();

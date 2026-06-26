@@ -3332,6 +3332,31 @@ def research_phase_cases(dataset: dict[str, Any], reader_id: str, phase: str) ->
     return included, responses, active
 
 
+def cap_phase1_cases_by_group(rows: list[dict[str, Any]], total_count: int) -> list[dict[str, Any]]:
+    samples = [row for row in rows if row.get("sampleEpoch")]
+    group_limits = {
+        "epileptiform": total_count // 2 + total_count % 2,
+        "non_epileptiform": total_count // 2,
+    }
+    counts = {group: 0 for group in group_limits}
+    selected: list[dict[str, Any]] = []
+    overflow: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("sampleEpoch"):
+            continue
+        group = str(row.get("labelGroup") or "")
+        if group in group_limits and counts[group] < group_limits[group]:
+            selected.append(row)
+            counts[group] += 1
+        else:
+            overflow.append(row)
+    for row in overflow:
+        if len(selected) >= total_count:
+            break
+        selected.append(row)
+    return samples + selected[:total_count]
+
+
 def research_session(payload: dict[str, Any]) -> dict[str, Any]:
     dataset = load_research_dataset(payload.get("datasetPath") or payload.get("dataset"))
     dataset_dir = research_dataset_path(dataset.get("datasetPath"))
@@ -3344,13 +3369,14 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         if PUBLIC_MODE and existing_cookie_hash and access_cookie_hash and not secrets.compare_digest(existing_cookie_hash, access_cookie_hash):
             raise PermissionError("This readerId is already linked to another browser session.")
         cases, responses, active = research_phase_cases(dataset, reader_id, phase)
-        all_cases = research_phase_case_pool(dataset, reader_id, phase, active)
+        settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
+        requested_total = research_phase1_total_count(settings)
+        cases = cap_phase1_cases_by_group(cases, requested_total)
+        all_cases = cap_phase1_cases_by_group(research_phase_case_pool(dataset, reader_id, phase, active), requested_total)
         save_research_assignment(dataset_dir, reader_id, phase, all_cases)
         exposure_counts = research_case_exposure_counts(dataset_dir, phase)
     active_rows = list(active.values())
     non_sample_cases = [row for row in all_cases if not row.get("sampleEpoch")]
-    settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
-    requested_total = research_phase1_total_count(settings)
     return {
         "datasetPath": dataset_path,
         "datasetId": dataset.get("datasetId"),
@@ -3875,7 +3901,7 @@ def research_json_dataset_payload(dataset: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    return {
+    compact = {
         key: profile.get(key, "")
         for key in (
             "readerName", "email", "affiliation", "specialty", "position",
@@ -3883,10 +3909,21 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
             "medicalPracticeYears", "eegReadsPerMonth",
             "epilepsyCenterTraining", "epilepsyCenterTrainingDuration",
             "usualMontage", "ethicsNoticeConfirmed",
-            "dataProviderSharingAcknowledged", "dataProviderName",
-            "dataProviderSharedFields", "dataProviderSharingPurpose",
+            "dataProviderSharingAcknowledged",
         )
     }
+    qualification_labels = {
+        "specialist_instructor": "専門医有り・指導医有り",
+        "specialist_no_instructor": "専門医有り・指導医なし",
+        "no_specialist_no_instructor": "専門医なし・指導医なし",
+        "yes_instructor": "専門医有り・指導医有り",
+        "yes_no_instructor": "専門医有り・指導医なし",
+        "no": "専門医なし・指導医なし",
+    }
+    compact["positionLabel"] = qualification_labels.get(str(compact.get("position") or ""), "")
+    compact["epilepsySpecialistLabel"] = qualification_labels.get(str(compact.get("epilepsySpecialist") or ""), "")
+    compact["clinicalNeurophysEegSpecialistLabel"] = qualification_labels.get(str(compact.get("clinicalNeurophysEegSpecialist") or ""), "")
+    return compact
 
 
 def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path) -> dict[str, Any]:
@@ -4019,7 +4056,6 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
             "displayedMontages": row.get("displayedMontages", []),
             **answer_display_settings,
         },
-        "answerDisplaySettings": answer_display_settings,
         "montageLog": {
             "initialMontage": row.get("initialMontage", ""),
             "initialMontageLabel": RESEARCH_MONTAGE_LABELS.get(str(row.get("initialMontage") or ""), str(row.get("initialMontage") or "")),
