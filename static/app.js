@@ -7,6 +7,7 @@ const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
 const RESEARCH_PENDING_RESPONSES_KEY = "eegViewerPendingResearchResponses.v1";
 const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
 const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
+const TEST_ONLY_DISTRIBUTION = document.body.classList.contains("test-only-distribution");
 const PUBLIC_TEST_QUESTION_COUNT = 20;
 const DEFAULT_PUBLIC_DATASET_PATH = "private:gakkai_v1";
 const RECENT_FILES_LIMIT = 8;
@@ -428,12 +429,14 @@ function clearSharedBrowserResearchState() {
 async function init() {
   clearSharedBrowserResearchState();
   bindControls();
-  bindPanelResizers();
-  try {
-    restorePanelWidths();
-    restoreAnnotationListHeight();
-  } catch (err) {
-    console.warn("Panel restore skipped", err);
+  if (!TEST_ONLY_DISTRIBUTION) {
+    bindPanelResizers();
+    try {
+      restorePanelWidths();
+      restoreAnnotationListHeight();
+    } catch (err) {
+      console.warn("Panel restore skipped", err);
+    }
   }
   try {
     scheduleLayoutRefresh();
@@ -447,11 +450,15 @@ async function init() {
   }
   try {
     restoreSettings();
-    applyWorkspaceMode({ redraw: false });
-    applyRightPanelTab();
+    if (!TEST_ONLY_DISTRIBUTION) {
+      applyWorkspaceMode({ redraw: false });
+      applyRightPanelTab();
+    }
     applyRightPanelVisibility({ redraw: false });
-    applyScalogramVisibility({ redraw: false });
-    applyTopomapLayout();
+    if (!TEST_ONLY_DISTRIBUTION) {
+      applyScalogramVisibility({ redraw: false });
+      applyTopomapLayout();
+    }
   } catch (err) {
     console.warn("Settings restore skipped", err);
   }
@@ -496,6 +503,11 @@ function scheduleLayoutRefresh() {
     resizeCanvas();
     draw();
   };
+  if (TEST_ONLY_DISTRIBUTION) {
+    requestAnimationFrame(refresh);
+    window.setTimeout(refresh, 120);
+    return;
+  }
   requestAnimationFrame(() => {
     refresh();
     requestAnimationFrame(refresh);
@@ -742,36 +754,40 @@ function bindControls() {
     loadWindow();
   });
   els.reloadBtn?.addEventListener("click", loadWindow);
-  els.loadFileBtn?.addEventListener("click", openFileFromPath);
-  if (els.clearFilePathBtn) {
-    els.clearFilePathBtn.addEventListener("click", () => {
-      els.filePathInput.value = "";
-      els.filePathInput.focus();
+  if (!TEST_ONLY_DISTRIBUTION) {
+    els.loadFileBtn?.addEventListener("click", openFileFromPath);
+    if (els.clearFilePathBtn) {
+      els.clearFilePathBtn.addEventListener("click", () => {
+        els.filePathInput.value = "";
+        els.filePathInput.focus();
+      });
+    }
+    els.recentFileSelect?.addEventListener("change", () => {
+      const path = els.recentFileSelect.value;
+      if (!path) return;
+      els.filePathInput.value = path;
+      openFileFromPath();
+    });
+    els.filePathInput?.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        openFileFromPath();
+      }
     });
   }
-  els.recentFileSelect?.addEventListener("change", () => {
-    const path = els.recentFileSelect.value;
-    if (!path) return;
-    els.filePathInput.value = path;
-    openFileFromPath();
-  });
-  els.filePathInput?.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter") {
-      ev.preventDefault();
-      openFileFromPath();
+  if (!TEST_ONLY_DISTRIBUTION) {
+    for (const btn of els.viewModeButtons || []) {
+      btn.addEventListener("click", () => setViewMode(btn.dataset.viewMode || "single", btn.dataset.montageCount));
     }
-  });
-  for (const btn of els.viewModeButtons || []) {
-    btn.addEventListener("click", () => setViewMode(btn.dataset.viewMode || "single", btn.dataset.montageCount));
-  }
-  for (const btn of els.workspaceModeButtons || []) {
-    btn.addEventListener("click", () => setWorkspaceMode(btn.dataset.workspaceMode || "review"));
-  }
-  for (const btn of els.rightTabButtons || []) {
-    btn.addEventListener("click", () => setRightPanelTab(btn.dataset.rightTab || "topomap"));
-  }
-  for (const select of els.multiMontageSelects || []) {
-    select.addEventListener("change", onMultiMontageSelectChange);
+    for (const btn of els.workspaceModeButtons || []) {
+      btn.addEventListener("click", () => setWorkspaceMode(btn.dataset.workspaceMode || "review"));
+    }
+    for (const btn of els.rightTabButtons || []) {
+      btn.addEventListener("click", () => setRightPanelTab(btn.dataset.rightTab || "topomap"));
+    }
+    for (const select of els.multiMontageSelects || []) {
+      select.addEventListener("change", onMultiMontageSelectChange);
+    }
   }
   els.rangeCancelBtn?.addEventListener("click", () => {
     state.rangeStart = null;
@@ -809,55 +825,61 @@ function bindControls() {
   });
   els.contextMenu?.addEventListener("click", onContextMenuClick);
 
-  els.saveAnnotationBtn?.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    saveDialogAnnotation();
-  });
-  els.annotationDialog?.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Enter" || ev.isComposing) return;
-    if (ev.target === els.annotationNote && ev.shiftKey) return;
-    if (ev.target instanceof HTMLButtonElement) return;
-    ev.preventDefault();
-    saveDialogAnnotation();
-  });
-
-  els.exportJsonBtn?.addEventListener("click", exportJson);
-  if (els.sourceAnnotationToggle) {
-    els.sourceAnnotationToggle.addEventListener("change", () => {
-      state.showSourceAnnotations = els.sourceAnnotationToggle.checked;
-      saveSettings();
-      applyAnnotationVisibility();
-    });
-  }
-  if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.addEventListener("click", exportAnalysisJson);
-  if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.addEventListener("click", exportScalogramJpeg);
-  if (els.rightPanelToggleBtn) {
-    els.rightPanelToggleBtn.addEventListener("click", (ev) => {
+  if (!TEST_ONLY_DISTRIBUTION) {
+    els.saveAnnotationBtn?.addEventListener("click", (ev) => {
       ev.preventDefault();
-      toggleRightPanel();
+      saveDialogAnnotation();
     });
+    els.annotationDialog?.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.isComposing) return;
+      if (ev.target === els.annotationNote && ev.shiftKey) return;
+      if (ev.target instanceof HTMLButtonElement) return;
+      ev.preventDefault();
+      saveDialogAnnotation();
+    });
+
+    els.exportJsonBtn?.addEventListener("click", exportJson);
+    if (els.sourceAnnotationToggle) {
+      els.sourceAnnotationToggle.addEventListener("change", () => {
+        state.showSourceAnnotations = els.sourceAnnotationToggle.checked;
+        saveSettings();
+        applyAnnotationVisibility();
+      });
+    }
+    if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.addEventListener("click", exportAnalysisJson);
+    if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.addEventListener("click", exportScalogramJpeg);
+    if (els.rightPanelToggleBtn) {
+      els.rightPanelToggleBtn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        toggleRightPanel();
+      });
+    }
+    if (els.exportViewerJpegBtn) els.exportViewerJpegBtn.addEventListener("click", exportViewerJpeg);
+    els.importJsonInput?.addEventListener("change", importJson);
   }
-  if (els.exportViewerJpegBtn) els.exportViewerJpegBtn.addEventListener("click", exportViewerJpeg);
-  els.importJsonInput?.addEventListener("change", importJson);
   bindResearchControls();
 }
 
 
 function bindResearchControls() {
-  for (const btn of els.researchModeButtons || []) {
-    btn.addEventListener("click", () => setResearchMode(btn.dataset.researchMode || "viewer"));
+  if (!TEST_ONLY_DISTRIBUTION) {
+    for (const btn of els.researchModeButtons || []) {
+      btn.addEventListener("click", () => setResearchMode(btn.dataset.researchMode || "viewer"));
+    }
+    els.researchCreateDatasetBtn?.addEventListener("click", createResearchDataset);
+    els.researchLoadDatasetBtn?.addEventListener("click", loadResearchDatasetFromInput);
+    els.researchCutEpochBtn?.addEventListener("click", cutCurrentResearchEpoch);
+    els.researchStartValidationBtn?.addEventListener("click", startValidationMode);
   }
-  els.researchCreateDatasetBtn?.addEventListener("click", createResearchDataset);
-  els.researchLoadDatasetBtn?.addEventListener("click", loadResearchDatasetFromInput);
-  els.researchCutEpochBtn?.addEventListener("click", cutCurrentResearchEpoch);
-  els.researchStartValidationBtn?.addEventListener("click", startValidationMode);
   els.researchStartTestBtn?.addEventListener("click", startResearchTest);
   els.researchSetupStartBtn?.addEventListener("click", startResearchTest);
   els.researchSetupResetProfileBtn?.addEventListener("click", resetResearchProfileForm);
-  els.researchClearDatasetPathBtn?.addEventListener("click", () => clearResearchPath("dataset"));
-  els.researchClearIedsPresentPathBtn?.addEventListener("click", () => clearResearchPath("iedsPresent"));
-  els.researchClearIedsAbsentPathBtn?.addEventListener("click", () => clearResearchPath("iedsAbsent"));
-  els.researchEpochCountInput?.addEventListener("change", saveResearchEpochCount);
+  if (!TEST_ONLY_DISTRIBUTION) {
+    els.researchClearDatasetPathBtn?.addEventListener("click", () => clearResearchPath("dataset"));
+    els.researchClearIedsPresentPathBtn?.addEventListener("click", () => clearResearchPath("iedsPresent"));
+    els.researchClearIedsAbsentPathBtn?.addEventListener("click", () => clearResearchPath("iedsAbsent"));
+    els.researchEpochCountInput?.addEventListener("change", saveResearchEpochCount);
+  }
   els.researchCompleteExportCsvBtn?.addEventListener("click", submitResearchJson);
   els.researchCompleteSaveDesktopBtn?.addEventListener("click", exportResearchJson);
   els.researchShareJsonBtn?.addEventListener("click", shareResearchJsonByEmail);
@@ -867,16 +889,18 @@ function bindResearchControls() {
     updateResearchTutorial();
   });
   els.researchUndoBtn?.addEventListener("click", undoLastResearchAction);
-  els.researchSaveCaseBtn?.addEventListener("click", saveResearchCaseEdits);
-  els.researchPrevCaseBtn?.addEventListener("click", () => moveResearchCase(-1));
-  els.researchNextCaseBtn?.addEventListener("click", () => moveResearchCase(1));
-  els.researchSaveDesignBtn?.addEventListener("click", saveResearchTestDesign);
-  els.researchDesignEpochCountInput?.addEventListener("change", () => {
-    if (els.researchEpochCountInput) els.researchEpochCountInput.value = els.researchDesignEpochCountInput.value;
-    saveResearchTestDesign();
-  });
-  els.researchPhase2SampleToggle?.addEventListener("change", saveResearchTestDesign);
-  els.researchFalsePositiveToggle?.addEventListener("change", saveResearchTestDesign);
+  if (!TEST_ONLY_DISTRIBUTION) {
+    els.researchSaveCaseBtn?.addEventListener("click", saveResearchCaseEdits);
+    els.researchPrevCaseBtn?.addEventListener("click", () => moveResearchCase(-1));
+    els.researchNextCaseBtn?.addEventListener("click", () => moveResearchCase(1));
+    els.researchSaveDesignBtn?.addEventListener("click", saveResearchTestDesign);
+    els.researchDesignEpochCountInput?.addEventListener("change", () => {
+      if (els.researchEpochCountInput) els.researchEpochCountInput.value = els.researchDesignEpochCountInput.value;
+      saveResearchTestDesign();
+    });
+    els.researchPhase2SampleToggle?.addEventListener("change", saveResearchTestDesign);
+    els.researchFalsePositiveToggle?.addEventListener("change", saveResearchTestDesign);
+  }
   [
     els.researchOutputPathInput,
     els.researchDoctorNameInput,
@@ -900,10 +924,12 @@ function bindResearchControls() {
     updateEpilepsyCenterDurationRequirement();
     saveResearchProfile();
   }));
-  bindSyncedInputs(els.researchIedsPresentPathInput, els.researchSetupIedsPresentPathInput);
-  bindSyncedInputs(els.researchIedsAbsentPathInput, els.researchSetupIedsAbsentPathInput);
-  bindSyncedInputs(els.researchReaderIdInput, els.researchSetupReaderIdInput);
-  bindSyncedInputs(els.researchEpochCountInput, els.researchSetupEpochCountInput);
+  if (!TEST_ONLY_DISTRIBUTION) {
+    bindSyncedInputs(els.researchIedsPresentPathInput, els.researchSetupIedsPresentPathInput);
+    bindSyncedInputs(els.researchIedsAbsentPathInput, els.researchSetupIedsAbsentPathInput);
+    bindSyncedInputs(els.researchReaderIdInput, els.researchSetupReaderIdInput);
+    bindSyncedInputs(els.researchEpochCountInput, els.researchSetupEpochCountInput);
+  }
   updateEpilepsyCenterDurationRequirement();
 }
 
@@ -3774,14 +3800,14 @@ function rememberWindowCache(key, data) {
 function applyWindowData(data, requestedMontage) {
   state.windowData = data;
   state.activeMontage = data.montage || requestedMontage;
-  state.allAnnotations = state.windowData.annotations || [];
-  state.annotations = visibleAnnotations();
+  state.allAnnotations = TEST_ONLY_DISTRIBUTION ? [] : (state.windowData.annotations || []);
+  state.annotations = TEST_ONLY_DISTRIBUTION ? [] : visibleAnnotations();
   state.start = state.windowData.start || 0;
   state.scalogramData = null;
   renderStatus();
   updateWaveScrollbar();
   renderWarnings();
-  renderAnnotations();
+  if (!TEST_ONLY_DISTRIBUTION) renderAnnotations();
   draw();
 }
 
@@ -3934,6 +3960,7 @@ function renderStatus() {
 }
 
 function renderAnnotations() {
+  if (TEST_ONLY_DISTRIBUTION || !els.annotationList) return;
   els.annotationList.innerHTML = "";
   if (!state.annotations.length) {
     els.annotationList.innerHTML = "<div class='annotation-row empty'><small>No annotations</small></div>";
@@ -4256,6 +4283,7 @@ function drawRowBaselines(ctx, left, top, plotW, rowH, count, ratio) {
 }
 
 function drawAnnotations(ctx, left, top, plotW, plotH, start, duration) {
+  if (TEST_ONLY_DISTRIBUTION) return;
   const end = start + duration;
   for (const ann of state.annotations) {
     const onset = Number(ann.onset || 0);
@@ -4277,6 +4305,7 @@ function drawAnnotations(ctx, left, top, plotW, plotH, start, duration) {
 }
 
 function drawAnnotationLabels(ctx, left, top, plotW, plotH, start, duration, ratio) {
+  if (TEST_ONLY_DISTRIBUTION) return;
   const end = start + duration;
   ctx.save();
   ctx.font = `${11 * ratio}px Arial`;
@@ -4359,6 +4388,7 @@ function drawMarkerRow(ctx, left, top, plotW, plotH, ratio) {
 }
 
 function drawEventStrip() {
+  if (TEST_ONLY_DISTRIBUTION || !els.eventStrip) return;
   const duration = visibleDuration();
   const start = state.start;
   const end = start + duration;
