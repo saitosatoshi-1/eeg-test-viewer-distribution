@@ -21,7 +21,6 @@ const MONTAGE_LABELS = {
   cz: "Cz参照基準",
   transverse: "横双極誘導",
   c3c4: "C3/C4参照基準",
-  laplacian: "SD参照基準",
 };
 const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitudinal", "transverse"];
 const RIGHT_PANEL_TABS = ["metadata", "annotations", "test", "answer"];
@@ -257,6 +256,8 @@ const els = {
   researchCopyEmailBtn: document.getElementById("researchCopyEmailBtn"),
   researchTutorial: document.getElementById("researchTutorial"),
   researchTutorialDismissBtn: document.getElementById("researchTutorialDismissBtn"),
+  researchTutorialLead: document.getElementById("researchTutorialLead"),
+  researchTutorialMontageNote: document.getElementById("researchTutorialMontageNote"),
   researchCompleteExportCsvBtn: document.getElementById("researchCompleteExportCsvBtn"),
   researchCompleteSaveDesktopBtn: document.getElementById("researchCompleteSaveDesktopBtn"),
   researchSetupIedsPresentPathInput: document.getElementById("researchSetupIedsPresentPathInput"),
@@ -265,6 +266,7 @@ const els = {
   researchSetupReaderNameInput: document.getElementById("researchSetupReaderNameInput"),
   researchSetupReaderEmailInput: document.getElementById("researchSetupReaderEmailInput"),
   researchSetupReaderAffiliationInput: document.getElementById("researchSetupReaderAffiliationInput"),
+  researchConsentConfirmInput: document.getElementById("researchConsentConfirmInput"),
   researchSetupReaderSpecialtySelect: document.getElementById("researchSetupReaderSpecialtySelect"),
   researchPositionSelect: document.getElementById("researchPositionSelect"),
   researchEpilepsySpecialistSelect: document.getElementById("researchEpilepsySpecialistSelect"),
@@ -826,6 +828,8 @@ function bindResearchControls() {
     els.researchSetupReaderNameInput,
     els.researchSetupReaderEmailInput,
     els.researchSetupReaderAffiliationInput,
+    els.researchConsentConfirmInput,
+    els.researchSetupMontageSelect,
     els.researchSetupReaderSpecialtySelect,
     els.researchPositionSelect,
     els.researchEpilepsySpecialistSelect,
@@ -897,6 +901,7 @@ function resetResearchProfileForm() {
     els.researchEpilepsyCenterTrainingDurationInput,
   ];
   for (const input of textInputs.filter(Boolean)) input.value = "";
+  if (els.researchConsentConfirmInput) els.researchConsentConfirmInput.checked = false;
   for (const select of [
     els.researchSetupReaderSpecialtySelect,
     els.researchPositionSelect,
@@ -934,10 +939,9 @@ function validateResearchProfileForStart() {
     [els.researchSetupReaderAffiliationInput, "所属"],
     [els.researchPositionSelect, "職位"],
     [els.researchSetupReaderSpecialtySelect, "診療科"],
-    [els.researchMedicalYearsInput, "専門科目診療年数"],
+    [els.researchMedicalYearsInput, "診療科目年数"],
     [els.researchEpilepsySpecialistSelect, "てんかん専門医"],
     [els.researchClinicalNeurophysEegSpecialistSelect, "臨床神経生理 EEG専門医"],
-    [els.researchMonthlyReadsInput, "月間EEG読影数"],
     [els.researchEpilepsyCenterTrainingSelect, "てんかんセンター専従歴"],
   ];
   if (els.researchEpilepsyCenterTrainingSelect?.value === "yes") {
@@ -946,15 +950,18 @@ function validateResearchProfileForStart() {
   const missing = requiredFields.filter(([el]) => !String(el?.value ?? "").trim());
   const email = String(els.researchSetupReaderEmailInput?.value || "").trim();
   const invalidEmail = email && els.researchSetupReaderEmailInput?.validity?.valid === false;
-  if (!missing.length && !invalidEmail) return true;
+  const consentMissing = !els.researchConsentConfirmInput?.checked;
+  if (!missing.length && !invalidEmail && !consentMissing) return true;
   const labels = missing.map(([, label]) => label);
   if (invalidEmail) labels.push("メール形式");
+  if (consentMissing) labels.push("倫理説明の確認");
   const message = `未入力または確認が必要な項目があります: ${labels.join("、")}`;
   setResearchSetupMessage(message, true);
   setStatus(message, { error: true });
   window.alert(message);
   const first = missing[0]?.[0] || (invalidEmail ? els.researchSetupReaderEmailInput : null);
   first?.focus?.();
+  if (!first && consentMissing) els.researchConsentConfirmInput?.focus?.();
   return false;
 }
 
@@ -971,14 +978,15 @@ function researchProfile() {
     position: els.researchPositionSelect?.value || "",
     epilepsySpecialist: els.researchEpilepsySpecialistSelect?.value || "",
     clinicalNeurophysEegSpecialist: els.researchClinicalNeurophysEegSpecialistSelect?.value || "",
-    usualMontage: els.researchSetupMontageSelect?.value || storedProfile.usualMontage || activeMontageValue(),
+    usualMontage: els.researchSetupMontageSelect?.value || storedProfile.usualMontage || "",
     doctorName: els.researchSetupReaderNameInput?.value.trim() || els.researchDoctorNameInput?.value.trim() || "",
     medicalPracticeYears: els.researchMedicalYearsInput?.value === "" ? "" : Number(els.researchMedicalYearsInput?.value || 0),
     neurologyYears: els.researchNeurologyYearsInput?.value === "" ? "" : Number(els.researchNeurologyYearsInput?.value || 0),
     eegTraining: els.researchEegTrainingSelect?.value || "",
-    eegReadsPerMonth: els.researchMonthlyReadsInput?.value === "" ? "" : Number(els.researchMonthlyReadsInput?.value || 0),
+    eegReadsPerMonth: els.researchMonthlyReadsInput ? (els.researchMonthlyReadsInput.value === "" ? "" : Number(els.researchMonthlyReadsInput.value || 0)) : "",
     epilepsyCenterTraining: els.researchEpilepsyCenterTrainingSelect?.value || "",
     epilepsyCenterTrainingDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
+    ethicsNoticeConfirmed: Boolean(els.researchConsentConfirmInput?.checked),
   };
 }
 
@@ -1069,13 +1077,14 @@ function restoreResearchProfile() {
   if (els.researchPositionSelect) els.researchPositionSelect.value = profile.position || "";
   if (els.researchEpilepsySpecialistSelect) els.researchEpilepsySpecialistSelect.value = profile.epilepsySpecialist || "";
   if (els.researchClinicalNeurophysEegSpecialistSelect) els.researchClinicalNeurophysEegSpecialistSelect.value = profile.clinicalNeurophysEegSpecialist || "";
-  if (els.researchSetupMontageSelect) els.researchSetupMontageSelect.value = profile.usualMontage || activeMontageValue();
+  if (els.researchSetupMontageSelect) els.researchSetupMontageSelect.value = profile.usualMontage || "";
   if (els.researchMedicalYearsInput) els.researchMedicalYearsInput.value = profile.medicalPracticeYears ?? "";
   if (els.researchNeurologyYearsInput) els.researchNeurologyYearsInput.value = profile.neurologyYears ?? "";
   if (els.researchEegTrainingSelect) els.researchEegTrainingSelect.value = profile.eegTraining || "";
   if (els.researchMonthlyReadsInput) els.researchMonthlyReadsInput.value = profile.eegReadsPerMonth ?? "";
   if (els.researchEpilepsyCenterTrainingSelect) els.researchEpilepsyCenterTrainingSelect.value = profile.epilepsyCenterTraining || "";
   if (els.researchEpilepsyCenterTrainingDurationInput) els.researchEpilepsyCenterTrainingDurationInput.value = profile.epilepsyCenterTrainingDuration || "";
+  if (els.researchConsentConfirmInput) els.researchConsentConfirmInput.checked = Boolean(profile.ethicsNoticeConfirmed);
 }
 
 function currentResearchDisplayedMontages() {
@@ -1148,6 +1157,7 @@ function researchMontageTimingPayload() {
     .map(([montage, seconds]) => `${montage}:${seconds}`)
     .join(";");
   const timeline = (timing?.timeline || []).filter((row) => Number(row.durationSec || 0) > 0);
+  const analysisTimeline = timeline.filter((row) => Number(row.durationSec || 0) >= 1);
   const switches = timing?.switches || [];
   const montageUsage = timeline.map((row, index) => ({
     order: index + 1,
@@ -1156,6 +1166,20 @@ function researchMontageTimingPayload() {
     endSec: Number(Number(row.endSec || 0).toFixed(3)),
     durationSec: Number(Number(row.durationSec || 0).toFixed(3)),
   })).filter((row) => row.montage);
+  const analysisMontageUsage = analysisTimeline.map((row, index) => ({
+    order: index + 1,
+    montage: String(row.montage || "").trim(),
+    startSec: Number(Number(row.startSec || 0).toFixed(3)),
+    endSec: Number(Number(row.endSec || 0).toFixed(3)),
+    durationSec: Number(Number(row.durationSec || 0).toFixed(3)),
+  })).filter((row) => row.montage);
+  const analysisTotals = {};
+  for (const row of analysisMontageUsage) {
+    analysisTotals[row.montage] = Number(Number((analysisTotals[row.montage] || 0) + Number(row.durationSec || 0)).toFixed(3));
+  }
+  const analysisDisplayedMontages = Object.keys(analysisTotals);
+  const analysisHasBipolar = analysisDisplayedMontages.some((montage) => ["longitudinal", "transverse"].includes(montage));
+  const analysisHasReference = analysisDisplayedMontages.some((montage) => ["conventional", "conventional_average", "a1a2", "average", "cz"].includes(montage));
   const montageSequence = switches
     .map((row, index) => ({
       index: Number(row.index || index + 1),
@@ -1172,10 +1196,16 @@ function researchMontageTimingPayload() {
     montageOrder,
     montageSequence,
     montageUsage,
+    analysisMontageUsage,
+    analysisMontageDurationsSec: analysisTotals,
+    analysisDisplayedMontages,
+    montageConfirmationBehavior: analysisHasBipolar && analysisHasReference,
+    montageUsageAnalysisRule: "exclude_segments_under_1_sec",
     montageTimeline: timeline,
     montageSwitches: switches,
     montageOrderSummary: montageSequence.map((row) => `${row.index}:${row.montage}@${row.atSec}s`).join(";"),
     montageUsageSummary: montageUsage.map((row) => `${row.order}:${row.montage}:${row.startSec}-${row.endSec}s(${row.durationSec}s)`).join(";"),
+    analysisMontageUsageSummary: analysisMontageUsage.map((row) => `${row.order}:${row.montage}:${row.startSec}-${row.endSec}s(${row.durationSec}s)`).join(";"),
     montageTimelineSummary: timeline.map((row) => `${row.index}:${row.montage}:${row.startSec}-${row.endSec}s`).join(";"),
     montageSwitchSummary: switches.map((row) => `${row.index}:${row.atSec}s:${row.from || "-"}>${row.to || "-"}`).join(";"),
   };
@@ -1365,10 +1395,11 @@ function activeResearchCases() {
   if (state.researchMode === "test" && state.researchSession) {
     const phase = String(state.researchSession.phase || "");
     const cases = state.researchSession.cases || [];
-    if (state.researchSampleCompletedPhases[phase] || Number(state.researchSession.answeredCount || 0) > 0) {
+    if (Number(state.researchSession.answeredCount || 0) > 0) {
       return cases.filter((row) => !row.sampleEpoch);
     }
-    return cases;
+    const completed = state.researchSampleCompletedPhases[phase] || {};
+    return cases.filter((row) => !row.sampleEpoch || !completed[String(row.caseId || "")]);
   }
   return state.researchDataset?.cases || [];
 }
@@ -1384,10 +1415,23 @@ function isResearchPracticeCase(item = currentResearchCase()) {
   return !!(item?.sampleEpoch && state.researchSession?.phase === "1");
 }
 
+function isResearchMontageSetupPractice(item = currentResearchCase()) {
+  return isResearchPracticeCase(item) && String(item?.sampleStep || "") === "montage_setup";
+}
+
 function updateResearchTutorial(item = currentResearchCase()) {
   if (!els.researchTutorial) return;
-  const phase = String(state.researchSession?.phase || "");
-  const show = isResearchPracticeCase(item) && !state.researchTutorialDismissed && !state.researchSampleCompletedPhases[phase];
+  const show = isResearchPracticeCase(item) && !state.researchTutorialDismissed;
+  if (els.researchTutorialLead) {
+    els.researchTutorialLead.textContent = isResearchMontageSetupPractice(item)
+      ? "これは2回目の練習問題です。普段最も使用するモンタージュに切り替えてから判定してください。回答は記録されません。"
+      : "これは操作説明用の練習問題です。回答は記録されません。";
+  }
+  if (els.researchTutorialMontageNote) {
+    els.researchTutorialMontageNote.textContent = isResearchMontageSetupPractice(item)
+      ? "ここで選択したモンタージュを、本番20問の各エポックの初期表示に使用します。感度、時定数、表示スケールも自由に変更できます。"
+      : "波形の感度、時定数、表示スケール、モンタージュは自由に変更して構いません。";
+  }
   els.researchTutorial.hidden = !show;
   els.researchTutorial.setAttribute("aria-hidden", show ? "false" : "true");
 }
@@ -2413,16 +2457,24 @@ async function saveResearchRating(rating) {
   try {
     if (item.sampleEpoch) {
       hideResearchTutorial();
-      state.researchTutorialDismissed = true;
-      state.researchSampleCompletedPhases[String(state.researchSession.phase || "")] = true;
-      if (isResearchPracticeCase(item)) {
+      const phase = String(state.researchSession.phase || "");
+      if (!state.researchSampleCompletedPhases[phase] || typeof state.researchSampleCompletedPhases[phase] !== "object") {
+        state.researchSampleCompletedPhases[phase] = {};
+      }
+      state.researchSampleCompletedPhases[phase][String(item.caseId || "")] = true;
+      state.researchTutorialDismissed = false;
+      if (isResearchMontageSetupPractice(item)) {
         const usualMontage = saveUsualResearchMontage(activeMontageValue());
         markResearchTestStarted(new Date());
-        showResearchToast("練習終了 · テスト開始");
+        showResearchToast(`練習終了 · ${MONTAGE_LABELS[usualMontage] || usualMontage}で本番開始`);
+      } else if (isResearchPracticeCase(item)) {
+        showResearchToast("操作練習終了 · 次は普段使用するモンタージュを選んでください");
       } else {
         showResearchToast("Sample shown");
       }
-      const nextIndex = firstUnansweredResearchCaseIndex();
+      const remainingCases = activeResearchCases();
+      const nextPracticeIndex = remainingCases.findIndex((row) => row.sampleEpoch);
+      const nextIndex = nextPracticeIndex >= 0 ? nextPracticeIndex : firstUnansweredResearchCaseIndex();
       if (nextIndex >= 0) await showResearchCase(nextIndex);
       else {
         await completeResearchTest();
@@ -3206,7 +3258,7 @@ function onKeyDown(ev) {
   } else if (ev.key === "ArrowDown" || ev.key === "-" || ev.key === "_") {
     ev.preventDefault();
     stepSensitivity(1);
-  } else if (["1", "2", "3", "4", "5", "6"].includes(ev.key)) {
+  } else if (["1", "2", "3", "4", "5", "6", "7"].includes(ev.key)) {
     ev.preventDefault();
     const montageByKey = {
       1: "conventional",
@@ -3215,6 +3267,7 @@ function onKeyDown(ev) {
       4: "transverse",
       5: "a1a2",
       6: "average",
+      7: "cz",
     };
     setMontage(montageByKey[ev.key]);
   }

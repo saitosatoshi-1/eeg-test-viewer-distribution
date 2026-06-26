@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260620-public-test-flow11" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-study-flow1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -55,7 +55,6 @@
             <option value="average">平均参照基準2</option>
             <option value="cz">Cz参照基準</option>
             <option value="transverse">横双極誘導</option>
-            <option value="laplacian">SD参照基準</option>
           </select>
         </label>
         <label class="nk-select">
@@ -184,15 +183,21 @@
               <label>所属<input id="researchSetupReaderAffiliationInput" placeholder="所属施設・部署" /></label>
               <label>職位<select id="researchPositionSelect"><option value="">選択</option><option value="resident_no_board">レジデント (基幹領域専門医なし)</option><option value="fellow_board">フェロー (基幹領域専門医あり)</option><option value="attending_instructor">アテンディング (基幹領域指導医資格あり)</option></select></label>
               <label>診療科<select id="researchSetupReaderSpecialtySelect"><option value="">選択</option><option value="neurologist">脳神経内科</option><option value="psychiatrist">精神科</option><option value="neurosurgeon">脳神経外科</option><option value="other">その他</option></select></label>
-              <label>専門科目診療年数<input id="researchMedicalYearsInput" type="number" min="0" max="80" step="0.5" placeholder="年数" /></label>
+              <label>診療科目年数<input id="researchMedicalYearsInput" type="number" min="0" max="80" step="0.5" placeholder="年数" /></label>
               <label>てんかん専門医<select id="researchEpilepsySpecialistSelect"><option value="">選択</option><option value="yes_instructor">有 (指導医資格有り)</option><option value="yes_no_instructor">有 (指導医資格無し)</option><option value="no">無</option></select></label>
               <label>臨床神経生理 EEG専門医<select id="researchClinicalNeurophysEegSpecialistSelect"><option value="">選択</option><option value="yes_instructor">有 (指導医資格有り)</option><option value="yes_no_instructor">有 (指導医資格無し)</option><option value="no">無</option></select></label>
-              <label>月間EEG読影数<input id="researchMonthlyReadsInput" type="number" min="0" max="10000" step="1" placeholder="件/月" /></label>
               <label>てんかんセンター専従歴<select id="researchEpilepsyCenterTrainingSelect"><option value="">選択</option><option value="yes">あり</option><option value="no">なし</option></select></label>
               <label>専従期間<input id="researchEpilepsyCenterTrainingDurationInput" placeholder="例: 6か月、2年" /></label>
+              <label>普段最も使用するモンタージュ<select id="researchSetupMontageSelect"><option value="">練習2問目で選択</option><option value="longitudinal">縦双極誘導</option><option value="transverse">横双極誘導</option><option value="conventional">耳朶参照基準1</option><option value="a1a2">耳朶参照基準2</option><option value="conventional_average">平均参照基準1</option><option value="average">平均参照基準2</option><option value="cz">Cz参照基準</option></select></label>
               <input id="researchSetupEpochCountInput" type="hidden" value="20" />
               <div class="research-fixed-count" aria-label="テスト問題数">テスト問題数: <strong>20問</strong></div>
               <div class="research-privacy-note">入力いただいた個人情報は、論文化にあたり必要な連絡を行う場合にのみ使用します。研究計画終了後、速やかに破棄します。</div>
+              <div class="research-consent-box">
+                <div>本研究は個々の判読者の能力や成績を評価するものではありません.</div>
+                <div>どのような脳波波形で判定が難しくなるか, また判読時の操作状況が判定とどのように関連するかを, 集計データとして明らかにすることを目的とします.</div>
+                <div>本テストでは, 回答内容, 判読時間, モンタージュ表示時間, モンタージュ切り替え回数, 操作ログ, 回答者背景を研究目的で記録します.</div>
+                <label class="research-consent-check"><input id="researchConsentConfirmInput" type="checkbox" />上記を確認しました.</label>
+              </div>
               <button class="export-button" id="researchSetupStartBtn" type="button">開始</button>
             </div>
           </div>
@@ -224,8 +229,8 @@
               <strong>練習サンプル</strong>
               <button type="button" id="researchTutorialDismissBtn" aria-label="チュートリアルを閉じる">閉じる</button>
             </div>
-            <p>これは epilepsy group から選ばれた練習問題です。回答は記録されません。</p>
-            <p>波形の感度、時定数、スケールなどの表示条件は自由に変更して構いません。</p>
+            <p id="researchTutorialLead">これは操作説明用の練習問題です。回答は記録されません。</p>
+            <p id="researchTutorialMontageNote">波形の感度、時定数、表示スケール、モンタージュは自由に変更して構いません。</p>
             <p>判定していただきたい波形は、画面の真ん中にくるように表示してあります。</p>
             <ol>
               <li>波形を確認します。</li>
@@ -330,6 +335,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=20260620-public-test-flow11"></script>
+    <script src="/static/app.js?v=20260626-study-flow1"></script>
   </body>
 </html>

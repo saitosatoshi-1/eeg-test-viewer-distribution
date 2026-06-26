@@ -1770,7 +1770,6 @@ class RecordingStore:
             "cz": "Cz参照基準",
             "transverse": "横双極誘導",
             "c3c4": "C3/C4参照基準",
-            "laplacian": "SD参照基準",
         }
         requested = [m for m in (montages or []) if m in montage_labels]
         if not requested:
@@ -1782,8 +1781,6 @@ class RecordingStore:
         active_traces: list[dict[str, Any]] = []
         for montage, label in view_defs:
             traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
-            if montage == "laplacian":
-                traces = [trace for trace in traces if str(trace.get("label", "")).split("-", 1)[0] != "Pz"]
             for trace in traces:
                 trace["values"] = trace["values"][::stride].astype(float).round(3).tolist()
             view = {"montage": montage, "label": label, "traces": traces}
@@ -2278,7 +2275,7 @@ RESEARCH_RATING_ALIASES = {
     "てんかん性異常なし": RESEARCH_RATING_NEGATIVE,
     "てんかん性異常あり": RESEARCH_RATING_POSITIVE,
 }
-RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse", "c3c4", "laplacian"]
+RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse", "c3c4"]
 RESEARCH_MONTAGE_LABELS = {
     "longitudinal": "縦双極誘導",
     "a1a2": "耳朶参照基準2",
@@ -2288,7 +2285,6 @@ RESEARCH_MONTAGE_LABELS = {
     "cz": "Cz参照基準",
     "transverse": "横双極誘導",
     "c3c4": "C3/C4参照基準",
-    "laplacian": "SD参照基準",
 }
 RESEARCH_PHASE1_SAMPLE_TOTAL = 20
 RESEARCH_PHASE1_SAMPLE_PER_GROUP = 20
@@ -2979,6 +2975,29 @@ def load_research_responses(dataset_dir: Path, reader_id: str) -> list[dict[str,
     return []
 
 
+def research_case_exposure_counts(dataset_dir: Path, phase: str = "1") -> dict[str, int]:
+    counts: dict[str, int] = {}
+    responses_dir = dataset_dir / "responses"
+    if not responses_dir.exists():
+        return counts
+    for path in responses_dir.glob("*.json"):
+        payload = json_read(path, {"responses": []})
+        responses = payload.get("responses") if isinstance(payload, dict) else payload
+        if not isinstance(responses, list):
+            continue
+        seen_for_reader: set[str] = set()
+        for row in active_research_responses(responses):
+            if str(row.get("phase", "1")) != phase:
+                continue
+            case_id = str(row.get("caseId") or "").strip()
+            if not case_id or case_id.startswith("sample:"):
+                continue
+            seen_for_reader.add(case_id)
+        for case_id in seen_for_reader:
+            counts[case_id] = counts.get(case_id, 0) + 1
+    return counts
+
+
 def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[dict[str, Any]], output_path: Any = None, reader_profile: dict[str, Any] | None = None) -> None:
     if reader_profile is None:
         reader_profile = response_reader_profile(*responses)
@@ -3141,7 +3160,35 @@ def stable_balanced_research_order(rows: list[dict[str, Any]], seed_parts: tuple
     return ordered
 
 
-def research_phase1_sample(dataset: dict[str, Any], reader_id: str, excluded_case_ids: set[str] | None = None) -> list[dict[str, Any]]:
+def balanced_research_sample_by_exposure(
+    rows: list[dict[str, Any]],
+    limit: int,
+    exposure_counts: dict[str, int],
+    seed_parts: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    seed = hashlib.sha256("|".join(seed_parts).encode("utf-8")).hexdigest()
+    rng = random.Random(seed)
+    buckets: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        count = int(exposure_counts.get(str(row.get("caseId", "")), 0))
+        buckets.setdefault(count, []).append(row)
+    selected: list[dict[str, Any]] = []
+    for count in sorted(buckets):
+        bucket = list(buckets[count])
+        rng.shuffle(bucket)
+        for row in bucket:
+            if limit > 0 and len(selected) >= limit:
+                return selected
+            selected.append(row)
+    return selected
+
+
+def research_phase1_sample(
+    dataset: dict[str, Any],
+    reader_id: str,
+    excluded_case_ids: set[str] | None = None,
+    exposure_counts: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
     total_count = research_phase1_total_count(settings)
     excluded = excluded_case_ids or set()
@@ -3149,6 +3196,7 @@ def research_phase1_sample(dataset: dict[str, Any], reader_id: str, excluded_cas
         row for row in research_case_rows(dataset)
         if bool(row.get("include", True)) and str(row.get("caseId", "")) not in excluded
     ]
+    exposure_counts = exposure_counts or {}
     sampled: list[dict[str, Any]] = []
     selected_ids: set[str] = set()
     group_limits = {
@@ -3157,13 +3205,13 @@ def research_phase1_sample(dataset: dict[str, Any], reader_id: str, excluded_cas
     }
     for group, limit in group_limits.items():
         rows = [row for row in included if row.get("labelGroup") == group]
-        group_sample = stable_research_sample(rows, limit, (str(dataset.get("datasetId", "")), reader_id, "phase1", group))
+        group_sample = balanced_research_sample_by_exposure(rows, limit, exposure_counts, (str(dataset.get("datasetId", "")), reader_id, "phase1", group))
         sampled.extend(group_sample)
         selected_ids.update(str(row.get("caseId", "")) for row in group_sample)
     remaining = total_count - len(sampled)
     if remaining > 0:
         fill_pool = [row for row in included if str(row.get("caseId", "")) not in selected_ids]
-        sampled.extend(stable_research_sample(fill_pool, remaining, (str(dataset.get("datasetId", "")), reader_id, "phase1", "fill")))
+        sampled.extend(balanced_research_sample_by_exposure(fill_pool, remaining, exposure_counts, (str(dataset.get("datasetId", "")), reader_id, "phase1", "fill")))
     return stable_balanced_research_order(sampled, (str(dataset.get("datasetId", "")), reader_id, "phase1", "balanced-order"))
 
 
@@ -3182,10 +3230,22 @@ def research_sample_case(dataset: dict[str, Any], reader_id: str, phase: str, po
     sample_pool = [row for row in pool if research_is_epilepsy_sample_candidate(row)]
     if not sample_pool:
         sample_pool = [row for row in pool if row.get("labelGroup") == "epileptiform"]
-    sample = stable_research_sample(sample_pool, 1, (str(dataset.get("datasetId", "")), reader_id, phase, "sample"))
+    sample = stable_research_sample(sample_pool, 2, (str(dataset.get("datasetId", "")), reader_id, phase, "sample"))
+    if len(sample) == 1:
+        sample = sample * 2
+    steps = [("operation_practice", "操作説明用練習"), ("montage_setup", "普段使用モンタージュ設定用練習")]
     return [
-        {**row, "sampleEpoch": True, "samplePhase": phase, "sampleSourceGroup": "epilepsy", "originalCaseId": str(row.get("caseId", "")), "caseId": f"sample:{phase}:{row.get('caseId')}"}
-        for row in sample
+        {
+            **row,
+            "sampleEpoch": True,
+            "samplePhase": phase,
+            "sampleStep": step,
+            "sampleLabel": label,
+            "sampleSourceGroup": "epilepsy",
+            "originalCaseId": str(row.get("caseId", "")),
+            "caseId": f"sample:{phase}:{step}:{row.get('caseId')}",
+        }
+        for row, (step, label) in zip(sample, steps)
     ]
 
 
@@ -3193,7 +3253,9 @@ def research_phase_case_pool(dataset: dict[str, Any], reader_id: str, phase: str
     included = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
     sample = research_sample_case(dataset, reader_id, "phase1", included)
     sample_source_ids = {str(row.get("originalCaseId") or str(row.get("caseId", "")).split(":")[-1]) for row in sample}
-    phase1_cases = research_phase1_sample(dataset, reader_id, sample_source_ids)
+    dataset_dir = research_dataset_path(dataset.get("datasetPath"))
+    exposure_counts = research_case_exposure_counts(dataset_dir, phase)
+    phase1_cases = research_phase1_sample(dataset, reader_id, sample_source_ids, exposure_counts)
     return sample + phase1_cases
 
 
@@ -3460,6 +3522,8 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     montage_order = research_montage_order_payload(payload.get("montageOrder"))
     montage_sequence = research_montage_sequence_payload(payload.get("montageSequence"))
     montage_usage = research_montage_sequence_payload(payload.get("montageUsage"))
+    analysis_montage_usage = research_montage_sequence_payload(payload.get("analysisMontageUsage"))
+    analysis_montage_durations = research_montage_duration_payload(payload.get("analysisMontageDurationsSec"))
     montage_timeline = research_montage_sequence_payload(payload.get("montageTimeline"))
     montage_switches = research_montage_sequence_payload(payload.get("montageSwitches"))
     if not montage_sequence and montage_switches:
@@ -3475,6 +3539,7 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if not montage_order and montage_sequence:
         montage_order = [str(row.get("montage") or "").strip() for row in montage_sequence if str(row.get("montage") or "").strip()]
     displayed_montages = [str(item) for item in payload.get("displayedMontages", []) if str(item or "").strip()] if isinstance(payload.get("displayedMontages"), list) else list(montage_durations.keys())
+    analysis_displayed_montages = [str(item) for item in payload.get("analysisDisplayedMontages", []) if str(item or "").strip()] if isinstance(payload.get("analysisDisplayedMontages"), list) else list(analysis_montage_durations.keys())
     now = utc_now_iso()
     started_at = str(payload.get("startedAt") or now).strip()
     answered_at = str(payload.get("answeredAt") or now).strip()
@@ -3550,10 +3615,19 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         "montageOrder": montage_order,
         "montageSequence": montage_sequence,
         "montageUsage": montage_usage,
+        "analysisMontageUsage": analysis_montage_usage,
+        "analysisMontageDurationsSec": analysis_montage_durations,
+        "analysisDisplayedMontages": analysis_displayed_montages,
+        "montageConfirmationBehavior": bool(payload.get("montageConfirmationBehavior")),
+        "montageUsageAnalysisRule": payload.get("montageUsageAnalysisRule") or "exclude_segments_under_1_sec",
         "montageOrderSummary": payload.get("montageOrderSummary") or ";".join(f"{index}:{montage}" for index, montage in enumerate(montage_order, start=1)),
         "montageUsageSummary": payload.get("montageUsageSummary") or ";".join(
             f"{int(row.get('index') or row.get('order') or index)}:{row.get('montage', '')}:{row.get('startSec', 0)}-{row.get('endSec', 0)}s({row.get('durationSec', 0)}s)"
             for index, row in enumerate(montage_usage, start=1)
+        ),
+        "analysisMontageUsageSummary": payload.get("analysisMontageUsageSummary") or ";".join(
+            f"{int(row.get('index') or row.get('order') or index)}:{row.get('montage', '')}:{row.get('startSec', 0)}-{row.get('endSec', 0)}s({row.get('durationSec', 0)}s)"
+            for index, row in enumerate(analysis_montage_usage, start=1)
         ),
         "montageTimeline": montage_timeline,
         "montageSwitches": montage_switches,
@@ -3817,6 +3891,21 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
         for index, item in enumerate(montage_usage, start=1)
         if isinstance(item, dict) and str(item.get("montage") or "").strip()
     ]
+    analysis_montage_usage = row.get("analysisMontageUsage")
+    if not isinstance(analysis_montage_usage, list):
+        analysis_montage_usage = []
+    compact_analysis_montage_usage = [
+        {
+            "order": int(item.get("order") or item.get("index") or index),
+            "montage": str(item.get("montage") or "").strip(),
+            "montageLabel": RESEARCH_MONTAGE_LABELS.get(str(item.get("montage") or "").strip(), str(item.get("montage") or "").strip()),
+            "startSec": item.get("startSec", 0),
+            "endSec": item.get("endSec", 0),
+            "durationSec": item.get("durationSec", 0),
+        }
+        for index, item in enumerate(analysis_montage_usage, start=1)
+        if isinstance(item, dict) and str(item.get("montage") or "").strip()
+    ]
     test_date = row.get("testDate") or iso_date_part(row.get("testStartedAt") or row.get("answeredAt"))
     time_constant = row.get("timeConstant") or row.get("tc", "")
     high_cut_filter = row.get("highCutFilter") or row.get("hf", "")
@@ -3870,6 +3959,10 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
             "finalMontageLabel": RESEARCH_MONTAGE_LABELS.get(str(row.get("finalMontage") or row.get("usedMontage") or ""), str(row.get("finalMontage") or row.get("usedMontage") or "")),
             "totalSecByMontage": row.get("montageDurationsSec", {}),
             "usage": compact_montage_usage,
+            "analysisRule": row.get("montageUsageAnalysisRule", "exclude_segments_under_1_sec"),
+            "analysisTotalSecByMontage": row.get("analysisMontageDurationsSec", {}),
+            "analysisUsage": compact_analysis_montage_usage,
+            "montageConfirmationBehavior": bool(row.get("montageConfirmationBehavior")),
         },
     }
 
