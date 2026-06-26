@@ -4,6 +4,8 @@ const RECENT_FILES_KEY = "eegViewerRecentFiles.v1";
 const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
 const ANNOTATION_LIST_HEIGHT_KEY = "eegViewerAnnotationListHeight.v1";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
+const RESEARCH_PENDING_RESPONSES_KEY = "eegViewerPendingResearchResponses.v1";
+const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
 const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
 const PUBLIC_TEST_QUESTION_COUNT = 20;
 const DEFAULT_PUBLIC_DATASET_PATH = "private:gakkai_v1";
@@ -119,6 +121,7 @@ const state = {
   researchTestCompletedAt: "",
   researchResultAutoSubmitted: false,
   researchSaving: false,
+  researchRetryingPending: false,
   researchMontageTiming: null,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
@@ -317,23 +320,56 @@ function qs(params) {
   return new URLSearchParams(params).toString();
 }
 
-async function fetchJson(url, options = {}) {
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function cloneFetchOptions(options = {}) {
   const init = { ...options };
-  const headers = new Headers(init.headers || {});
-  if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
-  init.headers = headers;
-  const res = await fetch(url, init);
+  if (options.headers) init.headers = new Headers(options.headers);
+  return init;
+}
+
+function shouldRetryFetchError(err, response = null) {
+  if (!navigator.onLine) return true;
+  if (!response) return true;
+  return response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
+}
+
+async function fetchWithRetry(url, options = {}) {
+  const attempts = Math.max(1, Number(options.retryAttempts || 3));
+  const retryDelayMs = Math.max(100, Number(options.retryDelayMs || 650));
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const init = cloneFetchOptions(options);
+      delete init.retryAttempts;
+      delete init.retryDelayMs;
+      const headers = new Headers(init.headers || {});
+      if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
+      init.headers = headers;
+      const res = await fetch(url, init);
+      if (res.ok || !shouldRetryFetchError(null, res) || attempt === attempts) return res;
+      lastError = new Error(res.statusText || `HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+      if (!shouldRetryFetchError(err) || attempt === attempts) throw err;
+    }
+    setStatus(`通信が不安定です。再試行中 ${attempt}/${attempts - 1}...`, { busy: true });
+    await sleep(retryDelayMs * attempt);
+  }
+  throw lastError || new Error("Network request failed");
+}
+
+async function fetchJson(url, options = {}) {
+  const res = await fetchWithRetry(url, options);
   const data = await res.json();
   if (!res.ok || data.error) throw new Error(data.error || res.statusText);
   return data;
 }
 
 async function fetchText(url, options = {}) {
-  const init = { ...options };
-  const headers = new Headers(init.headers || {});
-  if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
-  init.headers = headers;
-  const res = await fetch(url, init);
+  const res = await fetchWithRetry(url, options);
   const text = await res.text();
   if (!res.ok) throw new Error(text || res.statusText);
   return text;
@@ -761,6 +797,13 @@ function bindControls() {
   document.addEventListener("click", (ev) => {
     if (!els.contextMenu?.contains(ev.target)) hideContextMenu();
   });
+  window.addEventListener("online", () => {
+    setStatus("オンラインに戻りました。未送信回答を確認します");
+    retryPendingResearchResponses();
+  });
+  window.addEventListener("offline", () => {
+    setStatus("オフラインです。回答は可能な範囲で一時保存します", { error: true });
+  });
   els.contextMenu?.addEventListener("click", onContextMenuClick);
 
   els.saveAnnotationBtn?.addEventListener("click", (ev) => {
@@ -1015,6 +1058,67 @@ function storedResearchProfile() {
     return profile && typeof profile === "object" ? profile : {};
   } catch {
     return {};
+  }
+}
+
+function readPendingResearchResponses() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(RESEARCH_PENDING_RESPONSES_KEY) || "[]");
+    return Array.isArray(rows) ? rows.filter((row) => row && typeof row === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingResearchResponses(rows) {
+  try {
+    localStorage.setItem(RESEARCH_PENDING_RESPONSES_KEY, JSON.stringify(rows.slice(-100)));
+  } catch {
+    // Ignore storage failures; the server remains the primary store.
+  }
+}
+
+function queuePendingResearchResponse(payload, reason = "") {
+  if (!payload || !payload.caseId) return;
+  const rows = readPendingResearchResponses();
+  const key = `${payload.readerId || ""}|${payload.phase || "1"}|${payload.caseId || ""}`;
+  const next = {
+    key,
+    queuedAt: new Date().toISOString(),
+    reason,
+    payload,
+  };
+  const index = rows.findIndex((row) => row.key === key);
+  if (index >= 0) rows[index] = next;
+  else rows.push(next);
+  writePendingResearchResponses(rows);
+}
+
+async function retryPendingResearchResponses() {
+  if (state.researchRetryingPending || !navigator.onLine) return;
+  const rows = readPendingResearchResponses();
+  if (!rows.length) return;
+  state.researchRetryingPending = true;
+  const remaining = [];
+  try {
+    for (const row of rows) {
+      try {
+        await fetchJson("/api/research/test/response", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(row.payload),
+          retryAttempts: 2,
+        });
+      } catch {
+        remaining.push(row);
+      }
+    }
+    writePendingResearchResponses(remaining);
+    if (rows.length !== remaining.length) {
+      setStatus(remaining.length ? `未送信回答を再送しました。一部は未送信です: ${remaining.length}件` : "未送信回答を再送しました");
+    }
+  } finally {
+    state.researchRetryingPending = false;
   }
 }
 
@@ -1324,6 +1428,31 @@ function downloadTextFile(filename, text, mime = "application/json") {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function saveResearchResultBackup(filename, text) {
+  try {
+    localStorage.setItem(RESEARCH_RESULT_BACKUP_KEY, JSON.stringify({
+      filename,
+      text,
+      savedAt: new Date().toISOString(),
+    }));
+  } catch {
+    // Ignore storage failures; explicit download remains available.
+  }
+}
+
+function downloadResearchResultBackup() {
+  try {
+    const backup = JSON.parse(localStorage.getItem(RESEARCH_RESULT_BACKUP_KEY) || "{}");
+    if (backup?.filename && backup?.text) {
+      downloadTextFile(backup.filename, backup.text);
+      return backup;
+    }
+  } catch {
+    // Ignore malformed backup.
+  }
+  return null;
 }
 
 function isMobileViewport() {
@@ -2301,6 +2430,7 @@ async function startResearchTest() {
   setResearchSetupMessage("入力内容を確認中...");
   if (!validateResearchProfileForStart()) return;
   saveResearchProfile();
+  retryPendingResearchResponses();
   hideResearchCompletion();
   state.researchTutorialDismissed = false;
   state.researchSampleCompletedPhases = {};
@@ -2506,10 +2636,50 @@ async function saveResearchRating(rating) {
       }
       return;
     }
+    const responsePayload = {
+      datasetPath: state.researchDatasetPath,
+      readerId: state.researchSession.readerId,
+      outputPath: researchProfile().outputPath,
+      readerProfile: researchProfile(),
+      phase: state.researchSession.phase,
+      caseId: item.caseId,
+      sessionToken: state.researchSession.sessionToken || "",
+      eventTime: item.eventTime ?? "",
+      epochStart: item.epochStart ?? "",
+      durationSec: item.durationSec ?? "",
+      rating,
+      startedAt: state.researchCaseStartedAt || answeredAt,
+      answeredAt,
+      elapsedMs,
+      ...researchTestTimingPayload(answeredAt),
+      displayMode: "phase1_single",
+      ...researchSpikeSelectionPayload(),
+      ...researchMontageTimingPayload(),
+    };
     const data = await fetchJson("/api/research/test/response", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(responsePayload),
+    });
+    writePendingResearchResponses(readPendingResearchResponses().filter((row) => row.key !== `${responsePayload.readerId || ""}|${responsePayload.phase || "1"}|${responsePayload.caseId || ""}`));
+    state.researchSession = data.session;
+    state.researchTestCompletedAt = answeredAt;
+    setResearchResponsesFromSession(data.session);
+    state.lastResearchResponse = data.response;
+    state.lastResearchResponseCaseIndex = state.researchCaseIndex;
+    renderRightResearchPanels();
+    showResearchToast(`保存しました: ${researchRatingLabel(rating)} · やり直す場合は「前の問題をやりなおす」`, { undo: true });
+    const cases = activeResearchCases();
+    const nextIndex = firstUnansweredResearchCaseIndex();
+    if (nextIndex >= 0) await showResearchCase(nextIndex);
+    else {
+      state.researchCaseIndex = cases.length ? cases.length - 1 : 0;
+      await completeResearchTest();
+      setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
+    }
+  } catch (err) {
+    if (!item.sampleEpoch) {
+      const fallbackPayload = {
         datasetPath: state.researchDatasetPath,
         readerId: state.researchSession.readerId,
         outputPath: researchProfile().outputPath,
@@ -2528,24 +2698,27 @@ async function saveResearchRating(rating) {
         displayMode: "phase1_single",
         ...researchSpikeSelectionPayload(),
         ...researchMontageTimingPayload(),
-      }),
-    });
-    state.researchSession = data.session;
-    state.researchTestCompletedAt = answeredAt;
-    setResearchResponsesFromSession(data.session);
-    state.lastResearchResponse = data.response;
-    state.lastResearchResponseCaseIndex = state.researchCaseIndex;
-    renderRightResearchPanels();
-    showResearchToast(`保存しました: ${researchRatingLabel(rating)} · やり直す場合は「前の問題をやりなおす」`, { undo: true });
-    const cases = activeResearchCases();
-    const nextIndex = firstUnansweredResearchCaseIndex();
-    if (nextIndex >= 0) await showResearchCase(nextIndex);
-    else {
-      state.researchCaseIndex = cases.length ? cases.length - 1 : 0;
-      await completeResearchTest();
-      setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
+      };
+      queuePendingResearchResponse(fallbackPayload, err.message || "save failed");
+      const localResponse = {
+        ...fallbackPayload,
+        responseId: `local-pending-${Date.now()}`,
+        answerOrder: Number(state.researchSession?.answeredCount || state.researchResponses?.length || 0) + 1,
+        pendingUpload: true,
+      };
+      state.researchSession.responses = [...(state.researchSession.responses || []), localResponse];
+      state.researchSession.answeredCount = Number(state.researchSession.answeredCount || 0) + 1;
+      setResearchResponsesFromSession(state.researchSession);
+      state.lastResearchResponse = localResponse;
+      state.lastResearchResponseCaseIndex = state.researchCaseIndex;
+      renderRightResearchPanels();
+      showResearchToast("通信が不安定です。この回答は端末内に一時保存しました。オンライン復帰時に再送します。");
+      setStatus(`Save failed: ${err.message}. 回答は端末内に一時保存しました。`, { error: true });
+      const nextIndex = firstUnansweredResearchCaseIndex();
+      if (nextIndex >= 0) await showResearchCase(nextIndex);
+      else await completeResearchTest();
+      return;
     }
-  } catch (err) {
     setStatus(`Save failed: ${err.message}`, { error: true });
     showResearchToast(`保存できませんでした: ${err.message}`);
   } finally {
@@ -2634,14 +2807,21 @@ async function exportResearchJson() {
   const readerId = activeResearchReaderId(profile);
   try {
     setStatus("結果JSONをダウンロード中...", { busy: true });
+    await retryPendingResearchResponses();
     const jsonFilename = researchJsonFilename(readerId, profile);
     const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
+    saveResearchResultBackup(jsonFilename, jsonText);
     downloadTextFile(jsonFilename, jsonText);
     if (els.researchSavedCsvName) {
       els.researchSavedCsvName.textContent = `ダウンロードしました: ${jsonFilename}。メールに添付してください。`;
     }
     setStatus(`結果JSONをダウンロードしました: ${jsonFilename}`);
   } catch (err) {
+    const backup = downloadResearchResultBackup();
+    if (backup) {
+      setStatus(`Export failed. 最後のバックアップをダウンロードしました: ${backup.filename}`, { error: true });
+      return;
+    }
     setStatus(`Export failed: ${err.message}`, { error: true });
   }
 }
@@ -2656,7 +2836,9 @@ async function shareResearchJsonByEmail() {
   const jsonFilename = researchJsonFilename(readerId, profile);
   try {
     setStatus("結果JSONを共有準備中...", { busy: true });
+    await retryPendingResearchResponses();
     const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
+    saveResearchResultBackup(jsonFilename, jsonText);
     const file = new File([jsonText], jsonFilename, { type: "application/json" });
     const shareData = {
       title: "脳波読影テスト結果",
@@ -2682,6 +2864,14 @@ async function shareResearchJsonByEmail() {
       setStatus("JSON共有をキャンセルしました");
       return;
     }
+    const backup = downloadResearchResultBackup();
+    if (backup) {
+      setStatus(`Share failed. 最後のバックアップをダウンロードしました: ${backup.filename}`, { error: true });
+      if (els.researchSavedCsvName) {
+        els.researchSavedCsvName.textContent = `共有できませんでした。最後のバックアップ ${backup.filename} をダウンロードしました。`;
+      }
+      return;
+    }
     setStatus(`Share failed: ${err.message}`, { error: true });
     if (els.researchSavedCsvName) {
       els.researchSavedCsvName.textContent = "共有できませんでした。JSONをダウンロードしてメールに添付してください。";
@@ -2703,6 +2893,7 @@ async function submitResearchJson(options = {}) {
   const readerId = activeResearchReaderId(profile);
   try {
     setStatus(options.automatic ? "テスト完了処理中..." : "結果を送信中...", { busy: true });
+    await retryPendingResearchResponses();
     const jsonFilename = researchJsonFilename(readerId, profile);
     const result = await fetchJson("/api/research/test/submit-result", {
       method: "POST",
