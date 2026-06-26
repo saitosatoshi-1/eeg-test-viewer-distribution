@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-mobile-share1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-temple-consent1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -178,9 +178,9 @@
               <div class="research-setup-title">テスト設定</div>
               <div class="research-setup-message" id="researchSetupMessage" role="status" aria-live="polite"></div>
               <input id="researchSetupDatasetPathInput" type="hidden" value="private:gakkai_v1" />
-              <label>回答者名<input id="researchSetupReaderNameInput" placeholder="氏名または識別名" /></label>
+              <label>回答者名 (English)<input id="researchSetupReaderNameInput" placeholder="例: Taro Yamada" autocomplete="name" /></label>
               <label>メール<input id="researchSetupReaderEmailInput" type="email" placeholder="メールアドレス" /></label>
-              <label>所属<input id="researchSetupReaderAffiliationInput" placeholder="所属施設・部署" /></label>
+              <label>所属 (English)<input id="researchSetupReaderAffiliationInput" placeholder="例: National Center of Neurology and Psychiatry" autocomplete="organization" /></label>
               <label>職位<select id="researchPositionSelect"><option value="">選択</option><option value="resident_no_board">レジデント (基幹領域専門医なし)</option><option value="fellow_board">フェロー (基幹領域専門医あり)</option><option value="attending_instructor">アテンディング (基幹領域指導医資格あり)</option></select></label>
               <label>診療科<select id="researchSetupReaderSpecialtySelect"><option value="">選択</option><option value="neurologist">脳神経内科</option><option value="psychiatrist">精神科</option><option value="neurosurgeon">脳神経外科</option><option value="other">その他</option></select></label>
               <label>診療科目年数<input id="researchMedicalYearsInput" type="number" min="0" max="80" step="0.5" placeholder="年数" /></label>
@@ -196,6 +196,7 @@
                 <div>本研究は個々の判読者の能力や成績を評価するものではありません.</div>
                 <div>どのような脳波波形で判定が難しくなるか, また判読時の操作状況が判定とどのように関連するかを, 集計データとして明らかにすることを目的とします.</div>
                 <div>本テストでは, 回答内容, 判読時間, モンタージュ表示時間, モンタージュ切り替え回数, 操作ログ, 回答者背景を研究目的で記録します.</div>
+                <div>データ流出予防のため, 脳波データ提供元であるTemple Universityへ回答者名, 所属, メールアドレスを送付します.</div>
                 <label class="research-consent-check"><input id="researchConsentConfirmInput" type="checkbox" />上記を確認しました.</label>
               </div>
               <button class="export-button" id="researchSetupStartBtn" type="button">開始</button>
@@ -336,6 +337,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=20260626-mobile-share1"></script>
+    <script src="/static/app.js?v=20260626-temple-consent1"></script>
   </body>
 </html>

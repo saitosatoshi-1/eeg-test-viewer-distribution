@@ -3816,7 +3816,9 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
             "epilepsySpecialist", "clinicalNeurophysEegSpecialist",
             "medicalPracticeYears", "eegReadsPerMonth",
             "epilepsyCenterTraining", "epilepsyCenterTrainingDuration",
-            "usualMontage",
+            "usualMontage", "ethicsNoticeConfirmed",
+            "dataProviderSharingAcknowledged", "dataProviderName",
+            "dataProviderSharedFields", "dataProviderSharingPurpose",
         )
     }
 

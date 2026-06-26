@@ -936,9 +936,9 @@ function updateEpilepsyCenterDurationRequirement() {
 function validateResearchProfileForStart() {
   updateEpilepsyCenterDurationRequirement();
   const requiredFields = [
-    [els.researchSetupReaderNameInput, "回答者名"],
+    [els.researchSetupReaderNameInput, "回答者名 (English)"],
     [els.researchSetupReaderEmailInput, "メール"],
-    [els.researchSetupReaderAffiliationInput, "所属"],
+    [els.researchSetupReaderAffiliationInput, "所属 (English)"],
     [els.researchPositionSelect, "職位"],
     [els.researchSetupReaderSpecialtySelect, "診療科"],
     [els.researchMedicalYearsInput, "診療科目年数"],
@@ -989,6 +989,10 @@ function researchProfile() {
     epilepsyCenterTraining: els.researchEpilepsyCenterTrainingSelect?.value || "",
     epilepsyCenterTrainingDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
     ethicsNoticeConfirmed: Boolean(els.researchConsentConfirmInput?.checked),
+    dataProviderSharingAcknowledged: Boolean(els.researchConsentConfirmInput?.checked),
+    dataProviderName: "Temple University",
+    dataProviderSharedFields: ["readerName", "affiliation", "email"],
+    dataProviderSharingPurpose: "prevention of EEG data leakage",
   };
 }
 
