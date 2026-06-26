@@ -3839,6 +3839,7 @@ async function loadWindow() {
           ecg: els.ecgToggle.checked ? "1" : "0",
           ecgFilter: els.ecgFilterToggle?.checked ? "1" : "0",
           topomap: "0",
+          annotations: TEST_ONLY_DISTRIBUTION ? "0" : "1",
         };
         const cacheKey = windowCacheKey(params);
         const cached = state.windowCache.get(cacheKey);

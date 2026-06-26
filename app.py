@@ -1641,6 +1641,7 @@ class RecordingStore:
         include_ecg: bool,
         ecg_filter: bool = False,
         include_topomap: bool = True,
+        include_annotations: bool = True,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1656,6 +1657,7 @@ class RecordingStore:
         else:
             raw = self.raw(record_id)
             if raw is None:
+                annotations = self.display_annotations(record_id) if include_annotations else []
                 return {
                     "id": record_id,
                     "sfreq": 0,
@@ -1663,7 +1665,7 @@ class RecordingStore:
                     "duration": duration_sec,
                     "times": [],
                     "traces": [],
-                    "annotations": self.display_annotations(record_id),
+                    "annotations": annotations,
                     "warnings": warnings,
                 }
 
@@ -1688,6 +1690,7 @@ class RecordingStore:
         rel_times = (np.arange(start, stop, stride) / sfreq).astype(float)
         for trace in traces:
             trace["values"] = trace["values"][::stride].astype(float).round(3).tolist()
+        annotations = self.display_annotations(record_id) if include_annotations else []
         return {
             "id": record_id,
             "sfreq": sfreq,
@@ -1696,7 +1699,7 @@ class RecordingStore:
             "times": rel_times.round(4).tolist(),
             "traces": traces,
             "topomap": topomap,
-            "annotations": self.display_annotations(record_id),
+            "annotations": annotations,
             "warnings": warnings,
             "metadata": metadata,
         }
@@ -1715,6 +1718,7 @@ class RecordingStore:
         ecg_filter: bool = False,
         montages: list[str] | None = None,
         include_topomap: bool = True,
+        include_annotations: bool = True,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1730,6 +1734,7 @@ class RecordingStore:
         else:
             raw = self.raw(record_id)
             if raw is None:
+                annotations = self.display_annotations(record_id) if include_annotations else []
                 return {
                     "id": record_id,
                     "sfreq": 0,
@@ -1739,7 +1744,7 @@ class RecordingStore:
                     "traces": [],
                     "montage": active_montage,
                     "montageViews": [],
-                    "annotations": self.display_annotations(record_id),
+                    "annotations": annotations,
                     "warnings": warnings,
                 }
 
@@ -1787,6 +1792,7 @@ class RecordingStore:
             montage_views.append(view)
             if montage == active:
                 active_traces = traces
+        annotations = self.display_annotations(record_id) if include_annotations else []
         return {
             "id": record_id,
             "sfreq": sfreq,
@@ -1797,7 +1803,7 @@ class RecordingStore:
             "montage": active,
             "montageViews": montage_views,
             "topomap": topomap,
-            "annotations": self.display_annotations(record_id),
+            "annotations": annotations,
             "warnings": warnings,
             "metadata": metadata,
         }
@@ -4628,6 +4634,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         qs.get("ecg", ["1"])[0] == "1",
                         qs.get("ecgFilter", ["0"])[0] == "1",
                         qs.get("topomap", ["1"])[0] != "0",
+                        qs.get("annotations", ["1"])[0] != "0",
                     )
                 )
             if path == "/api/research/dataset":
