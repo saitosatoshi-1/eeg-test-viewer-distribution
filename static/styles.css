@@ -1399,6 +1399,14 @@ dd {
   margin: 0 0 8px;
 }
 
+.research-tutorial-next-test {
+  border-left: 4px solid #2563eb;
+  padding: 7px 10px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-weight: 700;
+}
+
 .research-tutorial ol {
   display: grid;
   gap: 6px;

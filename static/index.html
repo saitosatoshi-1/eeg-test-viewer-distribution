@@ -192,7 +192,7 @@
                 <div>どのような脳波波形で判定が難しくなるか, また判読時の操作状況が判定とどのように関連するかを, 集計データとして明らかにすることを目的とします.</div>
                 <div>入力いただいた個人情報は、論文化にあたり必要な連絡を行う場合にのみ使用します。研究計画終了後、速やかに破棄します。</div>
                 <div>取得した情報は個人が特定されない形で解析し, 学会・論文等で公表することがあります.</div>
-                <div>データ流出予防のため, 脳波データ提供元である米国の大学, Temple Universityへ回答者名, 所属, メールアドレスを送付します.</div>
+                <div>データ流出予防のため, 脳波データ提供元である米国の大学, Temple Universityへ回答者名, 所属, メールアドレスを提供する必要があります.</div>
                 <label class="research-consent-check"><input id="researchConsentConfirmInput" type="checkbox" />上記を確認しました.</label>
               </div>
               <button class="export-button" id="researchSetupStartBtn" type="button">開始</button>
@@ -201,12 +201,12 @@
           <div class="research-complete-screen" id="researchCompleteScreen" hidden>
             <div class="research-complete-panel">
               <div class="research-complete-title" id="researchCompleteTitle">お疲れ様でした!</div>
-              <div class="research-complete-message" id="researchCompleteMessage">JSONをダウンロードし、メールに添付して送ってください。</div>
+              <div class="research-complete-message" id="researchCompleteMessage">JSONをダウンロードし、メールに添付して提出してください。</div>
               <div class="research-mail-box" id="researchMailBox">
                 <div class="research-mail-row"><span>宛先</span><strong>satoshi.saito@ncnp.go.jp</strong></div>
                 <textarea id="researchEmailBody" readonly>斉藤先生
 
-脳波読影テストの結果ファイルを送付します。
+脳波読影テストの結果ファイルを提出します。
 添付ファイルをご確認ください。
 
 よろしくお願いいたします。
@@ -228,6 +228,7 @@
               <button type="button" id="researchTutorialDismissBtn" aria-label="チュートリアルを閉じる">閉じる</button>
             </div>
             <p id="researchTutorialLead">これは操作説明用の練習問題です。回答は記録されません。</p>
+            <p class="research-tutorial-next-test" id="researchTutorialNextTestNote" hidden>この練習サンプル2の次から本番が始まります。</p>
             <p id="researchTutorialMontageNote">波形の感度、時定数、表示スケール、モンタージュは自由に変更して構いません。</p>
             <p id="researchTutorialTargetNote">判定していただきたい波形は、画面の真ん中にくるように表示してあります。</p>
             <ol id="researchTutorialSteps">

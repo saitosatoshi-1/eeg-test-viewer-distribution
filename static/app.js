@@ -262,6 +262,7 @@ const els = {
   researchTutorialDismissBtn: document.getElementById("researchTutorialDismissBtn"),
   researchTutorialTitle: document.getElementById("researchTutorialTitle"),
   researchTutorialLead: document.getElementById("researchTutorialLead"),
+  researchTutorialNextTestNote: document.getElementById("researchTutorialNextTestNote"),
   researchTutorialMontageNote: document.getElementById("researchTutorialMontageNote"),
   researchTutorialTargetNote: document.getElementById("researchTutorialTargetNote"),
   researchTutorialSteps: document.getElementById("researchTutorialSteps"),
@@ -1380,7 +1381,7 @@ function researchEmailBodyText(profile = researchProfile()) {
   return [
     "斉藤先生",
     "",
-    "脳波読影テストの結果ファイルを送付します。",
+    "脳波読影テストの結果ファイルを提出します。",
     "添付ファイルをご確認ください。",
     "",
     "よろしくお願いいたします。",
@@ -1628,6 +1629,7 @@ function updateResearchTutorial(item = currentResearchCase()) {
     els.researchTutorialMontageNote.hidden = isMontageSetup;
     els.researchTutorialMontageNote.textContent = "波形の感度、時定数、表示スケール、モンタージュは自由に変更して構いません。";
   }
+  if (els.researchTutorialNextTestNote) els.researchTutorialNextTestNote.hidden = !isMontageSetup;
   if (els.researchTutorialTargetNote) els.researchTutorialTargetNote.hidden = isMontageSetup;
   if (els.researchTutorialSteps) els.researchTutorialSteps.hidden = isMontageSetup;
   els.researchTutorial.hidden = !show;
@@ -4801,34 +4803,19 @@ function exportJson() {
 }
 
 function exportViewerJpeg() {
-  if (!els.waveCanvas) return;
-  const start = Number.isFinite(Number(state.start)) ? Number(state.start).toFixed(3) : "window";
-  exportCanvasAsJpeg(els.waveCanvas, `${state.recordingId}.viewer_${start}s.jpg`);
+  notifyScreenshotExportDisabled();
 }
 
 function exportTopomapJpeg() {
-  if (!state.preciseTopomap?.available) {
-    window.alert("Topomap data is not available yet.");
-    return;
-  }
-  const items = [{ label: els.earlobeTopomapTitle?.textContent || "System reference", canvas: els.systemTopomapCanvas }].filter((item) => item.canvas);
-  const start = Number(currentTopomapInterval()?.start || 0).toFixed(3);
-  exportCanvasGroupAsJpeg(items, `${state.recordingId}.topomap_${start}s.jpg`, {
-    title: `Topomap ${formatSec(currentTopomapInterval()?.start || 0)}`,
-  });
+  notifyScreenshotExportDisabled();
 }
 
 function exportScalogramJpeg() {
-  if (!state.scalogramData?.available) return;
-  const panel = document.querySelector(".scalogram-panel");
-  const items = Array.from(panel?.querySelectorAll("canvas") || [])
-    .filter((canvas) => canvas.width > 0 && canvas.height > 0 && isElementVisible(canvas))
-    .map((canvas) => ({ label: canvasExportLabel(canvas), canvas }));
-  if (!items.length) return;
-  const start = Number.isFinite(Number(state.scalogramData.start)) ? Number(state.scalogramData.start).toFixed(3) : "selection";
-  exportCanvasGroupAsJpeg(items, `${state.recordingId}.${state.analysisKind}_${start}s.jpg`, {
-    title: `${state.analysisKind} ${formatSec(state.scalogramData.start || 0)} + ${Number(state.scalogramData.duration || 0).toFixed(3)}s`,
-  });
+  notifyScreenshotExportDisabled();
+}
+
+function notifyScreenshotExportDisabled() {
+  setStatus("スクリーンショット/JPEG保存は無効です。");
 }
 
 async function importJson(ev) {
@@ -4909,52 +4896,11 @@ function canvasToWhiteJpegBlob(sourceCanvas, quality = 0.92) {
 }
 
 async function exportCanvasAsJpeg(canvas, filename) {
-  try {
-    await saveBlobToDesktop(await canvasToWhiteJpegBlob(canvas), filename);
-  } catch (err) {
-    console.error(err);
-    window.alert(err.message || "JPEG export failed");
-  }
+  notifyScreenshotExportDisabled();
 }
 
 async function exportCanvasGroupAsJpeg(items, filename, options = {}) {
-  try {
-    const valid = (items || []).filter((item) => item.canvas?.width && item.canvas?.height);
-    if (!valid.length) throw new Error("No canvas data to export");
-    const padding = 24;
-    const gap = 18;
-    const labelH = 22;
-    const titleH = options.title ? 34 : 0;
-    const width = Math.max(360, ...valid.map((item) => item.canvas.width)) + padding * 2;
-    const height = padding * 2 + titleH + valid.reduce((sum, item) => sum + labelH + item.canvas.height + gap, 0) - gap;
-    const out = document.createElement("canvas");
-    out.width = width;
-    out.height = height;
-    const ctx = out.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = "#26313b";
-    ctx.font = "600 18px system-ui, -apple-system, sans-serif";
-    let y = padding;
-    if (options.title) {
-      ctx.fillText(String(options.title), padding, y + 18);
-      y += titleH;
-    }
-    ctx.font = "600 13px system-ui, -apple-system, sans-serif";
-    for (const item of valid) {
-      ctx.fillStyle = "#3f4952";
-      ctx.fillText(String(item.label || "Canvas").slice(0, 120), padding, y + 14);
-      y += labelH;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(padding, y, item.canvas.width, item.canvas.height);
-      ctx.drawImage(item.canvas, padding, y);
-      y += item.canvas.height + gap;
-    }
-    await saveBlobToDesktop(await canvasToWhiteJpegBlob(out), filename);
-  } catch (err) {
-    console.error(err);
-    window.alert(err.message || "JPEG export failed");
-  }
+  notifyScreenshotExportDisabled();
 }
 
 function isElementVisible(el) {
