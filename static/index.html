@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260626-temple-consent1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260626-ac-filter1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -60,11 +60,8 @@
         <label class="nk-select">
           <span class="select-caption">AC</span>
           <select id="acSelect">
-            <option value="OFF">OFF</option>
             <option value="50" selected>50 Hz</option>
             <option value="60">60 Hz</option>
-            <option value="50h">50+100 Hz</option>
-            <option value="60h">60+120 Hz</option>
           </select>
         </label>
         <label class="nk-select">
@@ -337,6 +334,6 @@
       </form>
     </dialog>
 
-    <script src="/static/app.js?v=20260626-temple-consent1"></script>
+    <script src="/static/app.js?v=20260626-ac-filter1"></script>
   </body>
 </html>

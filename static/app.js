@@ -558,10 +558,22 @@ function filterControlKey() {
   return [
     els.tcSelect?.value || "",
     els.hfSelect?.value || "",
-    els.acSelect?.value || "",
+    normalizeAcValue(els.acSelect?.value),
     els.ecgToggle?.checked ? "1" : "0",
     els.ecgFilterToggle?.checked ? "1" : "0",
   ].join("|");
+}
+
+function normalizeAcValue(value) {
+  const raw = String(value || "").trim();
+  return raw === "60" || raw === "60h" ? "60" : "50";
+}
+
+function normalizeAcSelect() {
+  if (!els.acSelect) return "50";
+  const value = normalizeAcValue(els.acSelect.value);
+  if (els.acSelect.value !== value) els.acSelect.value = value;
+  return value;
 }
 
 function preferredWindowMontages(activeMontage = activeMontageValue()) {
@@ -2912,7 +2924,8 @@ function restoreSettings() {
     setSelectValue(els.sensitivitySelect, settings.sensitivity);
     setSelectValue(els.tcSelect, settings.tc);
     setSelectValue(els.hfSelect, settings.hf);
-    setSelectValue(els.acSelect, settings.ac);
+    setSelectValue(els.acSelect, normalizeAcValue(settings.ac));
+    normalizeAcSelect();
     setSelectValue(els.durationSelect, settings.duration);
     syncTimebaseButtons();
     setSelectValue(els.paperSelect, settings.paper);
@@ -2945,7 +2958,7 @@ function saveSettings() {
     sensitivity: els.sensitivitySelect.value,
     tc: els.tcSelect.value,
     hf: els.hfSelect.value,
-    ac: els.acSelect.value,
+    ac: normalizeAcSelect(),
     duration: els.durationSelect.value,
     paper: els.paperSelect.value,
     ecg: els.ecgToggle.checked,
@@ -3563,7 +3576,7 @@ async function loadWindow() {
           montages: preferredWindowMontages(requestedMontage).join(","),
           tc: els.tcSelect.value,
           hf: els.hfSelect.value,
-          ac: els.acSelect.value,
+          ac: normalizeAcSelect(),
           ecg: els.ecgToggle.checked ? "1" : "0",
           ecgFilter: els.ecgFilterToggle?.checked ? "1" : "0",
           topomap: "0",
@@ -3779,7 +3792,7 @@ function draw() {
     els.timeReadout.textContent = `${formatSec(start)} - ${formatSec(start + duration)}`;
   }
   if (els.calReadout) {
-    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · AC ${els.acSelect?.value || ""} · ${els.paperSelect?.value || "30"} mm/s`;
+    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · AC ${normalizeAcValue(els.acSelect?.value)} · ${els.paperSelect?.value || "30"} mm/s`;
   }
   if (!traces.length || !times.length) {
     ctx.fillStyle = "#68707c";
@@ -4519,7 +4532,7 @@ async function saveDialogAnnotation() {
       sensitivityUvPerMm: sensitivityValue(),
       tc: els.tcSelect.value,
       hf: els.hfSelect.value,
-      ac: els.acSelect.value,
+      ac: normalizeAcSelect(),
       timebaseSec: Number(els.durationSelect.value),
       paperSpeedMmPerSec: Number(els.paperSelect.value),
     },
