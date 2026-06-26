@@ -990,7 +990,7 @@ function researchProfile() {
     epilepsyCenterTrainingDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
     ethicsNoticeConfirmed: Boolean(els.researchConsentConfirmInput?.checked),
     dataProviderSharingAcknowledged: Boolean(els.researchConsentConfirmInput?.checked),
-    dataProviderName: "Temple University",
+    dataProviderName: "Temple University, a university in the United States",
     dataProviderSharedFields: ["readerName", "affiliation", "email"],
     dataProviderSharingPurpose: "prevention of EEG data leakage",
   };
