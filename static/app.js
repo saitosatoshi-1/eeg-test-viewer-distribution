@@ -277,7 +277,6 @@ const els = {
   researchClinicalNeurophysEegSpecialistSelect: document.getElementById("researchClinicalNeurophysEegSpecialistSelect"),
   researchEpilepsyCenterTrainingSelect: document.getElementById("researchEpilepsyCenterTrainingSelect"),
   researchEpilepsyCenterTrainingDurationInput: document.getElementById("researchEpilepsyCenterTrainingDurationInput"),
-  researchSetupMontageSelect: document.getElementById("researchSetupMontageSelect"),
   researchSetupEpochCountInput: document.getElementById("researchSetupEpochCountInput"),
   researchSetupStartBtn: document.getElementById("researchSetupStartBtn"),
   researchSetupResetProfileBtn: document.getElementById("researchSetupResetProfileBtn"),
@@ -886,7 +885,6 @@ function bindResearchControls() {
     els.researchSetupReaderEmailInput,
     els.researchSetupReaderAffiliationInput,
     els.researchConsentConfirmInput,
-    els.researchSetupMontageSelect,
     els.researchSetupReaderSpecialtySelect,
     els.researchPositionSelect,
     els.researchEpilepsySpecialistSelect,
@@ -967,9 +965,8 @@ function resetResearchProfileForm() {
     els.researchEpilepsyCenterTrainingSelect,
     els.researchEegTrainingSelect,
   ].filter(Boolean)) select.value = "";
-  const usualMontage = storedResearchProfile().usualMontage || activeMontageValue();
   try {
-    localStorage.setItem(RESEARCH_PROFILE_KEY, JSON.stringify({ usualMontage }));
+    localStorage.removeItem(RESEARCH_PROFILE_KEY);
   } catch {
     // Ignore private-mode storage failures.
   }
@@ -985,7 +982,7 @@ function updateEpilepsyCenterDurationRequirement() {
   els.researchEpilepsyCenterTrainingDurationInput.disabled = !hasTraining;
   els.researchEpilepsyCenterTrainingDurationInput.required = hasTraining;
   if (!hasTraining) els.researchEpilepsyCenterTrainingDurationInput.value = "";
-  els.researchEpilepsyCenterTrainingDurationInput.placeholder = hasTraining ? "例: 6か月、2年" : "専従歴なしの場合は不要";
+  els.researchEpilepsyCenterTrainingDurationInput.placeholder = hasTraining ? "例: 6か月、2年" : "勤務歴なしの場合は不要";
 }
 
 function validateResearchProfileForStart() {
@@ -994,15 +991,15 @@ function validateResearchProfileForStart() {
     [els.researchSetupReaderNameInput, "回答者名 (English)"],
     [els.researchSetupReaderEmailInput, "メール"],
     [els.researchSetupReaderAffiliationInput, "所属 (English)"],
-    [els.researchPositionSelect, "職位"],
+    [els.researchPositionSelect, "診療科専門医・指導医資格"],
     [els.researchSetupReaderSpecialtySelect, "診療科"],
     [els.researchMedicalYearsInput, "診療科目年数"],
-    [els.researchEpilepsySpecialistSelect, "てんかん専門医"],
-    [els.researchClinicalNeurophysEegSpecialistSelect, "臨床神経生理 EEG専門医"],
-    [els.researchEpilepsyCenterTrainingSelect, "てんかんセンター専従歴"],
+    [els.researchEpilepsySpecialistSelect, "てんかん専門医・指導医資格"],
+    [els.researchClinicalNeurophysEegSpecialistSelect, "臨床神経生理学会脳波専門医・指導医資格"],
+    [els.researchEpilepsyCenterTrainingSelect, "てんかんセンター勤務歴"],
   ];
   if (els.researchEpilepsyCenterTrainingSelect?.value === "yes") {
-    requiredFields.splice(requiredFields.length - 1, 0, [els.researchEpilepsyCenterTrainingDurationInput, "専従期間"]);
+    requiredFields.splice(requiredFields.length - 1, 0, [els.researchEpilepsyCenterTrainingDurationInput, "勤務期間"]);
   }
   const missing = requiredFields.filter(([el]) => !String(el?.value ?? "").trim());
   const email = String(els.researchSetupReaderEmailInput?.value || "").trim();
@@ -1035,7 +1032,7 @@ function researchProfile() {
     position: els.researchPositionSelect?.value || "",
     epilepsySpecialist: els.researchEpilepsySpecialistSelect?.value || "",
     clinicalNeurophysEegSpecialist: els.researchClinicalNeurophysEegSpecialistSelect?.value || "",
-    usualMontage: els.researchSetupMontageSelect?.value || storedProfile.usualMontage || "",
+    usualMontage: storedProfile.usualMontage || "",
     doctorName: els.researchSetupReaderNameInput?.value.trim() || els.researchDoctorNameInput?.value.trim() || "",
     medicalPracticeYears: els.researchMedicalYearsInput?.value === "" ? "" : Number(els.researchMedicalYearsInput?.value || 0),
     neurologyYears: els.researchNeurologyYearsInput?.value === "" ? "" : Number(els.researchNeurologyYearsInput?.value || 0),
@@ -1182,7 +1179,6 @@ function saveUsualResearchMontage(montage) {
       // Ignore private-mode storage failures.
     }
   }
-  if (els.researchSetupMontageSelect) els.researchSetupMontageSelect.value = value;
   return value;
 }
 
@@ -1199,7 +1195,6 @@ function restoreResearchProfile() {
   if (els.researchPositionSelect) els.researchPositionSelect.value = profile.position || "";
   if (els.researchEpilepsySpecialistSelect) els.researchEpilepsySpecialistSelect.value = profile.epilepsySpecialist || "";
   if (els.researchClinicalNeurophysEegSpecialistSelect) els.researchClinicalNeurophysEegSpecialistSelect.value = profile.clinicalNeurophysEegSpecialist || "";
-  if (els.researchSetupMontageSelect) els.researchSetupMontageSelect.value = profile.usualMontage || "";
   if (els.researchMedicalYearsInput) els.researchMedicalYearsInput.value = profile.medicalPracticeYears ?? "";
   if (els.researchNeurologyYearsInput) els.researchNeurologyYearsInput.value = profile.neurologyYears ?? "";
   if (els.researchEegTrainingSelect) els.researchEegTrainingSelect.value = profile.eegTraining || "";
@@ -2074,7 +2069,7 @@ async function createResearchDataset() {
   const iedsPresentPath = els.researchIedsPresentPathInput?.value.trim() || els.researchSetupIedsPresentPathInput?.value.trim() || "";
   const iedsAbsentPath = els.researchIedsAbsentPathInput?.value.trim() || els.researchSetupIedsAbsentPathInput?.value.trim() || "";
   const outputValue = state.researchMode === "dataset" ? (els.researchDatasetPathInput?.value.trim() || "") : "";
-  const phase1Montage = storedResearchProfile().usualMontage || activeMontageValue() || "conventional";
+  const phase1Montage = activeMontageValue() || "conventional";
   setStatus("Creating dataset...", { busy: true });
   try {
     const payload = {};
@@ -2446,18 +2441,13 @@ async function startResearchTest() {
   profile.testRunReaderId = readerId;
   profile.testRunStartedAt = new Date().toISOString();
   const phase = "1";
-  const usualMontage = profile.usualMontage || activeMontageValue();
   const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
   const iedsPresentPath = els.researchIedsPresentPathInput?.value.trim() || els.researchSetupIedsPresentPathInput?.value.trim() || "";
   const iedsAbsentPath = els.researchIedsAbsentPathInput?.value.trim() || els.researchSetupIedsAbsentPathInput?.value.trim() || "";
   applyFixedResearchQuestionCount();
   if (els.researchReaderIdInput && readerId) els.researchReaderIdInput.value = readerId;
-  if (els.montageSelect && usualMontage) {
-    els.montageSelect.value = usualMontage;
-    state.activeMontage = els.montageSelect.value || usualMontage;
-  }
   if (!setupDatasetPath && (!iedsPresentPath || !iedsAbsentPath)) {
-    const existingDatasetPath = state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
+    const existingDatasetPath = profile.datasetPath || state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
     if (!existingDatasetPath) {
       const message = "GitHub dataset URL、local dataset path、またはIEDs present/absentのDataを入力してください";
       setResearchSetupMessage(message, true);
@@ -2529,7 +2519,7 @@ async function showResearchCase(index) {
     state.topomapSelection = null;
     state.scalogramData = null;
     const profile = researchProfile();
-    const usualMontage = isResearchPracticeCase(item) ? "conventional" : (profile.usualMontage || item.phase1Montage || "conventional");
+    const usualMontage = isResearchPracticeCase(item) ? "conventional" : (profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional");
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
     if (els.tcSelect) els.tcSelect.value = "0.3";
     if (els.hfSelect) els.hfSelect.value = "120";
