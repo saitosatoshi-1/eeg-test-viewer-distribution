@@ -256,6 +256,23 @@ function isLikelyMobileViewport() {
 function updateMobileViewportClass() {
   if (!TEST_ONLY_DISTRIBUTION) return;
   document.body.classList.toggle("mobile-viewport", isLikelyMobileViewport());
+  updateMobileControlLabels();
+}
+
+function updateMobileControlLabels() {
+  const labels = [
+    [els.sensitivitySelect, "感度", "Sensitivity"],
+    [els.tcSelect, "時定数", "TC"],
+    [els.hfSelect, "高域", "HF"],
+    [els.montageSelect, "モンタージュ", "Montage"],
+    [els.acSelect, "交流", "AC"],
+    [els.durationSelect, "表示秒", "Timebase"],
+  ];
+  const mobile = TEST_ONLY_DISTRIBUTION && isMobileViewport();
+  for (const [select, mobileText, desktopText] of labels) {
+    const caption = select?.closest(".nk-select")?.querySelector(".select-caption");
+    if (caption) caption.textContent = mobile ? mobileText : desktopText;
+  }
 }
 
 async function init() {
@@ -1168,17 +1185,20 @@ async function requestMobileFullscreen() {
 
 function showResearchCompletion() {
   if (!els.researchCompleteScreen) return;
+  const mobile = isMobileViewport();
   els.researchCompleteScreen.hidden = false;
   els.researchCompleteScreen.setAttribute("aria-hidden", "false");
   if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
   if (els.researchCompleteMessage) {
-    els.researchCompleteMessage.textContent = "JSONをダウンロードし、メールに添付して送ってください。";
+    els.researchCompleteMessage.textContent = mobile
+      ? "「JSONをメールで送る」を押して、結果JSONをメールで提出してください。"
+      : "JSONをダウンロードし、メールに添付して送ってください。";
   }
-  if (els.researchMailBox) els.researchMailBox.hidden = false;
-  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = false;
-  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = !isMobileViewport();
+  if (els.researchMailBox) els.researchMailBox.hidden = mobile;
+  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = mobile;
+  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = !mobile;
   if (els.researchCompleteSaveDesktopBtn) {
-    els.researchCompleteSaveDesktopBtn.hidden = false;
+    els.researchCompleteSaveDesktopBtn.hidden = mobile;
     els.researchCompleteSaveDesktopBtn.textContent = "JSONをダウンロード";
   }
   updateResearchEmailBody();
@@ -1913,6 +1933,10 @@ async function saveResearchRating(rating) {
 
 function showResearchToast(message, options = {}) {
   if (!els.researchToast || !els.researchToastText) return;
+  if (TEST_ONLY_DISTRIBUTION && isMobileViewport()) {
+    els.researchToast.classList.add("hidden");
+    return;
+  }
   els.researchToastText.textContent = message;
   updateResearchUndoButton();
   els.researchToast.classList.remove("hidden");
@@ -2849,7 +2873,6 @@ function draw() {
     });
   }
   drawCursorLine(ctx, left, top, plotW, plotH, start, duration, ratio);
-  drawCalibration(ctx, left, top, plotW, plotH, duration, sensitivity, pxPerMm, ratio);
 }
 
 function multiMontageColumnLayouts(left, top, plotW, plotH, ratio) {
@@ -2951,8 +2974,8 @@ function drawWaveColumn(ctx, layout, traces, times, options) {
     ctx.font = `${labelPx}px Arial`;
     ctx.textAlign = "left";
     ctx.fillStyle = traceColor(trace, rowIndex, options.montage);
-    const labelX = layout.labelLeft ?? (45 * ratio);
-    const maxW = layout.labelMaxW ?? Math.max(45 * ratio, plotW - (labelX - left) - 3 * ratio);
+    const labelX = layout.labelLeft ?? (isMobileViewport() ? 4 * ratio : 45 * ratio);
+    const maxW = layout.labelMaxW ?? (isMobileViewport() ? Math.max(24 * ratio, left - labelX - 4 * ratio) : Math.max(45 * ratio, plotW - (labelX - left) - 3 * ratio));
     ctx.fillText(nkLabel(trace.label), labelX, centerY + labelPx * 0.35, maxW);
   });
 
@@ -3359,6 +3382,14 @@ function plotLayout(canvas) {
   const ratio = window.devicePixelRatio || 1;
   const h = canvas.height;
   const compact = h < 560 * ratio;
+  if (TEST_ONLY_DISTRIBUTION && isMobileViewport()) {
+    return {
+      left: 62 * ratio,
+      right: 6 * ratio,
+      top: 20 * ratio,
+      bottom: 6 * ratio,
+    };
+  }
   return {
     left: 86 * ratio,
     right: 14 * ratio,
