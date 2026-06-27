@@ -46,6 +46,7 @@ const state = {
   windowLoadPromise: null,
   windowCache: new Map(),
   suppressNextClick: false,
+  touchSwipe: null,
   lastWaveWheelPageAt: 0,
   lastMontageSelectValue: "",
   lastDurationSelectValue: "",
@@ -595,6 +596,10 @@ function bindControls() {
   window.addEventListener("mouseup", onWaveMouseUp);
   els.waveCanvas?.addEventListener("mouseleave", onWaveMouseLeave);
   els.waveCanvas?.addEventListener("wheel", onWaveWheel, { passive: false });
+  els.waveCanvas?.addEventListener("touchstart", onWaveTouchStart, { passive: true });
+  els.waveCanvas?.addEventListener("touchmove", onWaveTouchMove, { passive: false });
+  els.waveCanvas?.addEventListener("touchend", onWaveTouchEnd, { passive: false });
+  els.waveCanvas?.addEventListener("touchcancel", onWaveTouchCancel);
   els.waveCanvas?.addEventListener("click", onWaveClick);
   els.waveCanvas?.addEventListener("dblclick", onWaveDoubleClick);
   if (els.waveScrollbar) {
@@ -1125,6 +1130,27 @@ function downloadResearchResultBackup() {
 
 function isMobileViewport() {
   return window.matchMedia?.("(max-width: 700px)")?.matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+}
+
+function defaultResearchTimebaseSec() {
+  return TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 5 : 10;
+}
+
+function researchCaseCenterTime(item) {
+  const event = Number(item?.eventTime);
+  if (Number.isFinite(event)) return event;
+  const total = recordingDuration();
+  if (Number.isFinite(total) && total > 0) return total / 2;
+  const epochStart = Number(item?.epochStart);
+  const duration = Number(item?.durationSec);
+  if (Number.isFinite(epochStart) && Number.isFinite(duration) && duration > 0) return epochStart + duration / 2;
+  return Number.isFinite(epochStart) ? epochStart : 0;
+}
+
+function centeredStartForResearchCase(item, timebaseSec = visibleDuration()) {
+  const duration = Number(timebaseSec);
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : defaultResearchTimebaseSec();
+  return clampStart(researchCaseCenterTime(item) - safeDuration / 2, safeDuration);
 }
 
 async function requestMobileFullscreen() {
@@ -1682,7 +1708,6 @@ async function showResearchCase(index) {
     });
     applyOpenedRecording(opened);
     await loadMetadata();
-    state.start = 0;
     state.cursorTime = null;
     state.dragSelection = null;
     const profile = researchProfile();
@@ -1690,7 +1715,9 @@ async function showResearchCase(index) {
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
     if (els.tcSelect) els.tcSelect.value = "0.3";
     if (els.hfSelect) els.hfSelect.value = "120";
-    if (els.durationSelect) els.durationSelect.value = "10";
+    const researchTimebase = defaultResearchTimebaseSec();
+    if (els.durationSelect) els.durationSelect.value = String(researchTimebase);
+    state.start = centeredStartForResearchCase(item, researchTimebase);
     state.viewMode = "single";
     els.montageSelect.value = usualMontage;
     state.activeMontage = els.montageSelect.value;
@@ -2424,6 +2451,49 @@ function pageWaveform(direction) {
   state.cursorTime = null;
   updateWaveScrollbar();
   loadWindow();
+}
+
+function onWaveTouchStart(ev) {
+  if (!state.windowData?.traces?.length || ev.touches.length !== 1) return;
+  const touch = ev.touches[0];
+  state.touchSwipe = {
+    startX: touch.clientX,
+    startY: touch.clientY,
+    lastX: touch.clientX,
+    lastY: touch.clientY,
+    swiping: false,
+  };
+}
+
+function onWaveTouchMove(ev) {
+  if (!state.touchSwipe || ev.touches.length !== 1) return;
+  const touch = ev.touches[0];
+  const dx = touch.clientX - state.touchSwipe.startX;
+  const dy = touch.clientY - state.touchSwipe.startY;
+  state.touchSwipe.lastX = touch.clientX;
+  state.touchSwipe.lastY = touch.clientY;
+  if (!state.touchSwipe.swiping && Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+    state.touchSwipe.swiping = true;
+  }
+  if (state.touchSwipe.swiping) {
+    ev.preventDefault();
+  }
+}
+
+function onWaveTouchEnd(ev) {
+  const swipe = state.touchSwipe;
+  state.touchSwipe = null;
+  if (!swipe?.swiping) return;
+  const dx = swipe.lastX - swipe.startX;
+  if (Math.abs(dx) < 52) return;
+  ev.preventDefault();
+  state.suppressNextClick = true;
+  hideContextMenu();
+  pageWaveform(dx < 0 ? 1 : -1);
+}
+
+function onWaveTouchCancel() {
+  state.touchSwipe = null;
 }
 
 function onWaveScrollbarInput(ev) {
