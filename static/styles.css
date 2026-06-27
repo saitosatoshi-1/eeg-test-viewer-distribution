@@ -2073,15 +2073,16 @@ body.test-only-distribution.mobile-viewport .context-menu button {
 @media (max-width: 700px) and (orientation: portrait) {
   body.test-only-distribution.mobile-viewport .topbar {
     grid-template-rows: auto;
-    min-height: 92px;
-    padding: 2px 4px;
+    min-height: 66px;
+    padding: 2px 3px;
     overflow: hidden;
   }
 
   body.test-only-distribution.mobile-viewport .topbar-primary {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: minmax(27px, auto);
+    gap: 2px 3px;
     min-width: 0;
     width: 100%;
     align-items: stretch;
@@ -2095,26 +2096,54 @@ body.test-only-distribution.mobile-viewport .context-menu button {
   }
 
   body.test-only-distribution.mobile-viewport .nk-select {
-    flex-direction: row;
-    align-items: center;
-    gap: 2px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
   }
 
   body.test-only-distribution.mobile-viewport .select-caption {
-    flex: 0 0 30px;
     padding-left: 0;
     font-size: 7px;
-    line-height: 8px;
+    line-height: 7px;
   }
 
   body.test-only-distribution.mobile-viewport .nk-select select {
-    flex: 1 1 auto;
     width: 100%;
     min-width: 0;
-    height: 21px;
-    min-height: 21px;
-    padding: 0 13px 0 3px;
-    font-size: 10px;
+    height: 19px;
+    min-height: 19px;
+    padding: 0 10px 0 2px;
+    font-size: 9px;
+  }
+
+  body.test-only-distribution.mobile-viewport .sensitivity-control {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  body.test-only-distribution.mobile-viewport .tc-control {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  body.test-only-distribution.mobile-viewport .hf-control {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  body.test-only-distribution.mobile-viewport .ac-control {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  body.test-only-distribution.mobile-viewport .montage-control {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  body.test-only-distribution.mobile-viewport .duration-control {
+    grid-column: 2;
+    grid-row: 2;
   }
 
   body.test-only-distribution.mobile-viewport .montage-control select {
@@ -2122,17 +2151,29 @@ body.test-only-distribution.mobile-viewport .context-menu button {
   }
 
   body.test-only-distribution.mobile-viewport .research-top-undo {
+    grid-column: 3;
+    grid-row: 2;
     min-width: 0;
     max-width: none;
-    height: 21px;
-    min-height: 21px;
-    font-size: 9px;
+    height: 27px;
+    min-height: 27px;
+    padding: 0 2px;
+    font-size: 8px;
+    line-height: 1.05;
+    white-space: normal;
   }
 
   body.test-only-distribution.mobile-viewport .primary-progress {
+    grid-column: 4;
+    grid-row: 2;
     justify-content: center;
-    min-height: 21px;
-    font-size: 9px;
+    align-self: end;
+    min-height: 13px;
+    height: 13px;
+    padding: 0 2px;
+    font-size: 8px;
+    line-height: 1;
+    pointer-events: none;
   }
 
   body.test-only-distribution.mobile-viewport .transport-button {
@@ -2140,8 +2181,8 @@ body.test-only-distribution.mobile-viewport .context-menu button {
   }
 
   body.test-only-distribution.mobile-viewport .workspace {
-    height: calc(100dvh - 92px);
-    height: calc(100svh - 92px);
+    height: calc(100dvh - 66px);
+    height: calc(100svh - 66px);
   }
 
   body.test-only-distribution.mobile-viewport .wave-panel {

@@ -5,25 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260627-mobile4" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260628-mobile5" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
       <header class="topbar">
         <div class="topbar-column topbar-primary">
-        <label class="nk-select">
+        <label class="nk-select sensitivity-control">
           <span class="select-caption">Sensitivity</span>
           <select id="sensitivitySelect">
-            <option>5uV</option>
-            <option>7uV</option>
-            <option selected>10uV</option>
-            <option>15uV</option>
-            <option>20uV</option>
-            <option>30uV</option>
-            <option>50uV</option>
+            <option value="5uV">5μV</option>
+            <option value="7uV">7μV</option>
+            <option value="10uV" selected>10μV</option>
+            <option value="15uV">15μV</option>
+            <option value="20uV">20μV</option>
+            <option value="30uV">30μV</option>
+            <option value="50uV">50μV</option>
           </select>
         </label>
-        <label class="nk-select">
+        <label class="nk-select tc-control">
           <span class="select-caption">TC</span>
           <select id="tcSelect">
             <option>OFF</option>
@@ -34,7 +34,7 @@
             <option>2.0</option>
           </select>
         </label>
-        <label class="nk-select">
+        <label class="nk-select hf-control">
           <span class="select-caption">HF</span>
           <select id="hfSelect">
             <option value="OFF">OFF</option>
@@ -57,7 +57,7 @@
             <option value="transverse">横双極誘導</option>
           </select>
         </label>
-        <label class="nk-select">
+        <label class="nk-select ac-control">
           <span class="select-caption">AC</span>
           <select id="acSelect">
             <option value="OFF" selected>OFF</option>
@@ -65,7 +65,7 @@
             <option value="60">60 Hz</option>
           </select>
         </label>
-        <label class="nk-select">
+        <label class="nk-select duration-control">
           <span class="select-caption">Timebase</span>
           <select id="durationSelect">
             <option value="1">1s</option>
@@ -227,6 +227,6 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260627-mobile4"></script>
+    <script src="/static/app.js?v=20260628-mobile5"></script>
   </body>
 </html>
