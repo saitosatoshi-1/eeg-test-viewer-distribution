@@ -427,15 +427,22 @@ function filterControlKey() {
 }
 
 function normalizeAcValue(value) {
-  const raw = String(value || "").trim();
-  return raw === "60" || raw === "60h" ? "60" : "50";
+  const raw = String(value || "").trim().toUpperCase();
+  if (raw === "50" || raw === "50HZ") return "50";
+  if (raw === "60" || raw === "60HZ") return "60";
+  return "OFF";
 }
 
 function normalizeAcSelect() {
-  if (!els.acSelect) return "50";
+  if (!els.acSelect) return "OFF";
   const value = normalizeAcValue(els.acSelect.value);
   if (els.acSelect.value !== value) els.acSelect.value = value;
   return value;
+}
+
+function acFilterLabel(value = normalizeAcValue(els.acSelect?.value)) {
+  const normalized = normalizeAcValue(value);
+  return normalized === "OFF" ? "OFF" : `${normalized} Hz`;
 }
 
 function preferredWindowMontages(activeMontage = activeMontageValue()) {
@@ -1715,6 +1722,10 @@ function researchSpikeSelectionPayload() {
     hf: els.hfSelect?.value || "",
     highCutFilter: els.hfSelect?.value || "",
     highCutFilterLabel: hfText(),
+    ac: normalizeAcValue(els.acSelect?.value),
+    acFilter: normalizeAcValue(els.acSelect?.value),
+    acFilterLabel: acFilterLabel(),
+    acFilterUsed: normalizeAcValue(els.acSelect?.value) !== "OFF",
     timebaseSec: Number(els.durationSelect?.value || visibleDuration() || 0),
     spikeTime: Number.isFinite(onset) ? onset : "",
     spikeSampleIndex: Number.isFinite(Number(context.sampleIndex)) ? Number(context.sampleIndex) : "",
@@ -2680,9 +2691,10 @@ function renderStatus() {
   const firstTrace = state.windowData?.traces?.[0]?.label ? ` · ${state.windowData.traces[0].label}` : "";
   const loadedDuration = Number(state.windowData?.duration || 0);
   const durationText = loadedDuration ? ` · loaded ${loadedDuration.toFixed(2)}s` : "";
-  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${els.acSelect.options[els.acSelect.selectedIndex].text}${ecgFilterText}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
+  const acText = acFilterLabel();
+  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText}${ecgFilterText}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
   els.timeReadout.textContent = `${formatSec(state.start)} - ${formatSec(end)}`;
-  els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${els.acSelect.options[els.acSelect.selectedIndex].text}${ecgFilterText} · ${els.paperSelect.value} mm/s`;
+  els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText}${ecgFilterText} · ${els.paperSelect.value} mm/s`;
 }
 
 function isMultiWindowData() {
@@ -2706,7 +2718,7 @@ function draw() {
     els.timeReadout.textContent = `${formatSec(start)} - ${formatSec(start + duration)}`;
   }
   if (els.calReadout) {
-    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · AC ${normalizeAcValue(els.acSelect?.value)} · ${els.paperSelect?.value || "30"} mm/s`;
+    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · AC ${acFilterLabel()} · ${els.paperSelect?.value || "30"} mm/s`;
   }
   if (!traces.length || !times.length) {
     ctx.fillStyle = "#68707c";

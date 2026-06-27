@@ -3064,6 +3064,10 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         "hf": payload.get("hf") or "",
         "highCutFilter": payload.get("highCutFilter") or payload.get("hf") or "",
         "highCutFilterLabel": payload.get("highCutFilterLabel") or "",
+        "ac": payload.get("ac") or "",
+        "acFilter": payload.get("acFilter") or payload.get("ac") or "",
+        "acFilterLabel": payload.get("acFilterLabel") or "",
+        "acFilterUsed": bool(payload.get("acFilterUsed")),
         "timebaseSec": payload.get("timebaseSec") or "",
         "spikeMontage": payload.get("spikeMontage") or "",
         "accessCookieHash": str(payload.get("accessCookieHash") or ""),
@@ -3337,6 +3341,7 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
     test_date = row.get("testDate") or iso_date_part(row.get("testStartedAt") or row.get("answeredAt"))
     time_constant = row.get("timeConstant") or row.get("tc", "")
     high_cut_filter = row.get("highCutFilter") or row.get("hf", "")
+    ac_filter = row.get("acFilter") or row.get("ac", "")
     answer_display_settings = {
         "sensitivity": row.get("sensitivity", ""),
         "sensitivityUvPerMm": row.get("sensitivityUvPerMm", ""),
@@ -3346,6 +3351,10 @@ def research_compact_response_payload(response: dict[str, Any], case: dict[str, 
         "hf": row.get("hf", ""),
         "highCutFilter": high_cut_filter,
         "highCutFilterLabel": row.get("highCutFilterLabel", ""),
+        "ac": row.get("ac", ""),
+        "acFilter": ac_filter,
+        "acFilterLabel": row.get("acFilterLabel", ""),
+        "acFilterUsed": bool(row.get("acFilterUsed")),
         "timebaseSec": row.get("timebaseSec", ""),
     }
     return {
@@ -3947,7 +3956,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         qs.get("montage", ["longitudinal"])[0],
                         qs.get("tc", ["0.3"])[0],
                         qs.get("hf", ["120"])[0],
-                        qs.get("ac", ["50"])[0],
+                        qs.get("ac", ["OFF"])[0],
                         qs.get("ecg", ["1"])[0] == "1",
                         qs.get("ecgFilter", ["0"])[0] == "1",
                         qs.get("topomap", ["1"])[0] != "0",
