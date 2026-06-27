@@ -245,8 +245,21 @@ function clearSharedBrowserResearchState() {
   }
 }
 
+function isLikelyMobileViewport() {
+  const uaMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
+  const compactHeight = window.matchMedia?.("(orientation: landscape) and (max-height: 620px)")?.matches;
+  return Boolean(uaMobile || (coarsePointer && compactHeight));
+}
+
+function updateMobileViewportClass() {
+  if (!TEST_ONLY_DISTRIBUTION) return;
+  document.body.classList.toggle("mobile-viewport", isLikelyMobileViewport());
+}
+
 async function init() {
   clearSharedBrowserResearchState();
+  updateMobileViewportClass();
   bindControls();
   if (!TEST_ONLY_DISTRIBUTION) {
     bindPanelResizers();
@@ -262,6 +275,11 @@ async function init() {
     console.warn("Initial layout skipped", err);
   }
   window.addEventListener("resize", scheduleLayoutRefresh);
+  window.addEventListener("resize", updateMobileViewportClass);
+  window.visualViewport?.addEventListener("resize", () => {
+    updateMobileViewportClass();
+    scheduleLayoutRefresh();
+  });
   if (window.ResizeObserver && els.waveCanvas?.parentElement) {
     const observer = new ResizeObserver(scheduleLayoutRefresh);
     observer.observe(els.waveCanvas.parentElement);
