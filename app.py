@@ -2584,6 +2584,21 @@ def save_research_assignment(dataset_dir: Path, reader_id: str, phase: str, case
     })
 
 
+def research_assignment_case_ids(dataset_dir: Path, reader_id: str, phase: str = "1") -> list[str]:
+    assignment_id = f"{research_reader_id(reader_id)}|{phase}"
+    assignments = load_research_assignments(dataset_dir, phase).get("assignments", [])
+    if not isinstance(assignments, list):
+        return []
+    for row in assignments:
+        if isinstance(row, dict) and row.get("assignmentId") == assignment_id:
+            return [
+                str(case_id or "").strip()
+                for case_id in (row.get("caseIds") if isinstance(row.get("caseIds"), list) else [])
+                if str(case_id or "").strip()
+            ]
+    return []
+
+
 def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[dict[str, Any]], reader_profile: dict[str, Any] | None = None) -> None:
     if reader_profile is None:
         reader_profile = response_reader_profile(*responses)
@@ -2652,6 +2667,18 @@ def active_response_map(responses: list[dict[str, Any]]) -> dict[tuple[str, str]
     for row in active_research_responses(responses):
         result[(str(row.get("caseId", "")), str(row.get("phase", "1")))] = row
     return result
+
+
+def assigned_active_response_map(dataset_dir: Path, reader_id: str, phase: str, responses: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+    active = active_response_map(responses)
+    assigned_ids = set(research_assignment_case_ids(dataset_dir, reader_id, phase))
+    if not assigned_ids:
+        return active
+    return {
+        key: row
+        for key, row in active.items()
+        if key[1] == str(phase) and key[0] in assigned_ids
+    }
 
 
 def stable_research_sample(rows: list[dict[str, Any]], limit: int, seed_parts: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -2842,6 +2869,14 @@ def research_phase_case_pool(dataset: dict[str, Any], reader_id: str, phase: str
     return sample + phase1_cases
 
 
+def research_assigned_case_rows(dataset: dict[str, Any], reader_id: str, phase: str, case_ids: list[str]) -> list[dict[str, Any]]:
+    included = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
+    sample = research_sample_case(dataset, reader_id, "phase1", included)
+    by_id = {str(row.get("caseId", "")): row for row in included}
+    assigned = [by_id[case_id] for case_id in case_ids if case_id in by_id]
+    return sample + assigned
+
+
 def research_phase_cases(dataset: dict[str, Any], reader_id: str, phase: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[tuple[str, str], dict[str, Any]]]:
     dataset_dir = research_dataset_path(dataset.get("datasetPath"))
     responses = load_research_responses(dataset_dir, reader_id)
@@ -2890,15 +2925,29 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         existing_cookie_hash = research_response_cookie_hash(dataset_dir, reader_id)
         if PUBLIC_MODE and existing_cookie_hash and access_cookie_hash and not secrets.compare_digest(existing_cookie_hash, access_cookie_hash):
             raise PermissionError("This readerId is already linked to another browser session.")
-        cases, responses, active = research_phase_cases(dataset, reader_id, phase)
+        responses = load_research_responses(dataset_dir, reader_id)
+        active = active_response_map(responses)
         settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
         requested_total = research_phase1_total_count(settings)
-        cases = cap_phase1_cases_by_group(cases, requested_total)
-        all_cases = cap_phase1_cases_by_group(research_phase_case_pool(dataset, reader_id, phase, active), requested_total)
-        save_research_assignment(dataset_dir, reader_id, phase, all_cases)
+        assignment_ids = research_assignment_case_ids(dataset_dir, reader_id, phase)
+        if assignment_ids:
+            all_cases = research_assigned_case_rows(dataset, reader_id, phase, assignment_ids)
+        else:
+            all_cases = cap_phase1_cases_by_group(research_phase_case_pool(dataset, reader_id, phase, active), requested_total)
+            save_research_assignment(dataset_dir, reader_id, phase, all_cases)
+        cases = [
+            row for row in all_cases
+            if row.get("sampleEpoch") or not active.get((str(row.get("caseId")), phase))
+        ]
         exposure_counts = research_case_exposure_counts(dataset_dir, phase)
-    active_rows = list(active.values())
     non_sample_cases = [row for row in all_cases if not row.get("sampleEpoch")]
+    assigned_ids = {str(row.get("caseId")) for row in non_sample_cases}
+    active = {
+        key: row
+        for key, row in active.items()
+        if key[1] == phase and key[0] in assigned_ids
+    }
+    active_rows = list(active.values())
     return {
         "datasetPath": dataset_path,
         "datasetId": dataset.get("datasetId"),
@@ -2940,6 +2989,9 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if not case:
         raise KeyError(f"Case not found: {case_id}")
     responses = load_research_responses(dataset_dir, reader_id)
+    assigned_ids = set(research_assignment_case_ids(dataset_dir, reader_id, phase))
+    if assigned_ids and case_id not in assigned_ids:
+        raise PermissionError("This case is not assigned to the current test session.")
     reader_profile = payload.get("readerProfile") if isinstance(payload.get("readerProfile"), dict) else {}
     montage_durations = research_montage_duration_payload(payload.get("montageDurationsSec"))
     montage_order = research_montage_order_payload(payload.get("montageOrder"))
@@ -3006,6 +3058,7 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         1
         for row in responses
         if str(row.get("phase")) == phase and not row.get("superseded") and not row.get("undoneAt")
+        and (not assigned_ids or str(row.get("caseId") or "") in assigned_ids)
     )
     response = {
         "responseId": response_id,
@@ -3471,7 +3524,8 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
     readers = []
     for rid in reader_ids:
         responses = load_research_responses(dataset_dir, rid)
-        active = active_response_map(responses)
+        active = assigned_active_response_map(dataset_dir, rid, "1", responses)
+        assignment_ids = research_assignment_case_ids(dataset_dir, rid, "1")
         compact_responses = [
             row for row in (
                 research_compact_response_payload(response, case_by_id.get(str(response.get("caseId", ""))))
@@ -3483,6 +3537,9 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
             compact_responses,
             key=lambda row: (int(row.get("answerOrder") or 0), str(row.get("answeredAt", "")), str(row.get("caseId", ""))),
         )
+        if not assignment_ids:
+            settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
+            compact_responses = compact_responses[:research_phase1_total_count(settings)]
         profile = response_reader_profile(*active.values())
         readers.append({
             "readerId": rid,
