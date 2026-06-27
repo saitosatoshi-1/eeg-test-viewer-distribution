@@ -12,6 +12,8 @@ const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
 const ECG_AUTO_MAX_UV_PER_MM = 250;
+const MOBILE_SWIPE_PX_PER_STEP = 24;
+const MOBILE_SWIPE_STEP_SEC = 0.5;
 const MONTAGE_LABELS = {
   longitudinal: "縦双極誘導",
   a1a2: "耳朶参照基準2",
@@ -2477,6 +2479,17 @@ function pageWaveform(direction) {
   loadWindow();
 }
 
+function shiftWaveformSeconds(deltaSec) {
+  if (!state.recordingId || !Number.isFinite(deltaSec) || deltaSec === 0) return;
+  const nextStart = clampStart(Number((Number(state.start || 0) + deltaSec).toFixed(3)));
+  if (nextStart === state.start) return;
+  state.start = nextStart;
+  state.cursorTime = null;
+  updateWaveScrollbar();
+  renderStatus();
+  loadWindow();
+}
+
 function onWaveTouchStart(ev) {
   if (!state.windowData?.traces?.length || ev.touches.length !== 1) return;
   const touch = ev.touches[0];
@@ -2485,6 +2498,8 @@ function onWaveTouchStart(ev) {
     startY: touch.clientY,
     lastX: touch.clientX,
     lastY: touch.clientY,
+    startTime: Number(state.start || 0),
+    appliedSeconds: 0,
     swiping: false,
   };
 }
@@ -2496,11 +2511,23 @@ function onWaveTouchMove(ev) {
   const dy = touch.clientY - state.touchSwipe.startY;
   state.touchSwipe.lastX = touch.clientX;
   state.touchSwipe.lastY = touch.clientY;
-  if (!state.touchSwipe.swiping && Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+  if (!state.touchSwipe.swiping && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
     state.touchSwipe.swiping = true;
+    hideContextMenu();
   }
   if (state.touchSwipe.swiping) {
     ev.preventDefault();
+    state.suppressNextClick = true;
+    const steps = Math.trunc((-dx / MOBILE_SWIPE_PX_PER_STEP) || 0);
+    const deltaSec = Number((steps * MOBILE_SWIPE_STEP_SEC).toFixed(3));
+    if (deltaSec !== state.touchSwipe.appliedSeconds) {
+      state.start = clampStart(Number((state.touchSwipe.startTime + deltaSec).toFixed(3)));
+      state.touchSwipe.appliedSeconds = deltaSec;
+      state.cursorTime = null;
+      updateWaveScrollbar();
+      renderStatus();
+      loadWindow();
+    }
   }
 }
 
@@ -2509,11 +2536,13 @@ function onWaveTouchEnd(ev) {
   state.touchSwipe = null;
   if (!swipe?.swiping) return;
   const dx = swipe.lastX - swipe.startX;
-  if (Math.abs(dx) < 52) return;
+  if (Math.abs(dx) < 16) return;
   ev.preventDefault();
   state.suppressNextClick = true;
   hideContextMenu();
-  pageWaveform(dx < 0 ? 1 : -1);
+  if (!swipe.appliedSeconds) {
+    shiftWaveformSeconds(dx < 0 ? MOBILE_SWIPE_STEP_SEC : -MOBILE_SWIPE_STEP_SEC);
+  }
 }
 
 function onWaveTouchCancel() {
