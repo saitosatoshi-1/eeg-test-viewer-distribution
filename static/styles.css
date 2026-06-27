@@ -2073,15 +2073,15 @@ body.test-only-distribution.mobile-viewport .context-menu button {
 @media (max-width: 700px) and (orientation: portrait) {
   body.test-only-distribution.mobile-viewport .topbar {
     grid-template-rows: auto;
-    min-height: 176px;
-    padding: 4px 6px;
+    min-height: 116px;
+    padding: 3px 5px;
     overflow: hidden;
   }
 
   body.test-only-distribution.mobile-viewport .topbar-primary {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
     width: 100%;
     align-items: stretch;
@@ -2094,21 +2094,27 @@ body.test-only-distribution.mobile-viewport .context-menu button {
     min-width: 0;
   }
 
-  body.test-only-distribution.mobile-viewport .montage-control {
-    grid-column: 1 / -1;
+  body.test-only-distribution.mobile-viewport .nk-select {
+    flex-direction: row;
+    align-items: center;
+    gap: 3px;
   }
 
   body.test-only-distribution.mobile-viewport .select-caption {
-    font-size: 9px;
-    line-height: 10px;
+    flex: 0 0 48px;
+    padding-left: 0;
+    font-size: 8px;
+    line-height: 9px;
   }
 
   body.test-only-distribution.mobile-viewport .nk-select select {
+    flex: 1 1 auto;
     width: 100%;
-    height: 30px;
-    min-height: 30px;
-    padding: 0 18px 0 6px;
-    font-size: 13px;
+    min-width: 0;
+    height: 24px;
+    min-height: 24px;
+    padding: 0 16px 0 4px;
+    font-size: 11px;
   }
 
   body.test-only-distribution.mobile-viewport .montage-control select {
@@ -2118,15 +2124,15 @@ body.test-only-distribution.mobile-viewport .context-menu button {
   body.test-only-distribution.mobile-viewport .research-top-undo {
     min-width: 0;
     max-width: none;
-    height: 30px;
-    min-height: 30px;
-    font-size: 11px;
+    height: 24px;
+    min-height: 24px;
+    font-size: 10px;
   }
 
   body.test-only-distribution.mobile-viewport .primary-progress {
     justify-content: center;
-    min-height: 30px;
-    font-size: 11px;
+    min-height: 24px;
+    font-size: 10px;
   }
 
   body.test-only-distribution.mobile-viewport .transport-button {
@@ -2134,8 +2140,8 @@ body.test-only-distribution.mobile-viewport .context-menu button {
   }
 
   body.test-only-distribution.mobile-viewport .workspace {
-    height: calc(100dvh - 176px);
-    height: calc(100svh - 176px);
+    height: calc(100dvh - 116px);
+    height: calc(100svh - 116px);
   }
 
   body.test-only-distribution.mobile-viewport .wave-panel {
