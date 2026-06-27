@@ -14,6 +14,8 @@ const ECG_AUTO_MIN_UV_PER_MM = 5;
 const ECG_AUTO_MAX_UV_PER_MM = 250;
 const MOBILE_SWIPE_PX_PER_STEP = 24;
 const MOBILE_SWIPE_STEP_SEC = 0.5;
+const MAX_WINDOW_CACHE_ENTRIES = 72;
+const RESEARCH_PREFETCH_LOOKAHEAD = 3;
 const MONTAGE_LABELS = {
   longitudinal: "縦双極誘導",
   a1a2: "耳朶参照基準2",
@@ -71,6 +73,12 @@ const state = {
   researchSaving: false,
   researchRetryingPending: false,
   researchMontageTiming: null,
+  researchPrefetchRunId: 0,
+  researchPrefetchActive: false,
+  researchPrefetchQueue: [],
+  researchPrefetchRecordIds: new Map(),
+  researchPrefetchQueuedCases: new Set(),
+  researchPrefetchQueuedKeys: new Set(),
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
   lastResearchResponse: null,
@@ -1240,6 +1248,7 @@ function setResearchMode(mode) {
   document.body.classList.add("research-mode");
   updateResearchControlsVisibility();
   if (state.researchMode !== "test") {
+    resetResearchPrefetch();
     state.researchTutorialDismissed = false;
     state.researchSampleCompletedPhases = {};
     hideResearchTutorial();
@@ -1656,6 +1665,7 @@ async function startResearchTest() {
   state.researchTestStartedMs = 0;
   state.researchTestCompletedAt = "";
   state.researchResultAutoSubmitted = false;
+  resetResearchPrefetch({ clearRecords: true });
   hideResearchTutorial();
   const profile = researchProfile();
   const baseReaderId = researchReaderDisplayId(profile);
@@ -1755,6 +1765,7 @@ async function showResearchCase(index) {
     renderResearchInlineProgress();
     setStatus(isResearchPracticeCase(item) ? `${researchPracticeLabel(item)}: 波形を左クリックして三択から回答してください` : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`));
     renderRightResearchPanels();
+    scheduleResearchPrefetch(state.researchCaseIndex);
   } catch (err) {
     hideResearchTutorial();
     setStatus(`Test epoch load failed: ${err.message}`, { error: true });
@@ -1829,6 +1840,7 @@ async function saveResearchRating(rating) {
       if (isResearchMontageSetupPractice(item)) {
         const usualMontage = saveUsualResearchMontage(activeMontageValue());
         markResearchTestStarted(new Date());
+        resetResearchPrefetch();
         showResearchToast(`練習終了 · ${MONTAGE_LABELS[usualMontage] || usualMontage}で本番開始`);
       } else if (isResearchPracticeCase(item)) {
         showResearchToast("操作練習終了 · 次は普段使用するモンタージュを選んでください");
@@ -2616,7 +2628,9 @@ function stepSensitivity(direction) {
 }
 
 function applyOpenedRecording(opened) {
-  state.windowCache.clear();
+  if (!(TEST_ONLY_DISTRIBUTION && state.researchMode === "test")) {
+    state.windowCache.clear();
+  }
   const rows = Array.isArray(opened?.recordings) ? opened.recordings : [];
   const next = rows.length ? rows : [{ id: opened?.id, baseName: opened?.id, format: "EDF", eegPath: opened?.path || "", sizeMb: "" }];
   const byId = new Map((state.recordings || []).map((rec) => [String(rec.id || ""), rec]));
@@ -2726,10 +2740,161 @@ function windowCacheKey(params) {
 function rememberWindowCache(key, data) {
   if (!key || !data) return;
   state.windowCache.set(key, data);
-  while (state.windowCache.size > 24) {
+  while (state.windowCache.size > MAX_WINDOW_CACHE_ENTRIES) {
     const firstKey = state.windowCache.keys().next().value;
     state.windowCache.delete(firstKey);
   }
+}
+
+function researchCasePrefetchCenterTime(item) {
+  const event = Number(item?.eventTime);
+  if (Number.isFinite(event)) return event;
+  const epochStart = Number(item?.epochStart);
+  const duration = Number(item?.durationSec);
+  if (Number.isFinite(epochStart) && Number.isFinite(duration) && duration > 0) return epochStart + duration / 2;
+  return Number.isFinite(epochStart) ? epochStart : 0;
+}
+
+function researchCasePrefetchStart(item, duration) {
+  const safeDuration = Number.isFinite(Number(duration)) && Number(duration) > 0 ? Number(duration) : defaultResearchTimebaseSec();
+  return Math.max(0, Number((researchCasePrefetchCenterTime(item) - safeDuration / 2).toFixed(3)));
+}
+
+function researchCasePrefetchMontage(item) {
+  const profile = researchProfile();
+  if (isResearchPracticeCase(item)) return "conventional";
+  return profile.usualMontage || item?.phase1Montage || activeMontageValue() || "conventional";
+}
+
+function researchWindowPrefetchParams(recordId, item, options = {}) {
+  const duration = Number(options.duration || defaultResearchTimebaseSec()) || defaultResearchTimebaseSec();
+  const montage = options.montage || researchCasePrefetchMontage(item);
+  return {
+    id: recordId,
+    start: options.start ?? researchCasePrefetchStart(item, duration),
+    duration,
+    montage,
+    montages: preferredWindowMontages(montage).join(","),
+    tc: options.tc || "0.3",
+    hf: options.hf || "120",
+    ac: normalizeAcValue(options.ac || "OFF"),
+    ecg: "1",
+    ecgFilter: "0",
+    topomap: "0",
+    annotations: "0",
+  };
+}
+
+async function openResearchCaseForPrefetch(item) {
+  const path = String(item?.edfPath || "");
+  if (!path) return "";
+  if (state.researchPrefetchRecordIds.has(path)) return state.researchPrefetchRecordIds.get(path);
+  const opened = await fetchJson("/api/open-file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    retryAttempts: 1,
+    body: JSON.stringify({ path }),
+  });
+  const recordId = opened?.id || "";
+  if (recordId) state.researchPrefetchRecordIds.set(path, recordId);
+  return recordId;
+}
+
+async function prefetchResearchWindow(item, options = {}) {
+  if (!TEST_ONLY_DISTRIBUTION || !item?.edfPath) return false;
+  const recordId = options.recordId || await openResearchCaseForPrefetch(item);
+  if (!recordId) return false;
+  const params = researchWindowPrefetchParams(recordId, item, options);
+  const cacheKey = windowCacheKey(params);
+  if (state.windowCache.has(cacheKey) || state.researchPrefetchQueuedKeys.has(cacheKey)) return false;
+  state.researchPrefetchQueuedKeys.add(cacheKey);
+  try {
+    const data = await fetchJson(`/api/window?${qs(params)}`, { retryAttempts: 1 });
+    rememberWindowCache(cacheKey, data);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    state.researchPrefetchQueuedKeys.delete(cacheKey);
+  }
+}
+
+function researchPrefetchCaseKey(item) {
+  return [
+    item?.caseId || "",
+    item?.edfPath || "",
+    item?.eventTime ?? "",
+    item?.epochStart ?? "",
+    item?.durationSec ?? "",
+  ].join("|");
+}
+
+function enqueueResearchPrefetchCases(items, options = {}) {
+  if (!TEST_ONLY_DISTRIBUTION || state.researchMode !== "test" || !state.researchSession) return;
+  const nextItems = [];
+  for (const item of items || []) {
+    if (!item?.edfPath) continue;
+    const key = researchPrefetchCaseKey(item);
+    if (!key || state.researchPrefetchQueuedCases.has(key)) continue;
+    state.researchPrefetchQueuedCases.add(key);
+    nextItems.push(item);
+  }
+  if (!nextItems.length) return;
+  state.researchPrefetchQueue = options.priority
+    ? [...nextItems, ...state.researchPrefetchQueue]
+    : [...state.researchPrefetchQueue, ...nextItems];
+  drainResearchPrefetchQueue(state.researchPrefetchRunId);
+}
+
+async function drainResearchPrefetchQueue(runId) {
+  if (state.researchPrefetchActive) return;
+  state.researchPrefetchActive = true;
+  try {
+    while (
+      state.researchPrefetchQueue.length &&
+      runId === state.researchPrefetchRunId &&
+      state.researchMode === "test" &&
+      state.researchSession
+    ) {
+      const item = state.researchPrefetchQueue.shift();
+      state.researchPrefetchQueuedCases.delete(researchPrefetchCaseKey(item));
+      await prefetchResearchWindow(item);
+      await sleep(isMobileViewport() ? 90 : 45);
+    }
+  } finally {
+    state.researchPrefetchActive = false;
+    if (
+      state.researchPrefetchQueue.length &&
+      runId === state.researchPrefetchRunId &&
+      state.researchMode === "test" &&
+      state.researchSession
+    ) {
+      drainResearchPrefetchQueue(runId);
+    }
+  }
+}
+
+function scheduleResearchPrefetch(aroundIndex = state.researchCaseIndex) {
+  if (!TEST_ONLY_DISTRIBUTION || state.researchMode !== "test" || !state.researchSession) return;
+  const cases = activeResearchCases();
+  if (!cases.length) return;
+  const index = Math.max(0, Math.min(cases.length - 1, Number(aroundIndex || 0)));
+  const ahead = cases.slice(index + 1, index + 1 + RESEARCH_PREFETCH_LOOKAHEAD);
+  const rest = [
+    ...cases.slice(index + 1 + RESEARCH_PREFETCH_LOOKAHEAD),
+    ...cases.slice(0, index),
+  ];
+  enqueueResearchPrefetchCases(ahead, { priority: true });
+  enqueueResearchPrefetchCases(rest);
+}
+
+function resetResearchPrefetch(options = {}) {
+  state.researchPrefetchRunId += 1;
+  state.researchPrefetchActive = false;
+  state.researchPrefetchQueue = [];
+  state.researchPrefetchQueuedCases.clear();
+  state.researchPrefetchQueuedKeys.clear();
+  if (options.clearRecords) state.researchPrefetchRecordIds.clear();
 }
 
 function applyWindowData(data, requestedMontage) {
