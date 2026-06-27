@@ -882,7 +882,6 @@ dd {
   overflow-wrap: anywhere;
 }
 
-.research-mobile-note,
 .mobile-orientation-notice {
   display: none;
 }
@@ -1589,42 +1588,48 @@ body.test-only-distribution .readout {
 
   body.test-only-distribution .topbar {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 48px;
-    min-height: 56px;
-    padding: 4px 6px;
+    grid-template-rows: 36px;
+    min-height: 40px;
+    padding: 2px 4px;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
   }
 
   body.test-only-distribution .topbar-primary {
-    gap: 5px;
+    gap: 3px;
     min-width: max-content;
     overflow: visible;
   }
 
   body.test-only-distribution .topbar-secondary {
-    top: 56px;
+    top: 40px;
     right: 8px;
   }
 
+  body.test-only-distribution .select-caption {
+    font-size: 8px;
+    line-height: 8px;
+  }
+
   body.test-only-distribution .nk-select select {
-    min-width: 64px;
-    height: 30px;
-    min-height: 30px;
-    font-size: 13px;
+    min-width: 54px;
+    height: 24px;
+    min-height: 24px;
+    padding: 1px 12px 1px 3px;
+    font-size: 11px;
   }
 
   body.test-only-distribution .montage-control select {
-    min-width: 136px;
+    min-width: 112px;
   }
 
   body.test-only-distribution .transport-button,
   body.test-only-distribution .tool-button {
-    width: 34px;
-    height: 34px;
-    min-height: 34px;
-    font-size: 14px;
+    width: 27px;
+    height: 27px;
+    min-height: 27px;
+    font-size: 12px;
   }
 
   body.test-only-distribution .export-button {
@@ -1636,15 +1641,15 @@ body.test-only-distribution .readout {
 
   body.test-only-distribution .research-top-undo {
     width: auto;
-    min-width: 112px;
-    padding: 0 9px;
-    font-size: 12px;
+    min-width: 86px;
+    padding: 0 5px;
+    font-size: 10px;
   }
 
   body.test-only-distribution .primary-progress {
-    min-height: 32px;
-    padding: 5px 9px;
-    font-size: 12px;
+    min-height: 24px;
+    padding: 3px 6px;
+    font-size: 10px;
   }
 
   body.test-only-distribution .readout,
@@ -1659,17 +1664,18 @@ body.test-only-distribution .readout {
   body.test-only-distribution .workspace {
     grid-template-columns: minmax(0, 1fr) !important;
     min-width: 0;
-    height: calc(100dvh - 56px);
+    height: calc(100dvh - 40px);
+    height: calc(100svh - 40px);
   }
 
   body.test-only-distribution .wave-panel {
-    grid-template-rows: 20px minmax(280px, 1fr) 30px 0;
+    grid-template-rows: 12px minmax(220px, 1fr) 20px 0;
     width: 100%;
     min-width: 0;
   }
 
   body.test-only-distribution .event-strip span {
-    height: 14px;
+    height: 9px;
   }
 
   body.test-only-distribution #waveCanvas {
@@ -1680,7 +1686,7 @@ body.test-only-distribution .readout {
 
   body.test-only-distribution .wave-scrollbar-row {
     min-width: 0;
-    padding: 4px 8px;
+    padding: 2px 6px;
   }
 
   body.test-only-distribution .wave-scrollbar {
@@ -1742,34 +1748,44 @@ body.test-only-distribution .readout {
     font-size: 13px;
   }
 
-  body.test-only-distribution .research-mobile-note {
-    display: block;
-    border: 1px solid #c8d8eb;
-    border-radius: 6px;
-    padding: 8px 9px;
-    background: #f5f9fd;
-    color: #1f3b57;
-    font-size: 12px;
-    line-height: 1.45;
-  }
-
   body.test-only-distribution .research-tutorial {
-    left: 8px;
-    right: 8px;
-    bottom: 38px;
-    max-height: min(44dvh, 320px);
+    left: 6px;
+    right: 6px;
+    bottom: 24px;
+    max-height: min(34dvh, 210px);
     overflow: auto;
-    padding: 10px;
-    font-size: 12px;
+    padding: 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    line-height: 1.32;
   }
 
   body.test-only-distribution .research-tutorial-head {
     position: sticky;
     top: 0;
-    margin: -10px -10px 8px;
-    padding: 8px 10px;
+    margin: -7px -7px 5px;
+    padding: 5px 7px;
     background: #fff;
     border-bottom: 1px solid #d4dbe5;
+  }
+
+  body.test-only-distribution .research-tutorial-head strong {
+    font-size: 12px;
+  }
+
+  body.test-only-distribution .research-tutorial-head button {
+    min-height: 22px;
+    padding: 1px 6px;
+    font-size: 10px;
+  }
+
+  body.test-only-distribution .research-tutorial p {
+    margin-bottom: 4px;
+  }
+
+  body.test-only-distribution .research-tutorial ol {
+    gap: 3px;
+    padding-left: 16px;
   }
 
   body.test-only-distribution .context-menu {
@@ -1785,9 +1801,9 @@ body.test-only-distribution .readout {
   }
 
   body.test-only-distribution .context-menu button {
-    min-height: 44px;
-    padding: 10px 12px;
-    font-size: 15px;
+    min-height: 38px;
+    padding: 8px 10px;
+    font-size: 13px;
   }
 
   body.test-only-distribution .context-menu button[data-action="research-rating"] {
@@ -1817,6 +1833,10 @@ body.test-only-distribution .readout {
 }
 
 @media (max-width: 700px) and (orientation: portrait) {
+  body.test-only-distribution.research-setup-active .mobile-orientation-notice {
+    display: none !important;
+  }
+
   body.test-only-distribution .mobile-orientation-notice {
     display: block;
     position: fixed;
@@ -1854,13 +1874,31 @@ body.test-only-distribution .readout {
   }
 
   body.test-only-distribution .topbar {
-    min-height: 46px;
-    grid-template-rows: 42px;
-    padding: 3px 6px;
+    min-height: 34px;
+    grid-template-rows: 32px;
+    padding: 1px 4px;
   }
 
   body.test-only-distribution .workspace {
-    height: calc(100dvh - 46px);
+    height: calc(100dvh - 34px);
+    height: calc(100svh - 34px);
+  }
+
+  body.test-only-distribution .nk-select select {
+    height: 22px;
+    min-height: 22px;
+    font-size: 10px;
+  }
+
+  body.test-only-distribution .transport-button,
+  body.test-only-distribution .tool-button {
+    width: 24px;
+    height: 24px;
+    min-height: 24px;
+  }
+
+  body.test-only-distribution .wave-panel {
+    grid-template-rows: 10px minmax(160px, 1fr) 18px 0;
   }
 
   body.test-only-distribution .research-setup-screen,
@@ -1883,7 +1921,6 @@ body.test-only-distribution .readout {
   body.test-only-distribution .research-setup-title,
   body.test-only-distribution .research-setup-message,
   body.test-only-distribution .research-fixed-count,
-  body.test-only-distribution .research-mobile-note,
   body.test-only-distribution .research-consent-box,
   body.test-only-distribution #researchSetupStartBtn {
     grid-column: 1 / -1;

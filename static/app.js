@@ -1020,6 +1020,7 @@ function updateResearchControlsVisibility() {
 function updateResearchSetupScreen() {
   if (!els.researchSetupScreen) return;
   const showSetup = state.researchMode === "test" && !state.researchSession;
+  document.body.classList.toggle("research-setup-active", showSetup);
   els.researchSetupScreen.hidden = !showSetup;
   els.researchSetupScreen.setAttribute("aria-hidden", showSetup ? "false" : "true");
   if (showSetup) hideResearchCompletion();
