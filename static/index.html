@@ -9,6 +9,10 @@
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
+      <div class="mobile-orientation-notice" aria-hidden="true">
+        <div>スマホでは横画面での判読を推奨します</div>
+        <small>開始後、対応端末では全画面表示に切り替わります。</small>
+      </div>
       <header class="topbar">
         <div class="topbar-column topbar-primary">
         <label class="nk-select">
@@ -90,28 +94,11 @@
             <option selected>30</option>
           </select>
         </label>
-        <button class="right-panel-switch active" id="rightPanelToggleBtn" type="button" role="switch" aria-checked="true" title="Show or hide event and annotation column"><span class="switch-track"><span class="switch-knob"></span></span><span class="switch-label">Right ON</span></button>
-        <button class="export-button" id="exportViewerJpegBtn" title="Save the current EEG viewer canvas to Desktop as JPEG">JPEG</button>
         <span class="transport-spacer"></span>
         <button class="transport-button" id="prevBtn" title="Previous window">◀◀</button>
         <button class="transport-button" id="stepBackBtn" title="Back 1 second">◀1</button>
         <button class="transport-button" id="stepForwardBtn" title="Forward 1 second">1▶</button>
         <button class="transport-button" id="nextBtn" title="Next window">▶▶</button>
-        <div class="file-panel top-file-panel">
-          <div class="file-path-row">
-            <input class="file-path-input" id="filePathInput" placeholder="/path/to/file-or-folder" title="EEG/EDF file or folder path" />
-            <button class="tool-button clear-path-button" id="clearFilePathBtn" title="Clear path">×</button>
-          </div>
-          <div class="file-action-row">
-            <button class="export-button" id="loadFileBtn" title="Open EEG/EDF file or folder">Open</button>
-          </div>
-          <label class="nk-select recent-file-select">
-            <span class="select-caption">Recent</span>
-            <select id="recentFileSelect" title="Recent EEG/EDF files">
-              <option value="">Recent</option>
-            </select>
-          </label>
-        </div>
         <label class="recording-label" hidden aria-hidden="true">
           <select id="recordingSelect"></select>
         </label>
@@ -127,36 +114,8 @@
         </div>
         <div class="topbar-column topbar-secondary">
         <div class="research-mode-bar" id="researchModeBar">
-          <div class="research-section research-mode-section" data-research-section="mode">
-            <span class="research-section-title">Mode</span>
-            <div class="research-mode-toggle" role="group" aria-label="Research mode">
-              <button type="button" class="active" data-research-mode="dataset">Cut</button>
-              <button type="button" data-research-mode="test">Test</button>
-              <button type="button" data-research-mode="validation">Validation</button>
-            </div>
-          </div>
-          <div class="research-section" data-research-section="dataset">
-            <span class="research-section-title">Output</span>
-            <input class="research-input dataset-path-input" id="researchDatasetPathInput" placeholder="output folder" title="Output folder for cut EDF epochs" />
-            <button class="tool-button research-clear-path-button" id="researchClearDatasetPathBtn" type="button" title="Clear dataset path">×</button>
-            <button class="export-button" id="researchCreateDatasetBtn" type="button" hidden>New</button>
-            <button class="export-button" id="researchLoadDatasetBtn" type="button" hidden>Load</button>
-          </div>
-          <div class="research-section" data-research-section="cut">
-            <span class="research-section-title">Cut</span>
-            <button class="export-button" id="researchCutEpochBtn" type="button">Save Epoch</button>
-          </div>
-          <div class="research-section" data-research-section="validation">
-            <span class="research-section-title">Validation</span>
-            <button class="export-button" id="researchStartValidationBtn" type="button">Start</button>
-            <span class="research-inline-progress" id="validationInlineProgress" hidden></span>
-          </div>
           <div class="research-section" data-research-section="output">
             <span class="research-section-title">Data</span>
-            <input class="research-input source-root-input" id="researchIedsPresentPathInput" placeholder="IEDs present EDF/folder" title="IEDs-present EDF file or folder" hidden />
-            <button class="tool-button research-clear-path-button" id="researchClearIedsPresentPathBtn" type="button" title="Clear IEDs-present path" hidden>×</button>
-            <input class="research-input source-root-input" id="researchIedsAbsentPathInput" placeholder="IEDs absent EDF/folder" title="IEDs-absent EDF file or folder" hidden />
-            <button class="tool-button research-clear-path-button" id="researchClearIedsAbsentPathBtn" type="button" title="Clear IEDs-absent path" hidden>×</button>
           </div>
           <div class="research-toast hidden" id="researchToast"><span id="researchToastText"></span></div>        </div>
         </div>
@@ -187,6 +146,7 @@
               <label>勤務期間<input id="researchEpilepsyCenterTrainingDurationInput" placeholder="例: 6か月、2年" /></label>
               <input id="researchSetupEpochCountInput" type="hidden" value="20" />
               <div class="research-fixed-count" aria-label="テスト問題数">テスト問題数: <strong>20問</strong></div>
+              <div class="research-mobile-note">スマホでは横画面での判読を推奨します。開始後、対応端末では全画面表示に切り替わります。</div>
               <div class="research-consent-box">
                 <div>本研究は個々の判読者の能力や成績を評価するものではありません.</div>
                 <div>どのような脳波波形で判定が難しくなるか, また判読時の操作状況が判定とどのように関連するかを, 集計データとして明らかにすることを目的とします.</div>
@@ -244,14 +204,12 @@
           </div>
         </section>
 
-        <div class="column-resize-handle right-panel-resize" data-resize-panel="right" title="Resize annotation column"></div>
+        <div class="column-resize-handle right-panel-resize" data-resize-panel="right" title="Resize details column"></div>
 
         <aside class="side-panel right">
           <div class="right-tabs" role="tablist" aria-label="Right panel">
             <button type="button" class="active" data-right-tab="metadata" role="tab">Metadata</button>
-            <button type="button" data-right-tab="annotations" role="tab">Annotations</button>
             <button type="button" data-right-tab="test" role="tab">Test</button>
-            <button type="button" data-right-tab="answer" role="tab">Validation</button>
           </div>
 
           <section class="right-tab-panel" data-right-tab-panel="metadata" role="tabpanel">
@@ -261,39 +219,9 @@
             <div id="warningPanel" class="warning-panel"></div>
           </section>
 
-          <section class="right-tab-panel" data-right-tab-panel="annotations" role="tabpanel" hidden>
-            <details class="event-section" id="eventControls">
-              <summary class="panel-title event-summary">Event</summary>
-              <div class="event-controls">
-                <button id="rangeCancelBtn" disabled>Cancel range</button>
-                <label class="import-label">
-                  Import JSON
-                  <input type="file" id="importJsonInput" accept="application/json" />
-                </label>
-              </div>
-            </details>
-            <div class="annotation-export-row">
-              <button class="export-button" id="exportJsonBtn" title="Export annotations as JSON">Ann JSON</button>
-            </div>
-            <div class="panel-title annotation-title-row">
-              <span>Annotations</span>
-              <label class="source-annotation-toggle" title="Show annotations embedded in EDF/Nihon Kohden files">
-                <input type="checkbox" id="sourceAnnotationToggle" checked />
-                File Ann
-              </label>
-            </div>
-            <div id="annotationList" class="annotation-list"></div>
-            <div class="annotation-list-resize" id="annotationListResize" title="Resize annotations list"></div>
-          </section>
-
           <section class="right-tab-panel" data-right-tab-panel="test" role="tabpanel" hidden>
             <div class="panel-title">Test</div>
             <div id="rightTestPanel" class="research-right-panel"></div>
-          </section>
-
-          <section class="right-tab-panel" data-right-tab-panel="answer" role="tabpanel" hidden>
-            <div class="panel-title">Validation</div>
-            <div id="rightAnswerPanel" class="research-right-panel"></div>
           </section>
 
         </aside>
@@ -301,38 +229,7 @@
       </main>
     </div>
 
-    <div id="contextMenu" class="context-menu hidden">
-      <button data-action="point" data-label="spike">spike</button>
-      <button data-action="point" data-label="focal">focal</button>
-      <button data-action="point" data-label="generalized">generalized</button>
-      <button data-action="point" data-label="seizure onset">seizure onset</button>
-      <button data-action="point" data-label="seizure end">seizure end</button>
-      <button data-action="point" data-label="artifact">artifact</button>
-      <button data-action="point" data-label="sleep stage">sleep stage</button>
-      <button data-action="point" data-label="ECG artifact">ECG artifact</button>
-      <button data-action="point" data-label="comment">comment</button>
-      <hr />
-      <button data-action="range-start">Start range here</button>
-      <button data-action="range-end">End range here</button>
-    </div>
-
-    <dialog id="annotationDialog">
-      <form method="dialog">
-        <h2 id="dialogTitle">Annotation</h2>
-        <label>
-          Label
-          <input id="annotationLabel" />
-        </label>
-        <label>
-          Note
-          <textarea id="annotationNote" rows="4"></textarea>
-        </label>
-        <menu>
-          <button value="cancel">Cancel</button>
-          <button value="save" id="saveAnnotationBtn">Save</button>
-        </menu>
-      </form>
-    </dialog>
+    <div id="contextMenu" class="context-menu hidden"></div>
 
     <script src="/static/app.js?v=20260626-network1"></script>
   </body>

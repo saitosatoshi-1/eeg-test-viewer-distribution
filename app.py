@@ -84,7 +84,6 @@ def ensure_signal():
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 USER_DATA_DIR = Path(os.environ.get("EEG_VIEWER_DATA_DIR") or (Path.home() / "Library" / "Application Support" / "EEG Viewer")).expanduser()
-ANNOTATION_DIR = USER_DATA_DIR / "annotations"
 RESEARCH_DIR = USER_DATA_DIR / "research"
 RESEARCH_DATASET_DIR = RESEARCH_DIR / "datasets"
 REMOTE_DATASET_CACHE_DIR = RESEARCH_DIR / "remote_cache"
@@ -114,8 +113,6 @@ ALLOWED_REMOTE_HOSTS = {
     for host in os.environ.get("EEG_VIEWER_ALLOWED_REMOTE_HOSTS", "raw.githubusercontent.com,github.com").split(",")
     if host.strip()
 }
-RESEARCH_GROUP_SCAN_MAX_DEPTH = 8
-RESEARCH_GROUP_SCAN_LIMIT = 2000
 PUBLIC_TEST_QUESTION_COUNT = 20
 ALLOWED_RESEARCH_WRITE_ROOTS = (
     RESEARCH_DATASET_DIR,
@@ -129,20 +126,11 @@ RESEARCH_SESSION_TOKEN_TTL_SEC = 60 * 60 * 24
 TOKEN_EXEMPT_GET_PATHS = {"/api/health"}
 MUTATING_PATHS = {
     "/api/open-file",
-    "/api/annotations",
-    "/api/export-file",
-    "/api/save-desktop",
-    "/api/research/dataset/create",
-    "/api/research/dataset/item",
-    "/api/research/dataset/cut",
     "/api/research/test/response",
     "/api/research/test/response/undo",
     "/api/research/test/export-file",
     "/api/research/test/submit-result",
     "/api/admin/private-dataset/upload",
-    "/api/research/validation/response",
-    "/api/research/validation/response/undo",
-    "/api/research/validation/export-file",
 }
 LOGIN_PATH = "/login"
 
@@ -175,30 +163,6 @@ CHANNEL_GROUPS = {
     "left_parasagittal": {"F3", "C3", "P3", "O1"},
     "right_parasagittal": {"F4", "C4", "P4", "O2"},
     "midline": {"Fz", "Cz", "Pz"},
-}
-
-# Derived from Nihon Kohden Default.ecd polar electrode coordinates by taking
-# the four nearest displayed 10-20 scalp electrodes for each channel.
-LAPLACIAN_NEIGHBORS = {
-    "Fp1": ("F3", "Fz", "F7", "Fp2"),
-    "F7": ("F3", "Fp1", "T7", "C3"),
-    "T7": ("C3", "F7", "P7", "F3"),
-    "P7": ("P3", "O1", "T7", "C3"),
-    "Fp2": ("F4", "Fz", "F8", "Fp1"),
-    "F8": ("F4", "Fp2", "T8", "C4"),
-    "T8": ("C4", "F8", "P8", "F4"),
-    "P8": ("P4", "O2", "T8", "C4"),
-    "F3": ("F7", "Fz", "Fp1", "C3"),
-    "C3": ("Cz", "T7", "F3", "P3"),
-    "P3": ("P7", "Pz", "O1", "C3"),
-    "O1": ("P3", "Pz", "P7", "O2"),
-    "F4": ("F8", "Fz", "Fp2", "C4"),
-    "C4": ("Cz", "T8", "F4", "P4"),
-    "P4": ("P8", "Pz", "O2", "C4"),
-    "O2": ("P4", "Pz", "P8", "O1"),
-    "Fz": ("F3", "F4", "Cz", "Fp1"),
-    "Cz": ("C3", "C4", "Fz", "Pz"),
-    "Pz": ("P3", "P4", "Cz", "O1"),
 }
 
 LEGACY_LABELS = {"T3": "T7", "T4": "T8", "T5": "P7", "T6": "P8"}
@@ -929,19 +893,6 @@ def unique_desktop_export_path(filename: str) -> Path:
     raise ValueError("Could not create a unique Desktop export filename")
 
 
-def save_desktop_export(payload: dict[str, Any]) -> dict[str, Any]:
-    filename = safe_export_filename(str(payload.get("filename") or "eeg_export.dat"))
-    content_b64 = str(payload.get("contentBase64") or "")
-    if not content_b64:
-        raise ValueError("Export content is empty")
-    raw = base64.b64decode(content_b64, validate=True)
-    if len(raw) > 100 * 1024 * 1024:
-        raise ValueError("Export file is too large")
-    target = unique_desktop_export_path(filename)
-    target.write_bytes(raw)
-    return {"ok": True, "path": str(target), "filename": target.name, "sizeBytes": len(raw)}
-
-
 def save_desktop_text_export(filename: str, text: str) -> dict[str, Any]:
     raw = text.encode("utf-8")
     if len(raw) > 100 * 1024 * 1024:
@@ -994,28 +945,6 @@ def discover_edf_paths(roots: list[Path], max_depth: int = 8, limit: int = 500) 
                 if len(paths) >= limit:
                     return sorted(paths, key=lambda p: str(p).lower())
     return sorted(paths, key=lambda p: str(p).lower())
-
-
-def research_group_edf_paths(path: Path) -> list[Path]:
-    if not path.exists():
-        raise FileNotFoundError(f"Path not found: {path}")
-    if path.is_file():
-        if path.suffix.lower() != ".edf":
-            raise ValueError(f"Research test path is not an EDF file: {path}")
-        return [path.resolve()]
-    if not path.is_dir():
-        raise ValueError(f"Research test path is not a folder or EDF file: {path}")
-    edf_paths = discover_edf_paths(
-        [path],
-        max_depth=RESEARCH_GROUP_SCAN_MAX_DEPTH,
-        limit=RESEARCH_GROUP_SCAN_LIMIT + 1,
-    )
-    if len(edf_paths) > RESEARCH_GROUP_SCAN_LIMIT:
-        raise ValueError(
-            f"Too many EDF files in {path}. "
-            f"Choose a smaller folder with {RESEARCH_GROUP_SCAN_LIMIT} files or fewer."
-        )
-    return edf_paths
 
 
 def discover_nkt_paths(roots: list[Path], max_depth: int = 8, limit: int = 500) -> list[Path]:
@@ -1537,7 +1466,7 @@ class RecordingStore:
         return rows
 
     def display_annotations(self, record_id: str) -> list[dict[str, Any]]:
-        rows = [*load_annotations(record_id), *self.source_annotations(record_id)]
+        rows = self.source_annotations(record_id)
         rows.sort(key=lambda row: float(row.get("onset", 0) or 0))
         return rows
 
@@ -1985,32 +1914,6 @@ def apply_ecg_artifact_filter(data: np.ndarray, ch_names: list[str], sfreq: floa
     return filtered
 
 
-def compute_local_laplacian_display(
-    data: np.ndarray, ch_names: list[str], warnings: list[str]
-) -> list[tuple[str, np.ndarray]]:
-    index = {name: idx for idx, name in enumerate(ch_names)}
-    traces: list[tuple[str, np.ndarray]] = []
-    skipped: list[str] = []
-    for ch in SCALP_ORDER:
-        if ch not in index:
-            continue
-        neighbors = [name for name in LAPLACIAN_NEIGHBORS.get(ch, ()) if name in index]
-        if len(neighbors) < 2:
-            skipped.append(ch)
-            continue
-        neighbor_values = data[[index[name] for name in neighbors]]
-        traces.append((ch, data[index[ch]] - np.nanmean(neighbor_values, axis=0)))
-    if traces:
-        warnings.append("Laplacian source: local montage using nearest neighbors derived from Nihon Kohden Default.ecd electrode coordinates; not guaranteed identical to Japanese Kohden viewer internals.")
-        if skipped:
-            warnings.append(f"Laplacian skipped channels with too few neighbors: {', '.join(skipped)}.")
-    else:
-        warnings.append("Laplacian unavailable: no channels had at least 2 neighboring 10-20 electrodes; showing raw channels.")
-    return traces
-
-
-
-
 def build_montage_traces(
     data: np.ndarray,
     ch_names: list[str],
@@ -2152,11 +2055,6 @@ def build_montage_traces(
             ref = data[[index[ch] for ch in refs]].mean(axis=0)
             for ch in [c for c in SCALP_ORDER if c in index and c not in refs]:
                 add(f"{ch}-C3/C4", data[index[ch]] - ref, group=channel_group(ch))
-    elif montage == "laplacian":
-        laplacian = compute_local_laplacian_display(data, ch_names, warnings)
-        for ch, values in laplacian:
-            add(f"{ch}-Lap", values, group=channel_group(ch))
-
     if not traces:
         warnings.append(f"Montage '{montage}' could not be derived from decoded channels; showing raw or pre-montaged EEG channels.")
         for ch in ch_names:
@@ -2171,67 +2069,6 @@ def build_montage_traces(
             ch = ch_names[ecg_indices[0]]
             add(f"ECG ({ch})", data[index[ch]], role="ecg", group="ecg")
     return traces
-
-
-def annotation_path(record_id: str) -> Path:
-    ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in record_id)
-    return ANNOTATION_DIR / f"{safe}.annotations.json"
-
-
-def load_annotations(record_id: str) -> list[dict[str, Any]]:
-    path = annotation_path(record_id)
-    if not path.exists():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return normalize_annotations(record_id, payload if isinstance(payload, list) else [])
-    except Exception:
-        return []
-
-
-def normalize_annotations(record_id: str, annotations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    for idx, row in enumerate(annotations):
-        if not isinstance(row, dict):
-            continue
-        annotation = dict(row)
-        if not annotation.get("id"):
-            stable_parts = [
-                record_id,
-                str(idx),
-                str(annotation.get("onset", "")),
-                str(annotation.get("duration", "")),
-                str(annotation.get("label", "")),
-                str(annotation.get("channel", "")),
-                str(annotation.get("note", "")),
-            ]
-            annotation["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "eeg-viewer:" + "|".join(stable_parts)))
-        annotation.setdefault("recordingId", record_id)
-        normalized.append(annotation)
-    return normalized
-
-
-def save_annotations(record_id: str, annotations: list[dict[str, Any]]) -> None:
-    annotations = normalize_annotations(record_id, annotations)
-    annotation_path(record_id).write_text(
-        json.dumps(annotations, ensure_ascii=False, indent=2, default=json_safe) + "\n",
-        encoding="utf-8",
-    )
-
-
-def annotation_export_rows(
-    store: RecordingStore | None, record_id: str
-) -> list[dict[str, Any]]:
-    rows = []
-    for row in load_annotations(record_id):
-        out_row = dict(row)
-        for key in ("onset", "duration"):
-            if key in out_row and out_row[key] not in (None, ""):
-                value = precise_float(out_row[key])
-                out_row[key] = f"{value:.6f}"
-        rows.append(out_row)
-    return rows
 
 
 def precise_float(value: Any) -> float:
@@ -2367,82 +2204,6 @@ def unique_file_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise FileExistsError(f"Could not find unique output filename for {path}")
-
-
-def edf_duration_seconds(edf_path: Path, default: float = 10.0) -> float:
-    imported_mne = ensure_mne()
-    if imported_mne is None:
-        return default
-    try:
-        raw = imported_mne.io.read_raw_edf(str(edf_path), preload=False, verbose="ERROR")
-        sfreq = float(raw.info.get("sfreq") or 0.0)
-        if sfreq > 0 and getattr(raw, "n_times", 0):
-            return max(0.001, round(float(raw.n_times) / sfreq, 6))
-        if len(getattr(raw, "times", []) or []):
-            return max(0.001, round(float(raw.times[-1]), 6))
-    except Exception:
-        return default
-    return default
-
-
-def research_cut_target(output_value: Any, edf_path: Path, epoch_start: float, duration: float) -> tuple[Path, Path]:
-    raw_output = normalize_path_input(output_value)
-    if not raw_output:
-        raise ValueError("outputPath is required.")
-    output_path = Path(raw_output).expanduser()
-    if output_path.suffix.lower() == ".edf":
-        output_dir = output_path.parent
-        target = output_path
-    else:
-        output_dir = output_path
-        stem = safe_filename_part(edf_path.stem, "edf")
-        filename = f"{stem}_start{epoch_start:010.3f}_dur{duration:07.3f}.edf"
-        target = output_dir / filename
-    output_dir = ensure_allowed_research_write_path(output_dir)
-    target = ensure_allowed_research_write_path(target)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir, unique_file_path(target)
-
-
-def export_research_epoch_edf(payload: dict[str, Any]) -> dict[str, Any]:
-    edf_raw = normalize_path_input(payload.get("edfPath"))
-    if not edf_raw:
-        raise ValueError("edfPath is required.")
-    edf_path = Path(edf_raw).expanduser().resolve()
-    if not edf_path.exists() or not edf_path.is_file():
-        raise FileNotFoundError(f"EDF file not found: {edf_path}")
-    if edf_path.suffix.lower() != ".edf":
-        raise ValueError("Save Epoch currently exports only from EDF source files.")
-    epoch_start = max(0.0, float(payload.get("epochStart") or 0.0))
-    duration = max(0.001, float(payload.get("durationSec") or 10.0))
-    output_dir, target = research_cut_target(payload.get("outputPath"), edf_path, epoch_start, duration)
-    imported_mne = ensure_mne()
-    if imported_mne is None:
-        raise RuntimeError("MNE is required to export EDF epochs.")
-    try:
-        raw = imported_mne.io.read_raw_edf(str(edf_path), preload=False, verbose="ERROR")
-        sfreq = float(raw.info.get("sfreq") or 0.0)
-        total_duration = float(raw.n_times) / sfreq if sfreq > 0 else duration
-        tmin = min(max(0.0, epoch_start), max(0.0, total_duration - 0.001))
-        tmax = min(total_duration, tmin + duration)
-        if tmax <= tmin:
-            raise ValueError("Selected epoch is outside the EDF duration.")
-        raw.crop(tmin=tmin, tmax=tmax, include_tmax=False)
-        raw.load_data()
-        raw.export(str(target), fmt="edf", overwrite=False)
-    except ImportError as exc:
-        raise RuntimeError("EDF export requires the edfio package. Please install/update the EEG Viewer runtime.") from exc
-    return {
-        "outputPath": str(target),
-        "outputDir": str(output_dir),
-        "filename": target.name,
-        "sourcePath": str(edf_path),
-        "recordingId": str(payload.get("recordingId") or edf_path.stem),
-        "epochStart": round(epoch_start, 6),
-        "durationSec": round(duration, 6),
-        "eventTime": round(float(payload.get("eventTime") or (epoch_start + duration / 2.0)), 6),
-        "labelGroup": str(payload.get("labelGroup") or ""),
-    }
 
 
 def research_dataset_path(value: str | None) -> Path:
@@ -2641,106 +2402,16 @@ def load_research_dataset(path_value: str | None) -> dict[str, Any]:
     dataset_dir = research_dataset_path(path_value)
     payload = json_read(dataset_dir / "dataset.json", None)
     if not isinstance(payload, dict):
-        payload = create_validation_dataset_from_edf_folder(dataset_dir)
+        raise FileNotFoundError(f"dataset.json not found: {dataset_dir}")
     payload.setdefault("datasetPath", str(dataset_dir))
     payload.setdefault("cases", [])
     return payload
-
-
-def infer_validation_label_group_from_path(path: Path) -> str:
-    name = path.name.lower()
-    parent = path.parent.name.lower()
-    text = f"{parent}/{name}"
-    negative_markers = ("no_epilepsy", "non_epilepsy", "nonepilepsy", "non-epilepsy", "iedなし", "なし", "absent", "negative", "normal")
-    if any(marker in text for marker in negative_markers):
-        return "non_epileptiform"
-    return "epileptiform"
-
-
-def create_validation_dataset_from_edf_folder(source_path: Path) -> dict[str, Any]:
-    source = source_path.expanduser().resolve()
-    if not source.exists():
-        raise FileNotFoundError(f"dataset.json not found: {source_path}")
-    edf_paths = research_group_edf_paths(source)
-    if not edf_paths:
-        raise FileNotFoundError(f"dataset.json not found and no EDF files were found: {source}")
-    label_group = infer_validation_label_group_from_path(source)
-    source_hash = hashlib.sha1(str(source).encode("utf-8")).hexdigest()[:12]
-    dataset_id = safe_research_id(f"validation_{source.name}_{source_hash}")
-    dataset_dir = RESEARCH_DATASET_DIR / dataset_id
-    dataset_file = dataset_dir / "dataset.json"
-    existing = json_read(dataset_file, None)
-    if isinstance(existing, dict):
-        existing.setdefault("datasetPath", str(dataset_dir))
-        existing.setdefault("cases", [])
-        return existing
-    cases: list[dict[str, Any]] = []
-    for file_index, edf_path in enumerate(edf_paths, start=1):
-        try:
-            duration = edf_duration_seconds(edf_path)
-        except Exception:
-            duration = 10.0
-        reference_label = "MANUAL_EPI" if label_group == "epileptiform" else "MANUAL_NON"
-        case_id_seed = f"{edf_path.resolve()}|validation|{label_group}|{file_index}"
-        case_id = hashlib.sha1(case_id_seed.encode("utf-8")).hexdigest()[:16]
-        cases.append({
-            "caseId": case_id,
-            "edfPath": str(edf_path.resolve()),
-            "recordingId": edf_path.stem,
-            "eventTime": round(duration / 2.0, 6),
-            "epochStart": 0.0,
-            "durationSec": round(duration, 6),
-            "referenceLabel": reference_label,
-            "labelGroup": label_group,
-            "include": True,
-            "excludeReason": "",
-            "qualityNotes": "",
-            "phase1Montage": "conventional",
-            "sourceRoot": str(source),
-            "sourceGroup": "epilepsy" if label_group == "epileptiform" else "no_epilepsy",
-            "sourceAnnotation": "validation_input_folder",
-        })
-    dataset = {
-        "datasetId": dataset_id,
-        "name": source.name,
-        "datasetPath": str(dataset_dir),
-        "sourceRoot": str(source),
-        "sourceRoots": [str(source)],
-        "createdAt": utc_now_iso(),
-        "settings": {"phase1TotalSampleCount": len(cases), "phase1SamplePerGroup": len(cases)},
-        "cases": cases,
-    }
-    dataset_dir.mkdir(parents=True, exist_ok=True)
-    json_write(dataset_file, dataset)
-    return dataset
 
 
 def research_case_rows(dataset: dict[str, Any]) -> list[dict[str, Any]]:
     rows = list(dataset.get("cases") or [])
     rows.sort(key=lambda row: (str(row.get("recordingId", "")), float(row.get("epochStart", 0) or 0), str(row.get("caseId", ""))))
     return rows
-
-
-def save_research_group_exports(dataset_dir: Path, dataset: dict[str, Any]) -> None:
-    group_dirs = {
-        "epileptiform": "IEDs_present",
-        "non_epileptiform": "IEDs_absent",
-    }
-    for group, folder_name in group_dirs.items():
-        group_dir = dataset_dir / folder_name
-        group_dir.mkdir(parents=True, exist_ok=True)
-        group_cases = [row for row in research_case_rows(dataset) if row.get("labelGroup") == group]
-        group_dataset = {**dataset, "cases": group_cases}
-        json_write(group_dir / "dataset.json", group_dataset)
-
-
-def save_research_dataset(dataset_dir: Path, dataset: dict[str, Any]) -> None:
-    dataset_dir.mkdir(parents=True, exist_ok=True)
-    (dataset_dir / "responses").mkdir(exist_ok=True)
-    (dataset_dir / "exports").mkdir(exist_ok=True)
-    dataset["datasetPath"] = str(dataset_dir)
-    json_write(dataset_dir / "dataset.json", dataset)
-    save_research_group_exports(dataset_dir, dataset)
 
 
 def parse_tuev_sidecar(path: Path) -> list[dict[str, Any]]:
@@ -2800,148 +2471,6 @@ def research_events_for_edf(edf_path: Path) -> list[dict[str, Any]]:
     return read_mne_events_from_edf(edf_path)
 
 
-def create_research_dataset(payload: dict[str, Any]) -> dict[str, Any]:
-    source_raw = str(payload.get("sourceRoot") or "").strip()
-    source_root = Path(source_raw).expanduser().resolve() if source_raw else None
-    group_paths_payload = payload.get("groupPaths") if isinstance(payload.get("groupPaths"), dict) else {}
-    phase1_montage = str(payload.get("phase1Montage") or "conventional")
-    phase1_total_count = max(1, int(float(payload.get("phase1TotalSampleCount") or RESEARCH_PHASE1_SAMPLE_TOTAL)))
-    if source_root is not None and not source_root.exists():
-        raise FileNotFoundError(f"Source root not found: {source_root}")
-    name = str(payload.get("name") or (source_root.name if source_root else "manual_dataset") or "dataset")
-    requested_id = str(payload.get("datasetId") or "").strip()
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_raw = str(payload.get("outputPath") or payload.get("datasetPath") or "").strip()
-    if output_raw:
-        dataset_dir = research_dataset_path(output_raw)
-        dataset_id = safe_research_id(requested_id or dataset_dir.name or f"{stamp}_{name}")
-    else:
-        dataset_id = safe_research_id(requested_id or f"{stamp}_{name}")
-        dataset_dir = RESEARCH_DATASET_DIR / dataset_id
-    if not output_raw and dataset_dir.exists():
-        dataset_id = safe_research_id(f"{dataset_id}_{uuid.uuid4().hex[:6]}")
-        dataset_dir = RESEARCH_DATASET_DIR / dataset_id
-    cases: list[dict[str, Any]] = []
-    source_roots: list[str] = []
-    if group_paths_payload:
-        for label_group in ("epileptiform", "non_epileptiform"):
-            folder_value = str(group_paths_payload.get(label_group) or "").strip()
-            if not folder_value:
-                raise ValueError("Both IEDs-present and IEDs-absent EDF files or folders are required.")
-            group_path = Path(folder_value).expanduser().resolve()
-            source_roots.append(str(group_path))
-            edf_paths = research_group_edf_paths(group_path)
-            for file_index, edf_path in enumerate(edf_paths, start=1):
-                duration = edf_duration_seconds(edf_path)
-                event_time = duration / 2.0
-                reference_label = "MANUAL_EPI" if label_group == "epileptiform" else "MANUAL_NON"
-                case_id_seed = f"{edf_path.resolve()}|{label_group}|{file_index}"
-                case_id = hashlib.sha1(case_id_seed.encode("utf-8")).hexdigest()[:16]
-                cases.append({
-                    "caseId": case_id,
-                    "edfPath": str(edf_path.resolve()),
-                    "recordingId": edf_path.stem,
-                    "eventTime": round(event_time, 6),
-                    "epochStart": 0.0,
-                    "durationSec": round(duration, 6),
-                    "referenceLabel": reference_label,
-                    "labelGroup": label_group,
-                    "include": True,
-                    "excludeReason": "",
-                    "qualityNotes": "",
-                    "phase1Montage": phase1_montage,
-                    "sourceGroup": "epilepsy" if label_group == "epileptiform" else "no_epilepsy",
-                    "sourceAnnotation": "manual_group_folder",
-                })
-        if not cases:
-            raise ValueError("No EDF files found in the IEDs-present or IEDs-absent folders.")
-    else:
-        edf_paths = sorted({*source_root.rglob("*.edf"), *source_root.rglob("*.EDF")}) if source_root is not None else []
-        for edf_path in edf_paths:
-            events = research_events_for_edf(edf_path)
-            recording_id = edf_path.stem
-            for event_index, event in enumerate(events, start=1):
-                label = str(event.get("label") or "").upper()
-                if label in RESEARCH_EXCLUDED_LABELS:
-                    continue
-                label_group = RESEARCH_INCLUDED_LABELS.get(label)
-                if not label_group:
-                    continue
-                event_time = float(event.get("eventTime", 0.0) or 0.0)
-                epoch_start = max(0.0, event_time - 5.0)
-                case_id_seed = f"{edf_path.resolve()}|{event_time:.6f}|{label}|{event_index}"
-                case_id = hashlib.sha1(case_id_seed.encode("utf-8")).hexdigest()[:16]
-                cases.append({
-                    "caseId": case_id,
-                    "edfPath": str(edf_path.resolve()),
-                    "recordingId": recording_id,
-                    "eventTime": round(event_time, 6),
-                    "epochStart": round(epoch_start, 6),
-                    "durationSec": 10,
-                    "referenceLabel": label,
-                    "labelGroup": label_group,
-                    "include": True,
-                    "excludeReason": "",
-                    "qualityNotes": "",
-                    "phase1Montage": phase1_montage,
-                    "sourceAnnotation": event.get("sourceAnnotation", ""),
-                })
-    dataset = {
-        "datasetId": dataset_id,
-        "name": name,
-        "datasetPath": str(dataset_dir),
-        "sourceRoot": str(source_root) if source_root is not None else "",
-        "sourceRoots": source_roots,
-        "createdAt": utc_now_iso(),
-        "version": RESEARCH_VERSION,
-        "cases": cases,
-        "settings": {
-            "epochDurationSec": 10,
-            "phase1Montage": phase1_montage,
-            "phase1TotalSampleCount": phase1_total_count,
-            "phase1SamplePerGroup": phase1_total_count,
-        },
-    }
-    manifest = {"datasetId": dataset_id, "name": name, "createdAt": dataset["createdAt"], "sourceRoot": dataset["sourceRoot"], "version": RESEARCH_VERSION}
-    save_research_dataset(dataset_dir, dataset)
-    json_write(dataset_dir / "manifest.json", manifest)
-    return {"datasetPath": str(dataset_dir), "dataset": dataset, "manifest": manifest, "caseCount": len(cases)}
-
-
-def add_research_dataset_cut(payload: dict[str, Any]) -> dict[str, Any]:
-    return export_research_epoch_edf(payload)
-
-
-def update_research_dataset_item(payload: dict[str, Any]) -> dict[str, Any]:
-    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("path"))
-    dataset = load_research_dataset(str(dataset_dir))
-    case_id = str(payload.get("caseId") or "")
-    updates = dict(payload.get("updates") or {})
-    allowed = {
-        "include", "excludeReason", "qualityNotes", "phase1Montage", "phase1SamplePerGroup", "phase1TotalSampleCount",
-    }
-    found = None
-    settings_keys = {"phase1SamplePerGroup", "phase1TotalSampleCount"}
-    if "phase1TotalSampleCount" in updates:
-        settings = dataset.setdefault("settings", {})
-        settings["phase1TotalSampleCount"] = max(1, int(float(updates.get("phase1TotalSampleCount") or RESEARCH_PHASE1_SAMPLE_TOTAL)))
-    if "phase1SamplePerGroup" in updates:
-        settings = dataset.setdefault("settings", {})
-        settings["phase1SamplePerGroup"] = max(1, int(float(updates.get("phase1SamplePerGroup") or RESEARCH_PHASE1_SAMPLE_PER_GROUP)))
-    if case_id:
-        for row in dataset.get("cases") or []:
-            if row.get("caseId") == case_id:
-                for key, value in updates.items():
-                    if key in allowed and key not in settings_keys:
-                        row[key] = value
-                found = row
-                break
-        if found is None:
-            raise KeyError(f"Case not found: {case_id}")
-    save_research_dataset(dataset_dir, dataset)
-    return {"datasetPath": str(dataset_dir), "case": found, "dataset": dataset}
-
-
 def research_reader_id(value: Any) -> str:
     reader = safe_filename_part(str(value or "reader"), "reader")
     if not reader:
@@ -2952,7 +2481,7 @@ def research_reader_id(value: Any) -> str:
 def research_reader_json_filename(reader_id: str | None, profile: dict[str, Any] | None = None) -> str:
     profile = profile if isinstance(profile, dict) else {}
     name = safe_filename_part(
-        str(profile.get("readerName") or profile.get("doctorName") or ""),
+        str(profile.get("readerName") or ""),
         "EEG_test_results",
     )
     return f"{name}.json"
@@ -2960,16 +2489,6 @@ def research_reader_json_filename(reader_id: str | None, profile: dict[str, Any]
 
 def research_response_path(dataset_dir: Path, reader_id: str) -> Path:
     return dataset_dir / "responses" / f"{research_reader_id(reader_id)}.json"
-
-
-def research_output_dir(dataset_dir: Path, value: Any) -> Path | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    path = Path(raw).expanduser()
-    if not path.is_absolute():
-        path = dataset_dir / "exports" / safe_research_id(raw)
-    return ensure_allowed_research_write_path(path)
 
 
 def load_research_responses(dataset_dir: Path, reader_id: str) -> list[dict[str, Any]]:
@@ -3065,7 +2584,7 @@ def save_research_assignment(dataset_dir: Path, reader_id: str, phase: str, case
     })
 
 
-def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[dict[str, Any]], output_path: Any = None, reader_profile: dict[str, Any] | None = None) -> None:
+def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[dict[str, Any]], reader_profile: dict[str, Any] | None = None) -> None:
     if reader_profile is None:
         reader_profile = response_reader_profile(*responses)
     payload = {
@@ -3078,9 +2597,6 @@ def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[d
     if cookie_hash:
         payload["accessCookieHash"] = cookie_hash
     json_write(research_response_path(dataset_dir, reader_id), payload)
-    output_dir = research_output_dir(dataset_dir, output_path)
-    if output_dir is not None:
-        json_write(output_dir / "responses" / f"{research_reader_id(reader_id)}.json", payload)
 
 
 def active_research_responses(responses: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -3404,197 +2920,6 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validation_response_path(dataset_dir: Path) -> Path:
-    return dataset_dir / "validation" / "validation.json"
-
-
-def load_validation_responses(dataset_dir: Path) -> list[dict[str, Any]]:
-    payload = json_read(validation_response_path(dataset_dir), {"responses": []})
-    if isinstance(payload, dict):
-        return list(payload.get("responses") or [])
-    if isinstance(payload, list):
-        return payload
-    return []
-
-
-def save_validation_responses(dataset_dir: Path, responses: list[dict[str, Any]]) -> None:
-    target = validation_response_path(dataset_dir)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "updatedAt": utc_now_iso(),
-        "responses": responses,
-    }
-    json_write(target, payload)
-
-
-def active_validation_map(responses: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    active: dict[str, dict[str, Any]] = {}
-    for row in responses:
-        if row.get("superseded") or row.get("undoneAt"):
-            continue
-        active[str(row.get("caseId", ""))] = row
-    return active
-
-
-def validation_expected_rating(case: dict[str, Any]) -> str:
-    return RESEARCH_RATING_POSITIVE if case.get("labelGroup") == "epileptiform" else RESEARCH_RATING_NEGATIVE
-
-
-def validation_case_rows(dataset: dict[str, Any]) -> list[dict[str, Any]]:
-    return [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
-
-
-def validation_session(payload: dict[str, Any]) -> dict[str, Any]:
-    dataset = load_research_dataset(payload.get("datasetPath") or payload.get("dataset"))
-    dataset_dir = research_dataset_path(dataset.get("datasetPath"))
-    responses = load_validation_responses(dataset_dir)
-    active = active_validation_map(responses)
-    all_cases = validation_case_rows(dataset)
-    remaining = [row for row in all_cases if str(row.get("caseId", "")) not in active]
-    active_rows = sorted(active.values(), key=lambda row: (str(row.get("answeredAt", "")), str(row.get("caseId", ""))))
-    return {
-        "datasetPath": dataset.get("datasetPath"),
-        "datasetId": dataset.get("datasetId"),
-        "name": dataset.get("name"),
-        "cases": remaining,
-        "responses": active_rows,
-        "answeredCount": len(active),
-        "totalCount": len(all_cases),
-        "displayCount": len(remaining),
-        "ratings": [RESEARCH_RATING_POSITIVE, RESEARCH_RATING_NEGATIVE],
-        "groupCounts": {group: sum(1 for row in all_cases if row.get("labelGroup") == group) for group in ("epileptiform", "non_epileptiform")},
-    }
-
-
-def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
-    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
-    dataset = load_research_dataset(str(dataset_dir))
-    case_id = str(payload.get("caseId") or "")
-    case = next((row for row in dataset.get("cases") or [] if row.get("caseId") == case_id), None)
-    if not case:
-        raise KeyError(f"Case not found: {case_id}")
-    raw_rating = str(payload.get("rating") or "")
-    rating = RESEARCH_RATING_ALIASES.get(raw_rating.strip().lower(), raw_rating) or validation_expected_rating(case)
-    if rating not in (RESEARCH_RATING_POSITIVE, RESEARCH_RATING_NEGATIVE):
-        raise ValueError("Validation rating must be epileptiform present or absent.")
-    expected = validation_expected_rating(case)
-    now = utc_now_iso()
-    response_id = str(uuid.uuid4())
-    responses = load_validation_responses(dataset_dir)
-    for row in responses:
-        if row.get("caseId") == case_id and not row.get("superseded") and not row.get("undoneAt"):
-            row["superseded"] = True
-            row["supersededAt"] = now
-            row["replacedByResponseId"] = response_id
-    dataset_consistent = rating == expected
-    response = {
-        "responseId": response_id,
-        "caseId": case_id,
-        "rating": rating,
-        "expectedRating": expected,
-        "datasetConsistent": dataset_consistent,
-        "datasetValid": dataset_consistent,
-        "validationMethod": payload.get("validationMethod") or ("enter_accept" if dataset_consistent else "manual_override"),
-        "startedAt": payload.get("startedAt") or now,
-        "answeredAt": payload.get("answeredAt") or now,
-        "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
-        "labelGroup": case.get("labelGroup", ""),
-        "referenceLabel": case.get("referenceLabel", ""),
-        "usedMontage": payload.get("usedMontage") or "",
-        "finalMontage": payload.get("finalMontage") or payload.get("usedMontage") or "",
-        "sensitivity": payload.get("sensitivity") or "",
-        "tc": payload.get("tc") or "",
-        "hf": payload.get("hf") or "",
-        "timebaseSec": payload.get("timebaseSec") or "",
-        "superseded": False,
-        "undoneAt": "",
-        "replacedByResponseId": "",
-    }
-    responses.append(response)
-    save_validation_responses(dataset_dir, responses)
-    session = validation_session({"datasetPath": str(dataset_dir)})
-    return {"response": response, "session": session}
-
-
-def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
-    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
-    response_id = str(payload.get("responseId") or "")
-    responses = load_validation_responses(dataset_dir)
-    candidates = [row for row in responses if not row.get("superseded") and not row.get("undoneAt")]
-    target = None
-    if response_id:
-        target = next((row for row in candidates if row.get("responseId") == response_id), None)
-    if target is None and candidates:
-        target = max(candidates, key=lambda row: str(row.get("answeredAt") or ""))
-    if target is None:
-        raise ValueError("No active validation response to undo.")
-    target["undoneAt"] = utc_now_iso()
-    save_validation_responses(dataset_dir, responses)
-    return {"undone": target, "session": validation_session({"datasetPath": str(dataset_dir)})}
-
-
-def export_validation_results_json(dataset_dir: Path) -> str:
-    dataset = load_research_dataset(str(dataset_dir))
-    responses = load_validation_responses(dataset_dir)
-    active = active_validation_map(responses)
-    cases_payload = []
-    reviewed = 0
-    valid_count = 0
-    invalid_count = 0
-    for case in validation_case_rows(dataset):
-        case_id = str(case.get("caseId", ""))
-        response = active.get(case_id)
-        expected = validation_expected_rating(case)
-        is_reviewed = response is not None
-        dataset_valid = response.get("datasetValid") if response else None
-        if is_reviewed:
-            reviewed += 1
-            if dataset_valid:
-                valid_count += 1
-            else:
-                invalid_count += 1
-        case_payload = {
-            "caseId": case_id,
-            "edfFile": Path(str(case.get("edfPath", ""))).name if case.get("edfPath") else "",
-            "recordingId": case.get("recordingId", ""),
-            "sourceGroup": case.get("sourceGroup", ""),
-            "referenceLabel": case.get("referenceLabel", ""),
-            "labelGroup": case.get("labelGroup", ""),
-            "expectedRatingFromDataset": expected,
-            "reviewed": is_reviewed,
-            "datasetValid": dataset_valid,
-            "datasetConsistent": response.get("datasetConsistent") if response else None,
-            "expertRating": response.get("rating") if response else "",
-            "validationMethod": response.get("validationMethod") if response else "",
-            "answeredAt": response.get("answeredAt") if response else "",
-            "responseId": response.get("responseId") if response else "",
-        }
-        cases_payload.append(case_payload)
-    payload = {
-        "exportVersion": "compact-1",
-        "exportedAt": utc_now_iso(),
-        "dataset": research_compact_dataset_payload(dataset, dataset_dir),
-        "summary": {
-            "totalEpochs": len(cases_payload),
-            "reviewedEpochs": reviewed,
-            "validEpochs": valid_count,
-            "invalidEpochs": invalid_count,
-            "unreviewedEpochs": max(0, len(cases_payload) - reviewed),
-            "invalidCaseIds": [row.get("caseId", "") for row in cases_payload if row.get("datasetValid") is False],
-        },
-        "cases": cases_payload,
-    }
-    json_text = json.dumps(payload, ensure_ascii=False, indent=2, default=json_safe) + "\n"
-    return json_text
-
-
-def save_validation_results_json_to_desktop(payload: dict[str, Any]) -> dict[str, Any]:
-    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
-    json_text = export_validation_results_json(dataset_dir)
-    filename = safe_export_filename(str(payload.get("filename") or "validation_results.json"))
-    return save_desktop_text_export(filename, json_text)
-
-
 def save_research_response(payload: dict[str, Any]) -> dict[str, Any]:
     with RESEARCH_RESPONSE_LOCK:
         return save_research_response_unlocked(payload)
@@ -3748,7 +3073,7 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
         "replacedByResponseId": "",
     }
     responses.append(response)
-    save_research_responses(dataset_dir, reader_id, responses, payload.get("outputPath"), reader_profile)
+    save_research_responses(dataset_dir, reader_id, responses, reader_profile)
     session = research_session({
         "datasetPath": str(dataset_dir),
         "readerId": reader_id,
@@ -3778,7 +3103,7 @@ def undo_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     if target is None:
         raise ValueError("No active response to undo.")
     target["undoneAt"] = utc_now_iso()
-    save_research_responses(dataset_dir, reader_id, responses, payload.get("outputPath"))
+    save_research_responses(dataset_dir, reader_id, responses)
     return {"undone": target, "session": research_session({
         "datasetPath": str(dataset_dir),
         "readerId": reader_id,
@@ -3875,18 +3200,14 @@ def profile_value(profile: dict[str, Any], *keys: str) -> Any:
 
 def research_json_case_payload(case: dict[str, Any]) -> dict[str, Any]:
     row = dict(case)
-    for key in ("phase2Montages", "topomapTime", "epochStart", "eventTime", "durationSec"):
+    for key in ("epochStart", "eventTime", "durationSec"):
         row.pop(key, None)
     return row
 
 
 def research_json_response_payload(response: dict[str, Any]) -> dict[str, Any] | None:
-    if str(response.get("phase") or "1") == "2":
-        return None
     row = dict(response)
     row["phase"] = "1"
-    if row.get("displayMode") == "phase2_4montage_topomap":
-        row["displayMode"] = "phase1_single"
     for key in (
         "spikeTime", "spikeSampleIndex", "spikeSfreq", "spikeChannel",
         "clickedElectrode", "clickedCanvasX", "clickedCanvasY", "clickedRowIndex",
@@ -3899,10 +3220,6 @@ def research_json_response_payload(response: dict[str, Any]) -> dict[str, Any] |
 def research_json_dataset_payload(dataset: dict[str, Any]) -> dict[str, Any]:
     payload = dict(dataset)
     payload["cases"] = [research_json_case_payload(row) for row in dataset.get("cases") or []]
-    settings = dict(payload.get("settings") or {})
-    settings.pop("phase2SampleEnabled", None)
-    settings.pop("phase2FalsePositiveEnabled", None)
-    payload["settings"] = settings
     return payload
 
 
@@ -3912,7 +3229,7 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
         for key in (
             "readerName", "email", "affiliation", "specialty", "position",
             "epilepsySpecialist", "clinicalNeurophysEegSpecialist",
-            "medicalPracticeYears", "eegReadsPerMonth",
+            "medicalPracticeYears",
             "epilepsyCenterTraining", "epilepsyCenterTrainingDuration",
             "usualMontage", "ethicsNoticeConfirmed",
             "dataProviderSharingAcknowledged",
@@ -4654,19 +3971,11 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     "sessionToken": qs.get("sessionToken", [""])[0],
                     "accessCookieHash": self.access_cookie_hash(),
                 }), "application/json; charset=utf-8")
-            if path == "/api/research/validation/session":
-                return self.send_json(validation_session({
-                    "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
-                }))
-            if path == "/api/research/validation/export.json":
-                dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
-                return self.send_text(export_validation_results_json(dataset_dir), "application/json; charset=utf-8")
-            if path == "/api/annotations":
-                return self.send_json(load_annotations(required(qs, "id")))
-            if path == "/api/annotations.json":
-                record_id = required(qs, "id")
-                return self.send_json(annotation_export_rows(self.store, record_id))
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+        except FileNotFoundError as exc:
+            self.send_json({"error": str(exc)}, status=404)
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, status=400)
         except Exception as exc:
             traceback.print_exc()
             self.send_json({"error": str(exc)}, status=500)
@@ -4690,21 +3999,13 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 return self.send_json({"error": "Invalid Content-Length."}, status=400)
-            max_body = MAX_EXPORT_POST_BODY_BYTES if parsed.path in {"/api/export-file", "/api/save-desktop", "/api/admin/private-dataset/upload"} else MAX_POST_BODY_BYTES
+            max_body = MAX_EXPORT_POST_BODY_BYTES if parsed.path in {"/api/admin/private-dataset/upload"} else MAX_POST_BODY_BYTES
             if length > max_body:
                 return self.send_json({"error": "Request body is too large."}, status=413)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
             payload.setdefault("accessCookieHash", self.access_cookie_hash())
             if parsed.path == "/api/open-file":
                 return self.send_json(self.store.add_path(normalize_path_input(payload.get("path", ""))))
-            if parsed.path in {"/api/export-file", "/api/save-desktop"}:
-                return self.send_json(save_desktop_export(payload))
-            if parsed.path == "/api/research/dataset/create":
-                return self.send_json(create_research_dataset(payload))
-            if parsed.path == "/api/research/dataset/item":
-                return self.send_json(update_research_dataset_item(payload))
-            if parsed.path == "/api/research/dataset/cut":
-                return self.send_json(add_research_dataset_cut(payload))
             if parsed.path == "/api/research/test/response":
                 return self.send_json(save_research_response(payload))
             if parsed.path == "/api/research/test/response/undo":
@@ -4713,41 +4014,15 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(save_research_responses_json_to_desktop(payload))
             if parsed.path == "/api/research/test/submit-result":
                 return self.send_json(save_research_result_submission(payload))
-            if parsed.path == "/api/research/validation/response":
-                return self.send_json(save_validation_response(payload))
-            if parsed.path == "/api/research/validation/response/undo":
-                return self.send_json(undo_validation_response(payload))
-            if parsed.path == "/api/research/validation/export-file":
-                return self.send_json(save_validation_results_json_to_desktop(payload))
             if parsed.path == "/api/admin/private-dataset/upload":
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_json(upload_private_dataset(payload))
-            if parsed.path != "/api/annotations":
-                return self.send_error(HTTPStatus.NOT_FOUND, "Not found")
-            record_id = required(qs, "id")
-            annotations = load_annotations(record_id)
-            action = payload.get("action", "add")
-            if action == "add":
-                annotation = dict(payload.get("annotation", {}))
-                annotation.setdefault("id", str(uuid.uuid4()))
-                annotation.setdefault("recordingId", record_id)
-                annotation.setdefault("createdAt", datetime.now(timezone.utc).isoformat())
-                annotations.append(annotation)
-            elif action == "update":
-                annotation = dict(payload.get("annotation", {}))
-                annotations = [annotation if row.get("id") == annotation.get("id") else row for row in annotations]
-            elif action == "delete":
-                delete_id = payload.get("id")
-                annotations = [row for row in annotations if row.get("id") != delete_id]
-            elif action == "replace":
-                annotations = normalize_annotations(record_id, list(payload.get("annotations", [])))
-            else:
-                raise ValueError(f"Unsupported annotation action: {action}")
-            annotations = normalize_annotations(record_id, annotations)
-            annotations.sort(key=lambda row: float(row.get("onset", 0) or 0))
-            save_annotations(record_id, annotations)
-            self.send_json(annotations)
+            return self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+        except FileNotFoundError as exc:
+            self.send_json({"error": str(exc)}, status=404)
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, status=400)
         except Exception as exc:
             traceback.print_exc()
             self.send_json({"error": str(exc)}, status=500)
@@ -4789,7 +4064,6 @@ def main() -> None:
 
     fds_dir = Path(args.fds_dir).expanduser().resolve()
     edf_dirs = [Path(path).expanduser().resolve() for path in args.edf_dir]
-    ANNOTATION_DIR.mkdir(parents=True, exist_ok=True)
     RESEARCH_DATASET_DIR.mkdir(parents=True, exist_ok=True)
     PRIVATE_DATASET_DIR.mkdir(parents=True, exist_ok=True)
     SUBMITTED_RESULTS_DIR.mkdir(parents=True, exist_ok=True)

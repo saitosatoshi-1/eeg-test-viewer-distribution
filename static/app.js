@@ -1,8 +1,6 @@
 const REQUEST_TOKEN = document.querySelector('meta[name="eeg-viewer-token"]')?.content || "";
 const SETTINGS_KEY = "eegViewerSettings.v1";
-const RECENT_FILES_KEY = "eegViewerRecentFiles.v1";
 const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
-const ANNOTATION_LIST_HEIGHT_KEY = "eegViewerAnnotationListHeight.v1";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
 const RESEARCH_PENDING_RESPONSES_KEY = "eegViewerPendingResearchResponses.v1";
 const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
@@ -10,7 +8,6 @@ const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.l
 const TEST_ONLY_DISTRIBUTION = document.body.classList.contains("test-only-distribution");
 const PUBLIC_TEST_QUESTION_COUNT = 20;
 const DEFAULT_PUBLIC_DATASET_PATH = "private:gakkai_v1";
-const RECENT_FILES_LIMIT = 8;
 const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
@@ -26,22 +23,7 @@ const MONTAGE_LABELS = {
   c3c4: "C3/C4参照基準",
 };
 const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitudinal", "transverse"];
-const RIGHT_PANEL_TABS = ["metadata", "annotations", "test", "answer"];
-const SCALOGRAM_PRESETS = {
-  spike: { freqStepHz: 1, timeBins: 200 },
-  balanced: { freqStepHz: 1, timeBins: 120 },
-  overview: { freqStepHz: 2, timeBins: 80 },
-};
-const ATTENUATION_PRESETS = {
-  spike: { baselineSec: 1.5, freqStepHz: 1, timeBins: 200 },
-  balanced: { baselineSec: 3, freqStepHz: 1, timeBins: 120 },
-  overview: { baselineSec: 3, freqStepHz: 2, timeBins: 80 },
-};
-const STFT_PRESETS = {
-  spike: { windowMs: 75, overlapPct: 90 },
-  balanced: { windowMs: 125, overlapPct: 95 },
-  rhythm: { windowMs: 500, overlapPct: 90 },
-};
+const RIGHT_PANEL_TABS = ["metadata", "test"];
 const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
 
 const state = {
@@ -52,54 +34,17 @@ const state = {
   viewMode: "single",
   multiMontageCount: 3,
   activeMontage: "conventional",
-  annotations: [],
-  allAnnotations: [],
-  showSourceAnnotations: true,
   workspaceMode: "review",
   rightPanelTab: "metadata",
-  recentFiles: [],
   start: 0,
   context: null,
   cursorTime: null,
-  rangeStart: null,
   dragSelection: null,
-  scalogramSelection: null,
-  scalogramRequestId: 0,
-  additionalManualAnchor: null,
-  scalogramData: null,
   rightPanelVisible: false,
-  scalogramVisible: false,
-  scalogramMode: "signed",
-  scalogramDisplayScope: "all",
-  scalogramDetectionMode: "both",
-  analysisKind: "scalogram",
-  attenuationScaleMode: "db",
-  topomapMode: "mean",
-  topomapLayout: "system",
-  stftScaleMode: "db",
-  stftPowerGain: 1,
-  attenuationFreqRange: { low: 0, high: 120 },
-  attenuationBaselineSec: 3,
-  attenuationFreqStepHz: 1,
-  attenuationTimeBins: 120,
-  psdFreqRange: { low: 0, high: 120 },
-  stftFreqRange: { low: 0, high: 120 },
-  scalogramFreqStepHz: 1,
-  scalogramTimeBins: 120,
-  stftWindowMs: 125,
-  stftOverlapPct: 95,
-  fzPeakWindowMs: 10,
-  preciseTopomap: null,
-  topomapSelection: null,
-  fzSpikeTopomap: null,
-  fzAfterSlowTopomap: null,
-  fzSpikeTopomapRequestId: 0,
-  topomapRequestId: 0,
   windowLoadInFlight: false,
   windowLoadPending: false,
   windowLoadPromise: null,
   windowCache: new Map(),
-  selectedScalogramIndex: 0,
   suppressNextClick: false,
   lastWaveWheelPageAt: 0,
   lastMontageSelectValue: "",
@@ -109,7 +54,6 @@ const state = {
   durationRefreshTimer: null,
   durationSelectFocusedAt: 0,
   panelResizeDrag: null,
-  annotationResizeDrag: null,
   researchMode: "test",
   researchDataset: null,
   researchDatasetPath: "",
@@ -126,11 +70,6 @@ const state = {
   researchMontageTiming: null,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
-  validationSession: null,
-  validationResponses: [],
-  validationCaseStartedAt: "",
-  validationSaving: false,
-  lastValidationResponse: null,
   lastResearchResponse: null,
   lastResearchResponseCaseIndex: -1,
 };
@@ -150,84 +89,14 @@ const els = {
   paperSelect: document.getElementById("paperSelect"),
   ecgToggle: document.getElementById("ecgToggle"),
   ecgFilterToggle: document.getElementById("ecgFilterToggle"),
-  filePathInput: document.getElementById("filePathInput"),
-  clearFilePathBtn: document.getElementById("clearFilePathBtn"),
-  loadFileBtn: document.getElementById("loadFileBtn"),
-  recentFileSelect: document.getElementById("recentFileSelect"),
   statusReadout: document.getElementById("statusReadout"),
   metadataPanel: document.getElementById("metadataPanel"),
   warningPanel: document.getElementById("warningPanel"),
-  resultWarningPanel: document.getElementById("resultWarningPanel"),
   rightTestPanel: document.getElementById("rightTestPanel"),
-  rightAnswerPanel: document.getElementById("rightAnswerPanel"),
   waveCanvas: document.getElementById("waveCanvas"),
   waveScrollbar: document.getElementById("waveScrollbar"),
   eventStrip: document.getElementById("eventStrip"),
-  eventControls: document.getElementById("eventControls"),
-  annotationList: document.getElementById("annotationList"),
-  annotationListResize: document.getElementById("annotationListResize"),
-  sourceAnnotationToggle: document.getElementById("sourceAnnotationToggle"),
-  rightPanelToggleBtn: document.getElementById("rightPanelToggleBtn"),
-  scalogramReadout: document.getElementById("scalogramReadout"),
-  scalogramDetailTitle: document.getElementById("scalogramDetailTitle"),
-  scalogramDetailCanvas: document.getElementById("scalogramDetailCanvas"),
-  scalogramList: document.getElementById("scalogramList"),
-  scalogramModeButtons: Array.from(document.querySelectorAll("[data-scalogram-mode]")),
-  scalogramScopeButtons: Array.from(document.querySelectorAll("[data-scalogram-scope]")),
-  scalogramDetectionButtons: Array.from(document.querySelectorAll("[data-scalogram-detection]")),
-  analysisKindButtons: Array.from(document.querySelectorAll("[data-analysis-kind]")),
-  attenuationScaleButtons: Array.from(document.querySelectorAll("[data-attenuation-scale]")),
-  attenuationPresetButtons: Array.from(document.querySelectorAll("[data-attenuation-preset]")),
-  stftScaleButtons: Array.from(document.querySelectorAll("[data-stft-scale]")),
-  scalogramPresetButtons: Array.from(document.querySelectorAll("[data-scalogram-preset]")),
-  stftPresetButtons: Array.from(document.querySelectorAll("[data-stft-preset]")),
-  topomapStack: document.querySelector(".topomap-stack"),
-  attenuationFreqLowInput: document.getElementById("attenuationFreqLowInput"),
-  attenuationFreqHighInput: document.getElementById("attenuationFreqHighInput"),
-  attenuationBaselineSecInput: document.getElementById("attenuationBaselineSecInput"),
-  attenuationBaselineSecValue: document.getElementById("attenuationBaselineSecValue"),
-  attenuationFreqStepInput: document.getElementById("attenuationFreqStepInput"),
-  attenuationFreqStepValue: document.getElementById("attenuationFreqStepValue"),
-  attenuationTimeBinsInput: document.getElementById("attenuationTimeBinsInput"),
-  attenuationTimeBinsValue: document.getElementById("attenuationTimeBinsValue"),
-  psdFreqLowInput: document.getElementById("psdFreqLowInput"),
-  psdFreqHighInput: document.getElementById("psdFreqHighInput"),
-  stftFreqLowInput: document.getElementById("stftFreqLowInput"),
-  stftFreqHighInput: document.getElementById("stftFreqHighInput"),
-  stftPowerGainInput: document.getElementById("stftPowerGainInput"),
-  stftPowerGainValue: document.getElementById("stftPowerGainValue"),
-  scalogramFreqStepInput: document.getElementById("scalogramFreqStepInput"),
-  scalogramFreqStepValue: document.getElementById("scalogramFreqStepValue"),
-  scalogramTimeBinsInput: document.getElementById("scalogramTimeBinsInput"),
-  scalogramTimeBinsValue: document.getElementById("scalogramTimeBinsValue"),
-  stftWindowMsInput: document.getElementById("stftWindowMsInput"),
-  stftWindowMsValue: document.getElementById("stftWindowMsValue"),
-  stftOverlapPctInput: document.getElementById("stftOverlapPctInput"),
-  stftOverlapPctValue: document.getElementById("stftOverlapPctValue"),
-  fzPeakWindowMsInput: document.getElementById("fzPeakWindowMsInput"),
-  fzPeakWindowMsValue: document.getElementById("fzPeakWindowMsValue"),
-  scalogramModeControls: Array.from(document.querySelectorAll(".scalogram-mode-controls")),
-  exportAnalysisJsonBtn: document.getElementById("exportAnalysisJsonBtn"),
-  exportScalogramJpegBtn: document.getElementById("exportScalogramJpegBtn"),
-  fzSpikeTopomapTitle: document.getElementById("fzSpikeTopomapTitle"),
-  fzSpikeTopomapCanvas: document.getElementById("fzSpikeTopomapCanvas"),
-  fzSpikeTopomapReadout: document.getElementById("fzSpikeTopomapReadout"),
-  fzSpikeFtliReadout: document.getElementById("fzSpikeFtliReadout"),
-  fzAfterSlowTopomapTitle: document.getElementById("fzAfterSlowTopomapTitle"),
-  fzAfterSlowTopomapCanvas: document.getElementById("fzAfterSlowTopomapCanvas"),
-  fzAfterSlowTopomapReadout: document.getElementById("fzAfterSlowTopomapReadout"),
-  fzAfterSlowFtliReadout: document.getElementById("fzAfterSlowFtliReadout"),
-  systemTopomapCanvas: document.getElementById("systemTopomapCanvas"),
-  topomapReadout: document.getElementById("topomapReadout"),
-  earlobeTopomapTitle: document.getElementById("earlobeTopomapTitle"),
-  exportTopomapJsonBtn: document.getElementById("exportTopomapJsonBtn"),
-  exportTopomapJpegBtn: document.getElementById("exportTopomapJpegBtn"),
   contextMenu: document.getElementById("contextMenu"),
-  annotationDialog: document.getElementById("annotationDialog"),
-  annotationLabel: document.getElementById("annotationLabel"),
-  annotationNote: document.getElementById("annotationNote"),
-  dialogTitle: document.getElementById("dialogTitle"),
-  saveAnnotationBtn: document.getElementById("saveAnnotationBtn"),
   timeReadout: document.getElementById("timeReadout"),
   calReadout: document.getElementById("calReadout"),
   prevBtn: document.getElementById("prevBtn"),
@@ -235,19 +104,8 @@ const els = {
   stepBackBtn: document.getElementById("stepBackBtn"),
   stepForwardBtn: document.getElementById("stepForwardBtn"),
   reloadBtn: document.getElementById("reloadBtn"),
-  rangeCancelBtn: document.getElementById("rangeCancelBtn"),
-  exportJsonBtn: document.getElementById("exportJsonBtn"),
-  importJsonInput: document.getElementById("importJsonInput"),
-  exportViewerJpegBtn: document.getElementById("exportViewerJpegBtn"),
   workspace: document.querySelector(".workspace"),
   panelResizeHandles: Array.from(document.querySelectorAll("[data-resize-panel]")),
-  researchModeButtons: Array.from(document.querySelectorAll("[data-research-mode]")),
-  researchDatasetPathInput: document.getElementById("researchDatasetPathInput"),
-  researchClearDatasetPathBtn: document.getElementById("researchClearDatasetPathBtn"),
-  researchIedsPresentPathInput: document.getElementById("researchIedsPresentPathInput"),
-  researchClearIedsPresentPathBtn: document.getElementById("researchClearIedsPresentPathBtn"),
-  researchIedsAbsentPathInput: document.getElementById("researchIedsAbsentPathInput"),
-  researchClearIedsAbsentPathBtn: document.getElementById("researchClearIedsAbsentPathBtn"),
   researchSetupScreen: document.getElementById("researchSetupScreen"),
   researchSetupMessage: document.getElementById("researchSetupMessage"),
   researchSetupDatasetPathInput: document.getElementById("researchSetupDatasetPathInput"),
@@ -267,10 +125,7 @@ const els = {
   researchTutorialMontageNote: document.getElementById("researchTutorialMontageNote"),
   researchTutorialTargetNote: document.getElementById("researchTutorialTargetNote"),
   researchTutorialSteps: document.getElementById("researchTutorialSteps"),
-  researchCompleteExportCsvBtn: document.getElementById("researchCompleteExportCsvBtn"),
   researchCompleteSaveDesktopBtn: document.getElementById("researchCompleteSaveDesktopBtn"),
-  researchSetupIedsPresentPathInput: document.getElementById("researchSetupIedsPresentPathInput"),
-  researchSetupIedsAbsentPathInput: document.getElementById("researchSetupIedsAbsentPathInput"),
   researchSetupReaderIdInput: document.getElementById("researchSetupReaderIdInput"),
   researchSetupReaderNameInput: document.getElementById("researchSetupReaderNameInput"),
   researchSetupReaderEmailInput: document.getElementById("researchSetupReaderEmailInput"),
@@ -285,39 +140,14 @@ const els = {
   researchSetupEpochCountInput: document.getElementById("researchSetupEpochCountInput"),
   researchSetupStartBtn: document.getElementById("researchSetupStartBtn"),
   researchSetupResetProfileBtn: document.getElementById("researchSetupResetProfileBtn"),
-  researchCreateDatasetBtn: document.getElementById("researchCreateDatasetBtn"),
-  researchLoadDatasetBtn: document.getElementById("researchLoadDatasetBtn"),
-  researchCutEpochBtn: document.getElementById("researchCutEpochBtn"),
-  researchStartValidationBtn: document.getElementById("researchStartValidationBtn"),
-  researchEpochCountInput: document.getElementById("researchEpochCountInput"),
-  researchReaderIdInput: document.getElementById("researchReaderIdInput"),
-  researchPhaseSelect: document.getElementById("researchPhaseSelect"),
   researchStartTestBtn: document.getElementById("researchStartTestBtn"),
   researchToast: document.getElementById("researchToast"),
   researchToastText: document.getElementById("researchToastText"),
   researchUndoBtn: document.getElementById("researchUndoBtn"),
-  researchOutputPathInput: document.getElementById("researchOutputPathInput"),
-  researchDoctorNameInput: document.getElementById("researchDoctorNameInput"),
   researchMedicalYearsInput: document.getElementById("researchMedicalYearsInput"),
-  researchNeurologyYearsInput: document.getElementById("researchNeurologyYearsInput"),
-  researchEegTrainingSelect: document.getElementById("researchEegTrainingSelect"),
-  researchMonthlyReadsInput: document.getElementById("researchMonthlyReadsInput"),
   researchTestProgress: document.getElementById("researchTestProgress"),
   researchWaveProgress: document.getElementById("researchWaveProgress"),
   researchInlineProgress: document.getElementById("researchInlineProgress"),
-  validationInlineProgress: document.getElementById("validationInlineProgress"),
-  researchDesignEpochCountInput: document.getElementById("researchDesignEpochCountInput"),
-  researchPhase2SampleToggle: document.getElementById("researchPhase2SampleToggle"),
-  researchFalsePositiveToggle: document.getElementById("researchFalsePositiveToggle"),
-  researchSaveDesignBtn: document.getElementById("researchSaveDesignBtn"),
-  researchPanel: document.getElementById("researchPanel"),
-  researchCaseEditor: document.getElementById("researchCaseEditor"),
-  researchIncludeInput: document.getElementById("researchIncludeInput"),
-  researchExcludeReasonInput: document.getElementById("researchExcludeReasonInput"),
-  researchQualityNotesInput: document.getElementById("researchQualityNotesInput"),
-  researchSaveCaseBtn: document.getElementById("researchSaveCaseBtn"),
-  researchPrevCaseBtn: document.getElementById("researchPrevCaseBtn"),
-  researchNextCaseBtn: document.getElementById("researchNextCaseBtn"),
 };
 
 function qs(params) {
@@ -406,21 +236,10 @@ function setStatus(message, options = {}) {
   els.statusReadout.classList.toggle("error", !!options.error);
 }
 
-function setOpenFileBusy(isBusy) {
-  if (els.loadFileBtn) {
-    els.loadFileBtn.disabled = isBusy;
-    els.loadFileBtn.textContent = isBusy ? "Opening..." : "Open";
-  }
-  if (els.reloadBtn) els.reloadBtn.disabled = isBusy;
-  if (els.filePathInput) els.filePathInput.disabled = isBusy;
-  if (els.recentFileSelect) els.recentFileSelect.disabled = isBusy;
-}
-
 function clearSharedBrowserResearchState() {
   if (!PUBLIC_WEB_MODE) return;
   try {
     localStorage.removeItem(RESEARCH_PROFILE_KEY);
-    localStorage.removeItem(RECENT_FILES_KEY);
   } catch {
     // Ignore storage failures.
   }
@@ -433,7 +252,6 @@ async function init() {
     bindPanelResizers();
     try {
       restorePanelWidths();
-      restoreAnnotationListHeight();
     } catch (err) {
       console.warn("Panel restore skipped", err);
     }
@@ -455,15 +273,10 @@ async function init() {
       applyRightPanelTab();
     }
     applyRightPanelVisibility({ redraw: false });
-    if (!TEST_ONLY_DISTRIBUTION) {
-      applyScalogramVisibility({ redraw: false });
-      applyTopomapLayout();
-    }
   } catch (err) {
     console.warn("Settings restore skipped", err);
   }
   try {
-    restoreRecentFiles();
     restoreResearchProfile();
     applyLaunchParams();
   } catch (err) {
@@ -485,8 +298,6 @@ function fixedResearchQuestionCount() {
 function applyFixedResearchQuestionCount() {
   const value = String(fixedResearchQuestionCount());
   if (els.researchSetupEpochCountInput) els.researchSetupEpochCountInput.value = value;
-  if (els.researchEpochCountInput) els.researchEpochCountInput.value = value;
-  if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = value;
 }
 
 function applyLaunchParams() {
@@ -682,16 +493,6 @@ function resizeCanvas() {
   if (els.waveCanvas.height !== height) els.waveCanvas.height = height;
 }
 
-function resizeTopomapCanvases() {
-  [els.systemTopomapCanvas, els.earlobeReferenceTopomapCanvas, els.averageTopomapCanvas, els.earlobeExtraTopomapCanvas, els.czTopomapCanvas, els.fzSpikeTopomapCanvas, els.fzAfterSlowTopomapCanvas].forEach((canvas) => {
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.max(220, Math.floor(rect.width * ratio));
-    canvas.height = Math.max(150, Math.floor(rect.height * ratio));
-  });
-}
-
 function bindControls() {
   [
     els.recordingSelect,
@@ -755,50 +556,13 @@ function bindControls() {
   });
   els.reloadBtn?.addEventListener("click", loadWindow);
   if (!TEST_ONLY_DISTRIBUTION) {
-    els.loadFileBtn?.addEventListener("click", openFileFromPath);
-    if (els.clearFilePathBtn) {
-      els.clearFilePathBtn.addEventListener("click", () => {
-        els.filePathInput.value = "";
-        els.filePathInput.focus();
-      });
-    }
-    els.recentFileSelect?.addEventListener("change", () => {
-      const path = els.recentFileSelect.value;
-      if (!path) return;
-      els.filePathInput.value = path;
-      openFileFromPath();
-    });
-    els.filePathInput?.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        openFileFromPath();
-      }
-    });
-  }
-  if (!TEST_ONLY_DISTRIBUTION) {
-    for (const btn of els.viewModeButtons || []) {
-      btn.addEventListener("click", () => setViewMode(btn.dataset.viewMode || "single", btn.dataset.montageCount));
-    }
     for (const btn of els.workspaceModeButtons || []) {
       btn.addEventListener("click", () => setWorkspaceMode(btn.dataset.workspaceMode || "review"));
     }
     for (const btn of els.rightTabButtons || []) {
       btn.addEventListener("click", () => setRightPanelTab(btn.dataset.rightTab || "topomap"));
     }
-    for (const select of els.multiMontageSelects || []) {
-      select.addEventListener("change", onMultiMontageSelectChange);
-    }
   }
-  els.rangeCancelBtn?.addEventListener("click", () => {
-    state.rangeStart = null;
-    state.dragSelection = null;
-    state.scalogramSelection = null;
-    state.scalogramData = null;
-    els.rangeCancelBtn.disabled = true;
-    hideContextMenu();
-    draw();
-  });
-
   els.waveCanvas?.addEventListener("contextmenu", openContextMenu);
   els.waveCanvas?.addEventListener("mousedown", onWaveMouseDown);
   els.waveCanvas?.addEventListener("mousemove", onWaveMouseMove);
@@ -825,62 +589,14 @@ function bindControls() {
   });
   els.contextMenu?.addEventListener("click", onContextMenuClick);
 
-  if (!TEST_ONLY_DISTRIBUTION) {
-    els.saveAnnotationBtn?.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      saveDialogAnnotation();
-    });
-    els.annotationDialog?.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter" || ev.isComposing) return;
-      if (ev.target === els.annotationNote && ev.shiftKey) return;
-      if (ev.target instanceof HTMLButtonElement) return;
-      ev.preventDefault();
-      saveDialogAnnotation();
-    });
-
-    els.exportJsonBtn?.addEventListener("click", exportJson);
-    if (els.sourceAnnotationToggle) {
-      els.sourceAnnotationToggle.addEventListener("change", () => {
-        state.showSourceAnnotations = els.sourceAnnotationToggle.checked;
-        saveSettings();
-        applyAnnotationVisibility();
-      });
-    }
-    if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.addEventListener("click", exportAnalysisJson);
-    if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.addEventListener("click", exportScalogramJpeg);
-    if (els.rightPanelToggleBtn) {
-      els.rightPanelToggleBtn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        toggleRightPanel();
-      });
-    }
-    if (els.exportViewerJpegBtn) els.exportViewerJpegBtn.addEventListener("click", exportViewerJpeg);
-    els.importJsonInput?.addEventListener("change", importJson);
-  }
   bindResearchControls();
 }
 
 
 function bindResearchControls() {
-  if (!TEST_ONLY_DISTRIBUTION) {
-    for (const btn of els.researchModeButtons || []) {
-      btn.addEventListener("click", () => setResearchMode(btn.dataset.researchMode || "viewer"));
-    }
-    els.researchCreateDatasetBtn?.addEventListener("click", createResearchDataset);
-    els.researchLoadDatasetBtn?.addEventListener("click", loadResearchDatasetFromInput);
-    els.researchCutEpochBtn?.addEventListener("click", cutCurrentResearchEpoch);
-    els.researchStartValidationBtn?.addEventListener("click", startValidationMode);
-  }
   els.researchStartTestBtn?.addEventListener("click", startResearchTest);
   els.researchSetupStartBtn?.addEventListener("click", startResearchTest);
   els.researchSetupResetProfileBtn?.addEventListener("click", resetResearchProfileForm);
-  if (!TEST_ONLY_DISTRIBUTION) {
-    els.researchClearDatasetPathBtn?.addEventListener("click", () => clearResearchPath("dataset"));
-    els.researchClearIedsPresentPathBtn?.addEventListener("click", () => clearResearchPath("iedsPresent"));
-    els.researchClearIedsAbsentPathBtn?.addEventListener("click", () => clearResearchPath("iedsAbsent"));
-    els.researchEpochCountInput?.addEventListener("change", saveResearchEpochCount);
-  }
-  els.researchCompleteExportCsvBtn?.addEventListener("click", submitResearchJson);
   els.researchCompleteSaveDesktopBtn?.addEventListener("click", exportResearchJson);
   els.researchShareJsonBtn?.addEventListener("click", shareResearchJsonByEmail);
   els.researchCopyEmailBtn?.addEventListener("click", copyResearchEmailBody);
@@ -889,25 +605,8 @@ function bindResearchControls() {
     updateResearchTutorial();
   });
   els.researchUndoBtn?.addEventListener("click", undoLastResearchAction);
-  if (!TEST_ONLY_DISTRIBUTION) {
-    els.researchSaveCaseBtn?.addEventListener("click", saveResearchCaseEdits);
-    els.researchPrevCaseBtn?.addEventListener("click", () => moveResearchCase(-1));
-    els.researchNextCaseBtn?.addEventListener("click", () => moveResearchCase(1));
-    els.researchSaveDesignBtn?.addEventListener("click", saveResearchTestDesign);
-    els.researchDesignEpochCountInput?.addEventListener("change", () => {
-      if (els.researchEpochCountInput) els.researchEpochCountInput.value = els.researchDesignEpochCountInput.value;
-      saveResearchTestDesign();
-    });
-    els.researchPhase2SampleToggle?.addEventListener("change", saveResearchTestDesign);
-    els.researchFalsePositiveToggle?.addEventListener("change", saveResearchTestDesign);
-  }
   [
-    els.researchOutputPathInput,
-    els.researchDoctorNameInput,
     els.researchMedicalYearsInput,
-    els.researchNeurologyYearsInput,
-    els.researchEegTrainingSelect,
-    els.researchMonthlyReadsInput,
     els.researchSetupReaderIdInput,
     els.researchSetupReaderNameInput,
     els.researchSetupReaderEmailInput,
@@ -924,53 +623,7 @@ function bindResearchControls() {
     updateEpilepsyCenterDurationRequirement();
     saveResearchProfile();
   }));
-  if (!TEST_ONLY_DISTRIBUTION) {
-    bindSyncedInputs(els.researchIedsPresentPathInput, els.researchSetupIedsPresentPathInput);
-    bindSyncedInputs(els.researchIedsAbsentPathInput, els.researchSetupIedsAbsentPathInput);
-    bindSyncedInputs(els.researchReaderIdInput, els.researchSetupReaderIdInput);
-    bindSyncedInputs(els.researchEpochCountInput, els.researchSetupEpochCountInput);
-  }
   updateEpilepsyCenterDurationRequirement();
-}
-
-function bindSyncedInputs(a, b) {
-  if (!a || !b) return;
-  const sync = (source, target) => {
-    if (target.value !== source.value) target.value = source.value;
-  };
-  a.addEventListener("input", () => sync(a, b));
-  b.addEventListener("input", () => sync(b, a));
-  a.addEventListener("change", () => sync(a, b));
-  b.addEventListener("change", () => sync(b, a));
-}
-
-function clearResearchPath(kind) {
-  if (kind === "dataset") {
-    if (els.researchDatasetPathInput) els.researchDatasetPathInput.value = "";
-    state.researchDatasetPath = "";
-    state.researchDataset = null;
-    state.researchSession = null;
-    state.validationSession = null;
-    state.researchResponses = [];
-    state.validationResponses = [];
-    state.researchCaseIndex = 0;
-    hideResearchTutorial();
-    hideResearchCompletion();
-    hideResearchWaveProgress();
-    hideValidationWaveProgress();
-    renderResearchPanel();
-    updateResearchSetupScreen();
-    setStatus("Dataset path cleared");
-    els.researchDatasetPathInput?.focus();
-    return;
-  }
-  const target = kind === "iedsPresent" ? els.researchIedsPresentPathInput : els.researchIedsAbsentPathInput;
-  if (!target) return;
-  target.value = "";
-  target.dispatchEvent(new Event("input", { bubbles: true }));
-  target.dispatchEvent(new Event("change", { bubbles: true }));
-  setStatus(kind === "iedsPresent" ? "IEDs-present path cleared" : "IEDs-absent path cleared");
-  target.focus();
 }
 
 function resetResearchProfileForm() {
@@ -979,10 +632,7 @@ function resetResearchProfileForm() {
     els.researchSetupReaderNameInput,
     els.researchSetupReaderEmailInput,
     els.researchSetupReaderAffiliationInput,
-    els.researchDoctorNameInput,
     els.researchMedicalYearsInput,
-    els.researchNeurologyYearsInput,
-    els.researchMonthlyReadsInput,
     els.researchEpilepsyCenterTrainingDurationInput,
   ];
   for (const input of textInputs.filter(Boolean)) input.value = "";
@@ -993,7 +643,6 @@ function resetResearchProfileForm() {
     els.researchEpilepsySpecialistSelect,
     els.researchClinicalNeurophysEegSpecialistSelect,
     els.researchEpilepsyCenterTrainingSelect,
-    els.researchEegTrainingSelect,
   ].filter(Boolean)) select.value = "";
   try {
     localStorage.removeItem(RESEARCH_PROFILE_KEY);
@@ -1052,10 +701,9 @@ function validateResearchProfileForStart() {
 function researchProfile() {
   const storedProfile = storedResearchProfile();
   return {
-    datasetPath: els.researchSetupDatasetPathInput?.value.trim() || els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "",
-    outputPath: els.researchOutputPathInput?.value.trim() || "",
+    datasetPath: els.researchSetupDatasetPathInput?.value.trim() || state.researchDatasetPath || "",
     readerId: els.researchSetupReaderIdInput?.value.trim() || "",
-    readerName: els.researchSetupReaderNameInput?.value.trim() || els.researchDoctorNameInput?.value.trim() || "",
+    readerName: els.researchSetupReaderNameInput?.value.trim() || "",
     email: els.researchSetupReaderEmailInput?.value.trim() || "",
     affiliation: els.researchSetupReaderAffiliationInput?.value.trim() || "",
     specialty: els.researchSetupReaderSpecialtySelect?.value || "",
@@ -1063,11 +711,7 @@ function researchProfile() {
     epilepsySpecialist: els.researchEpilepsySpecialistSelect?.value || "",
     clinicalNeurophysEegSpecialist: els.researchClinicalNeurophysEegSpecialistSelect?.value || "",
     usualMontage: storedProfile.usualMontage || "",
-    doctorName: els.researchSetupReaderNameInput?.value.trim() || els.researchDoctorNameInput?.value.trim() || "",
     medicalPracticeYears: els.researchMedicalYearsInput?.value === "" ? "" : Number(els.researchMedicalYearsInput?.value || 0),
-    neurologyYears: els.researchNeurologyYearsInput?.value === "" ? "" : Number(els.researchNeurologyYearsInput?.value || 0),
-    eegTraining: els.researchEegTrainingSelect?.value || "",
-    eegReadsPerMonth: els.researchMonthlyReadsInput ? (els.researchMonthlyReadsInput.value === "" ? "" : Number(els.researchMonthlyReadsInput.value || 0)) : "",
     epilepsyCenterTraining: els.researchEpilepsyCenterTrainingSelect?.value || "",
     epilepsyCenterTrainingDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
     ethicsNoticeConfirmed: Boolean(els.researchConsentConfirmInput?.checked),
@@ -1165,7 +809,6 @@ function researchReaderDisplayId(profile = researchProfile()) {
     profile.readerId ||
     profile.email ||
     profile.readerName ||
-    profile.doctorName ||
     "reader"
   );
 }
@@ -1182,7 +825,7 @@ function activeResearchReaderId(profile = researchProfile()) {
 }
 
 function researchJsonFilename(_readerId, profile = researchProfile()) {
-  const readerName = safeResultFilenamePart(profile.readerName || profile.doctorName || "", "EEG_test_results");
+  const readerName = safeResultFilenamePart(profile.readerName || "", "EEG_test_results");
   return `${readerName}.json`;
 }
 
@@ -1214,11 +857,9 @@ function saveUsualResearchMontage(montage) {
 
 function restoreResearchProfile() {
   const profile = storedResearchProfile();
-  if (els.researchOutputPathInput) els.researchOutputPathInput.value = profile.outputPath || "";
   if (els.researchSetupDatasetPathInput) els.researchSetupDatasetPathInput.value = profile.datasetPath || "";
-  if (els.researchDoctorNameInput) els.researchDoctorNameInput.value = profile.doctorName || "";
   if (els.researchSetupReaderIdInput) els.researchSetupReaderIdInput.value = profile.readerId || "";
-  if (els.researchSetupReaderNameInput) els.researchSetupReaderNameInput.value = profile.readerName || profile.doctorName || "";
+  if (els.researchSetupReaderNameInput) els.researchSetupReaderNameInput.value = profile.readerName || "";
   if (els.researchSetupReaderEmailInput) els.researchSetupReaderEmailInput.value = profile.email || "";
   if (els.researchSetupReaderAffiliationInput) els.researchSetupReaderAffiliationInput.value = profile.affiliation || "";
   if (els.researchSetupReaderSpecialtySelect) els.researchSetupReaderSpecialtySelect.value = profile.specialty || "";
@@ -1226,9 +867,6 @@ function restoreResearchProfile() {
   if (els.researchEpilepsySpecialistSelect) els.researchEpilepsySpecialistSelect.value = profile.epilepsySpecialist || "";
   if (els.researchClinicalNeurophysEegSpecialistSelect) els.researchClinicalNeurophysEegSpecialistSelect.value = profile.clinicalNeurophysEegSpecialist || "";
   if (els.researchMedicalYearsInput) els.researchMedicalYearsInput.value = profile.medicalPracticeYears ?? "";
-  if (els.researchNeurologyYearsInput) els.researchNeurologyYearsInput.value = profile.neurologyYears ?? "";
-  if (els.researchEegTrainingSelect) els.researchEegTrainingSelect.value = profile.eegTraining || "";
-  if (els.researchMonthlyReadsInput) els.researchMonthlyReadsInput.value = profile.eegReadsPerMonth ?? "";
   if (els.researchEpilepsyCenterTrainingSelect) els.researchEpilepsyCenterTrainingSelect.value = profile.epilepsyCenterTraining || "";
   if (els.researchEpilepsyCenterTrainingDurationInput) els.researchEpilepsyCenterTrainingDurationInput.value = profile.epilepsyCenterTrainingDuration || "";
   if (els.researchConsentConfirmInput) els.researchConsentConfirmInput.checked = Boolean(profile.ethicsNoticeConfirmed);
@@ -1365,30 +1003,9 @@ function setResearchControlVisible(el, visible) {
 }
 
 function updateResearchControlsVisibility() {
-  const datasetMode = state.researchMode === "dataset";
-  const validationMode = state.researchMode === "validation";
   for (const section of document.querySelectorAll("[data-research-section]")) {
     const key = section.dataset.researchSection || "";
-    if (key === "mode") section.hidden = false;
-    else if (key === "dataset") section.hidden = !(datasetMode || validationMode);
-    else if (key === "cut") section.hidden = !datasetMode;
-    else if (key === "validation") section.hidden = !validationMode;
-    else if (key === "test") section.hidden = datasetMode || validationMode;
-    else if (key === "output") section.hidden = datasetMode || validationMode;
-  }
-  setResearchControlVisible(els.researchCreateDatasetBtn, false);
-  setResearchControlVisible(els.researchLoadDatasetBtn, false);
-  setResearchControlVisible(els.researchDatasetPathInput, datasetMode || validationMode);
-  setResearchControlVisible(els.researchClearDatasetPathBtn, datasetMode || validationMode);
-  setResearchControlVisible(els.researchIedsPresentPathInput, !datasetMode && !validationMode);
-  setResearchControlVisible(els.researchClearIedsPresentPathBtn, !datasetMode && !validationMode);
-  setResearchControlVisible(els.researchIedsAbsentPathInput, !datasetMode && !validationMode);
-  setResearchControlVisible(els.researchClearIedsAbsentPathBtn, !datasetMode && !validationMode);
-  const datasetTitle = document.querySelector('[data-research-section="dataset"] .research-section-title');
-  if (datasetTitle) datasetTitle.textContent = validationMode ? "Input" : "Output";
-  if (els.researchDatasetPathInput) {
-    els.researchDatasetPathInput.placeholder = validationMode ? "input path" : "output folder";
-    els.researchDatasetPathInput.title = validationMode ? "Input path containing dataset.json" : "Output folder for cut EDF epochs";
+    section.hidden = key !== "output";
   }
   updateResearchSetupScreen();
 }
@@ -1402,7 +1019,7 @@ function updateResearchSetupScreen() {
 }
 
 function researchEmailBodyText(profile = researchProfile()) {
-  const name = profile.readerName || profile.doctorName || "";
+  const name = profile.readerName || "";
   const email = profile.email || "";
   return [
     "斉藤先生",
@@ -1484,34 +1101,39 @@ function isMobileViewport() {
   return window.matchMedia?.("(max-width: 700px)")?.matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
 }
 
+async function requestMobileFullscreen() {
+  if (!TEST_ONLY_DISTRIBUTION || !isMobileViewport()) return;
+  const root = document.documentElement;
+  const request = root.requestFullscreen || root.webkitRequestFullscreen || root.msRequestFullscreen;
+  if (!request || document.fullscreenElement || document.webkitFullscreenElement) return;
+  try {
+    await request.call(root);
+    document.body.classList.add("viewer-fullscreen");
+  } catch {
+    document.body.classList.add("viewer-fullscreen-requested");
+  }
+}
+
 function showResearchCompletion() {
   if (!els.researchCompleteScreen) return;
-  const validationMode = state.researchMode === "validation";
   els.researchCompleteScreen.hidden = false;
   els.researchCompleteScreen.setAttribute("aria-hidden", "false");
-  if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = validationMode ? "Validation完了" : "お疲れ様でした!";
+  if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
   if (els.researchCompleteMessage) {
-    els.researchCompleteMessage.textContent = validationMode
-      ? "結果ファイルをDesktopに保存してください。専門的な形式ですが、このボタンで作成されるファイルをそのまま送れば大丈夫です。"
-      : "JSONをダウンロードし、メールに添付して送ってください。";
+    els.researchCompleteMessage.textContent = "JSONをダウンロードし、メールに添付して送ってください。";
   }
-  if (els.researchMailBox) els.researchMailBox.hidden = validationMode;
-  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validationMode;
-  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = validationMode || !isMobileViewport();
-  if (els.researchCompleteExportCsvBtn) {
-    els.researchCompleteExportCsvBtn.hidden = !validationMode;
-    els.researchCompleteExportCsvBtn.textContent = validationMode ? "Validation結果ファイルをDesktopに保存" : "";
-  }
+  if (els.researchMailBox) els.researchMailBox.hidden = false;
+  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = false;
+  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = !isMobileViewport();
   if (els.researchCompleteSaveDesktopBtn) {
-    els.researchCompleteSaveDesktopBtn.hidden = validationMode;
-    if (!validationMode) els.researchCompleteSaveDesktopBtn.textContent = "JSONをダウンロード";
+    els.researchCompleteSaveDesktopBtn.hidden = false;
+    els.researchCompleteSaveDesktopBtn.textContent = "JSONをダウンロード";
   }
-  if (!validationMode) updateResearchEmailBody();
+  updateResearchEmailBody();
   if (els.researchSavedCsvName) {
-    els.researchSavedCsvName.textContent = validationMode ? "結果ファイルはまだ保存されていません。" : "JSONはまだダウンロードされていません。";
+    els.researchSavedCsvName.textContent = "JSONはまだダウンロードされていません。";
   }
   hideResearchWaveProgress();
-  if (validationMode) hideValidationWaveProgress();
 }
 
 function hideResearchCompletion() {
@@ -1539,13 +1161,8 @@ function setResearchStartBusy(isBusy) {
 }
 
 function setResearchMode(mode) {
-  state.researchMode = mode === "test" || mode === "validation" ? mode : "dataset";
+  state.researchMode = "test";
   hideResearchCompletion();
-  for (const btn of els.researchModeButtons || []) {
-    const active = btn.dataset.researchMode === state.researchMode;
-    btn.classList.toggle("active", active);
-    btn.setAttribute("aria-pressed", active ? "true" : "false");
-  }
   document.body.classList.add("research-mode");
   updateResearchControlsVisibility();
   if (state.researchMode !== "test") {
@@ -1556,20 +1173,13 @@ function setResearchMode(mode) {
     state.researchResponses = [];
     state.lastResearchResponse = null;
   }
-  if (state.researchMode !== "validation") {
-    state.validationSession = null;
-    state.validationResponses = [];
-    state.lastValidationResponse = null;
-    hideValidationWaveProgress();
-  }
   renderRightResearchPanels();
   hideResearchToast();
   updateResearchSetupScreen();
-  renderResearchPanel();
+  refreshResearchDisplay();
 }
 
 function activeResearchCases() {
-  if (state.researchMode === "validation" && state.validationSession) return state.validationSession.cases || [];
   if (state.researchMode === "test" && state.researchSession) {
     const phase = String(state.researchSession.phase || "");
     const cases = cappedResearchSessionCases(state.researchSession.cases || []);
@@ -1668,80 +1278,9 @@ function hideResearchTutorial() {
   els.researchTutorial.setAttribute("aria-hidden", "true");
 }
 
-function renderResearchPanel() {
-  if (!els.researchPanel) return;
-  const dataset = state.researchDataset;
-  const session = state.researchSession;
-  const cases = activeResearchCases();
-  const current = currentResearchCase();
-  if (!dataset) {
-    els.researchPanel.innerHTML = state.researchMode === "dataset"
-      ? '<div class="research-empty">Open an EDF, enter an output folder, then Save Epoch.</div>'
-      : (state.researchMode === "validation" ? '<div class="research-empty">データセットパスを入力してStartしてください。</div>' : '<div class="research-empty">No dataset loaded.</div>');
-    if (els.researchCaseEditor) els.researchCaseEditor.hidden = true;
-    renderResearchProgress();
-    renderRightResearchPanels();
-    return;
-  }
-  const sampleCount = researchConfiguredQuestionCount(dataset.settings || {}, session);
-  syncResearchDesignControls(dataset.settings || {});
-  const validationSession = state.validationSession;
-  const answered = state.researchMode === "validation" && validationSession
-    ? `${validationSession.answeredCount || 0}/${validationSession.totalCount || cases.length} validated`
-    : (session ? `${session.answeredCount || 0}/${session.totalCount || cases.length}` : `${cases.filter((row) => row.include !== false).length}/${cases.length} included · ${sampleCount} questions`);
-  const modeLabel = state.researchMode === "validation" ? "Validation" : (state.researchMode === "test" ? `Phase ${escapeHtml(session?.phase || "")}` : "Cut");
-  els.researchPanel.innerHTML = `
-    <div class="research-summary"><strong>${escapeHtml(dataset.name || dataset.datasetId || "Dataset")}</strong></div>
-    <div class="research-small">${escapeHtml(state.researchDatasetPath || dataset.datasetPath || "")}</div>
-    <div class="research-progress">${modeLabel} · ${escapeHtml(answered)}</div>
-    ${current ? `<div class="research-current"><strong>${state.researchCaseIndex + 1}/${cases.length}</strong> ${escapeHtml(current.recordingId || "")}<br>${escapeHtml(current.caseId || "")}<br>${formatSec(Number(current.epochStart || 0))} + ${Number(current.durationSec || 10)}s</div>` : '<div class="research-empty">No cases for this phase.</div>'}
-  `;
-  if (els.researchCaseEditor) els.researchCaseEditor.hidden = !current || state.researchMode === "test" || state.researchMode === "validation";
-  if (current && state.researchMode !== "test" && state.researchMode !== "validation") {
-    els.researchIncludeInput.checked = current.include !== false;
-    els.researchExcludeReasonInput.value = current.excludeReason || "";
-    els.researchQualityNotesInput.value = current.qualityNotes || "";
-  }
-  if (state.researchMode === "validation") renderValidationProgress();
-  else renderResearchProgress();
+function refreshResearchDisplay() {
+  renderResearchProgress();
   renderRightResearchPanels();
-}
-
-function syncResearchDesignControls(settings) {
-  const sampleCount = researchConfiguredQuestionCount(settings);
-  if (els.researchDesignEpochCountInput) els.researchDesignEpochCountInput.value = String(sampleCount);
-  if (els.researchEpochCountInput) els.researchEpochCountInput.value = String(sampleCount);
-  applyFixedResearchQuestionCount();
-}
-
-function researchConfiguredQuestionCount(_settings = {}, _session = null) {
-  return fixedResearchQuestionCount();
-}
-
-function researchDesignSettings() {
-  const samplePerGroup = fixedResearchQuestionCount();
-  return {
-    phase1TotalSampleCount: samplePerGroup,
-  };
-}
-
-async function saveResearchTestDesign(datasetPathOverride = "") {
-  const datasetPath = datasetPathOverride || state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
-  if (!datasetPath) return;
-  const settings = researchDesignSettings();
-  applyFixedResearchQuestionCount();
-  try {
-    const data = await fetchJson("/api/research/dataset/item", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datasetPath, updates: settings }),
-    });
-    state.researchDataset = data.dataset;
-    renderResearchPanel();
-    setStatus("Test design saved");
-  } catch (err) {
-    setStatus(`Test design save failed: ${err.message}`, { error: true });
-  }
 }
 
 function hideResearchWaveProgress() {
@@ -1773,7 +1312,7 @@ function firstUnansweredResearchCaseIndex() {
 
 async function completeResearchTest() {
   hideResearchTutorial();
-  renderResearchPanel();
+  refreshResearchDisplay();
   showResearchCompletion();
   if (state.researchMode !== "test" || state.researchResultAutoSubmitted) return;
   state.researchResultAutoSubmitted = true;
@@ -1810,7 +1349,7 @@ function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
 }
 
 function hideResearchInlineProgress() {
-  for (const el of [els.researchInlineProgress, els.validationInlineProgress]) {
+  for (const el of [els.researchInlineProgress]) {
     if (!el) continue;
     el.hidden = true;
     el.textContent = "";
@@ -1819,16 +1358,14 @@ function hideResearchInlineProgress() {
 
 function updateResearchUndoButton() {
   if (!els.researchUndoBtn) return;
-  const hasUndoTarget = state.researchMode === "validation"
-    ? activeValidationResponses().length > 0
-    : activeResearchResponses().length > 0;
+  const hasUndoTarget = activeResearchResponses().length > 0;
   els.researchUndoBtn.disabled = !hasUndoTarget;
 }
 
 function renderResearchInlineProgress(snapshot = null) {
   updateResearchUndoButton();
-  if (els.researchCompleteScreen?.hidden === false && (state.researchMode === "test" || state.researchMode === "validation")) {
-    const el = state.researchMode === "validation" ? els.validationInlineProgress : els.researchInlineProgress;
+  if (els.researchCompleteScreen?.hidden === false && state.researchMode === "test") {
+    const el = els.researchInlineProgress;
     hideResearchInlineProgress();
     if (el) {
       el.hidden = false;
@@ -1845,15 +1382,6 @@ function renderResearchInlineProgress(snapshot = null) {
     if (els.researchInlineProgress) {
       els.researchInlineProgress.hidden = false;
       els.researchInlineProgress.textContent = label;
-    }
-    return;
-  }
-  if (state.researchMode === "validation" && state.validationSession) {
-    const data = snapshot || validationProgressSnapshot();
-    hideResearchInlineProgress();
-    if (els.validationInlineProgress) {
-      els.validationInlineProgress.hidden = false;
-      els.validationInlineProgress.textContent = `残り ${data.remaining} epoch`;
     }
     return;
   }
@@ -1885,45 +1413,6 @@ function renderResearchProgress() {
   renderResearchWaveProgress(snapshot);
   renderResearchInlineProgress(snapshot);
   renderRightResearchPanels();
-}
-
-function validationProgressSnapshot() {
-  const session = state.validationSession;
-  const cases = activeResearchCases();
-  const current = currentResearchCase();
-  const total = Number(session?.totalCount || cases.length || 0);
-  const answered = Number(session?.answeredCount || 0);
-  const currentQuestion = current ? Math.min(total, answered + 1) : answered;
-  const remaining = Math.max(0, total - answered);
-  const pct = total ? Math.round((answered / total) * 100) : 0;
-  return { cases, current, total, answered, currentQuestion, remaining, pct };
-}
-
-function hideValidationWaveProgress() {
-  hideResearchWaveProgress();
-}
-
-function renderValidationProgress() {
-  const session = state.validationSession;
-  if (!session || state.researchMode !== "validation") {
-    hideResearchWaveProgress();
-    renderResearchInlineProgress();
-    return;
-  }
-  const snapshot = validationProgressSnapshot();
-  const { total, answered, currentQuestion, remaining, pct } = snapshot;
-  hideResearchWaveProgress();
-  if (els.researchTestProgress) {
-    els.researchTestProgress.innerHTML = `
-      <div class="research-progress-card">
-        <div class="research-progress-head"><strong>Validation ${currentQuestion}/${total || 0}</strong><span>${pct}%</span></div>
-        <div>評価済み ${answered}/${total || 0} · 残り ${remaining} epoch</div>
-        <div class="research-progress-bar"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
-        <div class="research-small">Enter: dataset label通り / 右クリック: 矛盾する判定を選択</div>
-      </div>
-    `;
-  }
-  renderResearchInlineProgress(snapshot);
 }
 
 function researchCaseLabelGroup(caseRow) {
@@ -2025,12 +1514,10 @@ function researchMontageUsageRows(response) {
 
 function renderRightResearchPanels() {
   renderRightTestPanel();
-  renderRightAnswerPanel();
 }
 
 function renderRightTestPanel() {
   if (!els.rightTestPanel) return;
-  if (state.researchMode === "validation") return renderRightValidationPanel();
   const session = state.researchSession;
   const current = currentResearchCase();
   const responses = activeResearchResponses();
@@ -2068,438 +1555,22 @@ function renderRightTestPanel() {
   `;
 }
 
-function renderRightValidationPanel() {
-  if (!els.rightTestPanel) return;
-  const session = state.validationSession;
-  const current = currentResearchCase();
-  const responses = activeValidationResponses();
-  const currentRows = current ? [
-    ["Current", `${validationProgressSnapshot().currentQuestion}/${session?.totalCount || 0}`],
-    ["Case", current.caseId || ""],
-    ["Recording", current.recordingId || ""],
-    ["Dataset label", researchCaseLabelGroup(current)],
-    ["Enter saves", researchExpectedRating(current)],
-    ["Epoch", `${formatSec(Number(current.epochStart || 0))} + ${Number(current.durationSec || 10)}s`],
-  ] : [];
-  const cards = responses.map((response, index) => {
-    const rows = [
-      ["Case", response.caseId || ""],
-      ["Expert rating", researchRatingLabel(response.rating)],
-      ["Expected", researchRatingLabel(response.expectedRating)],
-      ["Dataset valid", response.datasetValid ? "OK" : "要確認"],
-      ["Method", response.validationMethod || ""],
-      ["Answered", response.answeredAt || ""],
-    ];
-    return `<div class="research-result-card ${response.datasetValid ? "correct" : "incorrect"}"><div class="research-result-head"><strong>#${index + 1} ${response.datasetValid ? "OK" : "要確認"}</strong><span>${escapeHtml(researchRatingLabel(response.rating) || "-")}</span></div>${researchDetailRows(rows)}</div>`;
-  }).join("");
-  els.rightTestPanel.innerHTML = `
-    ${current ? `<div class="research-result-card"><div class="research-result-title">Current validation epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">Validation complete.</div>'}
-    <div class="research-result-title">Validation judgments (${responses.length})</div>
-    <div class="research-result-list">${cards || '<div class="research-empty">No validation yet.</div>'}</div>
-  `;
-}
-
-function renderRightAnswerPanel() {
-  if (!els.rightAnswerPanel) return;
-  if (state.researchMode === "validation") {
-    const rejected = activeValidationResponses().filter((response) => !response.datasetValid);
-    const cards = rejected.map((response, index) => {
-      const rows = [
-        ["Case", response.caseId || ""],
-        ["Expert rating", researchRatingLabel(response.rating)],
-        ["Expected", researchRatingLabel(response.expectedRating)],
-        ["Method", response.validationMethod || ""],
-        ["Answered", response.answeredAt || ""],
-      ];
-      return `<div class="research-result-card incorrect"><div class="research-result-head"><strong>#${index + 1} 要確認</strong><span>${escapeHtml(researchRatingLabel(response.rating) || "-")}</span></div>${researchDetailRows(rows)}</div>`;
-    }).join("");
-    els.rightAnswerPanel.innerHTML = `
-      <div class="research-result-title">Rejected epochs (${rejected.length})</div>
-      <div class="research-result-list">${cards || '<div class="research-empty">弾いたエポックはまだありません。</div>'}</div>
-    `;
-    return;
-  }
-  const response = state.lastResearchResponse;
-  if (!response) {
-    els.rightAnswerPanel.innerHTML = '<div class="research-empty">No saved judgment yet.</div>';
-    return;
-  }
-  const caseRow = researchResponseCase(response);
-  const result = researchResponseCorrectness(response);
-  const rows = [
-    ["Case", response.caseId || ""],
-    ["Recording", caseRow?.recordingId || ""],
-    ["True label", researchCaseLabelGroup(caseRow)],
-    ["Your rating", researchRatingLabel(response.rating)],
-    ["Expected", result.expected || ""],
-    ["Phase", response.phase || ""],
-    ...researchMontageUsageRows(response),
-  ];
-  els.rightAnswerPanel.innerHTML = `
-    <div class="research-result-card ${escapeHtml(result.className)}">
-      <div class="research-result-head"><strong>${escapeHtml(result.label)}</strong><span>${escapeHtml(researchRatingLabel(response.rating) || "-")}</span></div>
-      ${researchDetailRows(rows)}
-    </div>
-  `;
-}
-
-async function createResearchDataset() {
-  const iedsPresentPath = els.researchIedsPresentPathInput?.value.trim() || els.researchSetupIedsPresentPathInput?.value.trim() || "";
-  const iedsAbsentPath = els.researchIedsAbsentPathInput?.value.trim() || els.researchSetupIedsAbsentPathInput?.value.trim() || "";
-  const outputValue = state.researchMode === "dataset" ? (els.researchDatasetPathInput?.value.trim() || "") : "";
-  const phase1Montage = activeMontageValue() || "conventional";
-  setStatus("Creating dataset...", { busy: true });
-  try {
-    const payload = {};
-    if (iedsPresentPath || iedsAbsentPath) {
-      payload.groupPaths = {
-        epileptiform: iedsPresentPath,
-        non_epileptiform: iedsAbsentPath,
-      };
-      payload.name = "manual_test_dataset";
-      payload.phase1Montage = phase1Montage;
-      payload.phase1TotalSampleCount = researchDesignSettings().phase1TotalSampleCount;
-    }
-    if (outputValue) payload.outputPath = outputValue;
-    const data = await fetchJson("/api/research/dataset/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    state.researchDataset = data.dataset;
-    state.researchDatasetPath = data.datasetPath;
-    state.researchCaseIndex = 0;
-    syncResearchDesignControls(data.dataset?.settings || {});
-    if (state.researchMode === "dataset" && els.researchDatasetPathInput) {
-      els.researchDatasetPathInput.value = data.datasetPath;
-    }
-    renderResearchPanel();
-    setStatus(`Dataset created: ${data.caseCount || 0} cases`);
-    return data;
-  } catch (err) {
-    setStatus(`Dataset create failed: ${err.message}`, { error: true });
-    throw err;
-  }
-}
-
-async function loadResearchDatasetFromInput() {
-  const path = els.researchDatasetPathInput?.value.trim() || "";
-  if (!path) return setStatus("Enter dataset folder path", { error: true });
-  try {
-    const dataset = await loadResearchDatasetFromPath(path);
-    state.researchCaseIndex = 0;
-    if (state.researchMode !== "validation") setResearchMode("dataset");
-    setStatus(`Dataset loaded: ${(dataset.cases || []).length} cases`);
-  } catch (err) {
-    setStatus(`Dataset load failed: ${err.message}`, { error: true });
-  }
-}
-
 async function loadResearchDatasetFromPath(path) {
   const datasetPath = String(path || "").trim();
   if (!datasetPath) throw new Error("Dataset path or URL is required.");
   const dataset = await fetchJson(`/api/research/dataset?${qs({ path: datasetPath })}`);
   state.researchDataset = dataset;
   state.researchDatasetPath = dataset.datasetPath || datasetPath;
-  if (els.researchDatasetPathInput) els.researchDatasetPathInput.value = state.researchDatasetPath;
   if (els.researchSetupDatasetPathInput && !/^https?:\/\//i.test(datasetPath)) {
     els.researchSetupDatasetPathInput.value = state.researchDatasetPath;
   }
-  syncResearchDesignControls(dataset.settings || {});
-  renderResearchPanel();
+  applyFixedResearchQuestionCount();
+  refreshResearchDisplay();
   return dataset;
 }
 
-function moveResearchCase(delta) {
-  const cases = activeResearchCases();
-  if (!cases.length) return;
-  state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, state.researchCaseIndex + delta));
-  renderResearchPanel();
-  if (state.researchMode === "test") showResearchCase(state.researchCaseIndex);
-}
-
-async function saveResearchCaseEdits() {
-  const current = currentResearchCase();
-  if (!current || !state.researchDatasetPath) return;
-  try {
-    const data = await fetchJson("/api/research/dataset/item", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        datasetPath: state.researchDatasetPath,
-        caseId: current.caseId,
-        updates: {
-          include: !!els.researchIncludeInput.checked,
-          excludeReason: els.researchExcludeReasonInput.value.trim(),
-          qualityNotes: els.researchQualityNotesInput.value.trim(),
-        },
-      }),
-    });
-    state.researchDataset = data.dataset;
-    renderResearchPanel();
-    setStatus("Case saved");
-  } catch (err) {
-    setStatus(`Case save failed: ${err.message}`, { error: true });
-  }
-}
-
-function currentRecordingPayload() {
-  return (state.recordings || []).find((rec) => rec.id === state.recordingId) || null;
-}
-
-function currentRecordingPath() {
-  const rec = currentRecordingPayload();
-  return rec?.eegPath || rec?.path || els.filePathInput?.value.trim() || "";
-}
-
-async function ensureResearchDatasetForCut() {
-  if (state.researchDatasetPath && state.researchDataset) return;
-  await createResearchDataset();
-}
-
-function selectedEpochCenterTime() {
-  const selection = state.scalogramSelection || state.topomapSelection || state.dragSelection;
-  const start = Number(selection?.start);
-  const duration = Number(selection?.duration);
-  if (Number.isFinite(start) && Number.isFinite(duration) && duration > 0) {
-    return start + duration / 2;
-  }
-  if (Number.isFinite(Number(state.cursorTime))) return Number(state.cursorTime);
-  return Number(state.start || 0) + visibleDuration() / 2;
-}
-
-async function cutCurrentResearchEpoch() {
-  if (state.researchMode !== "dataset") setResearchMode("dataset");
-  const edfPath = currentRecordingPath();
-  if (!edfPath) return setStatus("Open an EDF file first", { error: true });
-  const outputPath = els.researchDatasetPathInput?.value.trim() || "";
-  if (!outputPath) return setStatus("Enter output folder", { error: true });
-  const duration = 10;
-  const totalDuration = recordingDuration();
-  const centerTime = selectedEpochCenterTime();
-  let epochStart = Math.max(0, centerTime - duration / 2);
-  if (totalDuration > 0 && epochStart + duration > totalDuration) {
-    epochStart = Math.max(0, totalDuration - duration);
-  }
-  const eventTime = Math.max(epochStart, Math.min(centerTime, epochStart + duration));
-  const labelGroup = "epileptiform";
-  if (els.researchCutEpochBtn) els.researchCutEpochBtn.disabled = true;
-  setStatus("Saving epoch EDF...", { busy: true });
-  try {
-    const data = await fetchJson("/api/research/dataset/cut", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        outputPath,
-        edfPath,
-        recordingId: state.recordingId,
-        epochStart,
-        durationSec: duration,
-        eventTime,
-        labelGroup,
-        phase1Montage: activeMontageValue(),
-      }),
-    });
-    state.researchDatasetPath = data.outputDir || outputPath;
-    if (els.researchDatasetPathInput) els.researchDatasetPathInput.value = state.researchDatasetPath;
-    renderResearchPanel();
-    const savedLabel = data.filename || data.outputPath || "epoch EDF";
-    setStatus(`Epoch EDF saved: ${savedLabel}`);
-    showResearchToast(`Saved epoch: ${savedLabel}`);
-  } catch (err) {
-    setStatus(`Cut failed: ${err.message}`, { error: true });
-    showResearchToast(`Save failed: ${err.message}`);
-  } finally {
-    if (els.researchCutEpochBtn) els.researchCutEpochBtn.disabled = false;
-  }
-}
-
-async function saveResearchEpochCount() {
-  if (!state.researchDatasetPath) return;
-  const value = fixedResearchQuestionCount();
-  applyFixedResearchQuestionCount();
-  try {
-    const data = await fetchJson("/api/research/dataset/item", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datasetPath: state.researchDatasetPath, updates: { phase1TotalSampleCount: value } }),
-    });
-    state.researchDataset = data.dataset;
-    renderResearchPanel();
-    setStatus(`Test question count set to ${value}`);
-  } catch (err) {
-    setStatus(`Question count save failed: ${err.message}`, { error: true });
-  }
-}
-
-function setValidationResponsesFromSession(session = state.validationSession) {
-  state.validationResponses = Array.isArray(session?.responses) ? [...session.responses] : [];
-}
-
-function activeValidationResponses() {
-  return (Array.isArray(state.validationResponses) ? state.validationResponses : [])
-    .filter((row) => row && !row.superseded && !row.undoneAt)
-    .sort((a, b) => String(b.answeredAt || "").localeCompare(String(a.answeredAt || "")));
-}
-
-async function startValidationMode() {
-  const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
-  if (!datasetPath) return setStatus("Validation用のデータセットパスを入力してください", { error: true });
-  hideResearchCompletion();
-  hideResearchTutorial();
-  setStatus("Starting validation...", { busy: true });
-  try {
-    const dataset = await fetchJson(`/api/research/dataset?${qs({ path: datasetPath })}`);
-    state.researchDataset = dataset;
-    state.researchDatasetPath = dataset.datasetPath || datasetPath;
-    if (els.researchDatasetPathInput) els.researchDatasetPathInput.value = state.researchDatasetPath;
-    const session = await fetchJson(`/api/research/validation/session?${qs({ dataset: state.researchDatasetPath })}`);
-    state.validationSession = session;
-    setValidationResponsesFromSession(session);
-    state.researchCaseIndex = 0;
-    setResearchMode("validation");
-    renderResearchPanel();
-    await showValidationCase(0);
-  } catch (err) {
-    setStatus(`Validation start failed: ${err.message}`, { error: true });
-  }
-}
-
-async function showValidationCase(index) {
-  const cases = activeResearchCases();
-  if (!cases.length) {
-    renderResearchPanel();
-    showResearchCompletion();
-    setStatus("Validation complete. 結果ファイルを保存できます");
-    return;
-  }
-  state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, index));
-  const item = cases[state.researchCaseIndex];
-  renderResearchPanel();
-  setStatus(`Loading validation epoch ${state.researchCaseIndex + 1}/${cases.length}...`, { busy: true });
-  try {
-    const opened = await fetchJson("/api/open-file", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: item.edfPath }),
-    });
-    applyOpenedRecording(opened);
-    await loadMetadata();
-    state.start = 0;
-    state.cursorTime = null;
-    state.rangeStart = null;
-    state.scalogramSelection = null;
-    state.topomapSelection = null;
-    state.scalogramData = null;
-    const montage = item.phase1Montage || storedResearchProfile().usualMontage || "conventional";
-    if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
-    if (els.tcSelect) els.tcSelect.value = "0.3";
-    if (els.hfSelect) els.hfSelect.value = "120";
-    if (els.durationSelect) els.durationSelect.value = "10";
-    state.viewMode = "single";
-    els.montageSelect.value = montage;
-    state.activeMontage = els.montageSelect.value;
-    updateViewModeButtons();
-    syncMultiMontageControls();
-    setRightPanelVisible(false, { save: false });
-    state.windowData = null;
-    await loadWindow();
-    scheduleLayoutRefresh();
-    state.validationCaseStartedAt = new Date().toISOString();
-    renderValidationProgress();
-    renderRightResearchPanels();
-    setStatus(`Validation: Enterで妥当 / 右クリックで矛盾判定 (${researchCaseLabelGroup(item)})`);
-  } catch (err) {
-    setStatus(`Validation epoch load failed: ${err.message}`, { error: true });
-  }
-}
-
-function renderValidationRatingContextMenu() {
-  const expected = researchExpectedRating(currentResearchCase());
-  const opposite = expected === "てんかん性異常あり" ? "てんかん性異常なし" : "てんかん性異常あり";
-  els.contextMenu.innerHTML = `
-    <div class="context-menu-caption">Validation: labelと矛盾する場合のみ選択</div>
-    <button data-action="validation-rating" data-rating="${escapeHtml(opposite)}">${escapeHtml(opposite)}として修正</button>
-  `;
-}
-
-function validationPayload(rating, method) {
-  const item = currentResearchCase();
-  const answeredAt = new Date().toISOString();
-  return {
-    datasetPath: state.researchDatasetPath,
-    caseId: item?.caseId || "",
-    rating,
-    validationMethod: method,
-    startedAt: state.validationCaseStartedAt || answeredAt,
-    answeredAt,
-    elapsedMs: state.validationCaseStartedAt ? Date.now() - Date.parse(state.validationCaseStartedAt) : 0,
-    usedMontage: activeMontageValue(),
-    finalMontage: activeMontageValue(),
-    sensitivity: els.sensitivitySelect?.value || "",
-    tc: els.tcSelect?.value || "",
-    hf: els.hfSelect?.value || "",
-    timebaseSec: Number(els.durationSelect?.value || visibleDuration() || 0),
-  };
-}
-
-async function saveValidationRating(rating, method = "manual_override") {
-  const item = currentResearchCase();
-  if (!item || !state.validationSession || state.validationSaving) return;
-  state.validationSaving = true;
-  try {
-    const data = await fetchJson("/api/research/validation/response", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validationPayload(rating, method)),
-    });
-    state.validationSession = data.session;
-    setValidationResponsesFromSession(data.session);
-    state.lastValidationResponse = data.response;
-    const label = data.response?.datasetValid ? "妥当" : "要確認";
-    showResearchToast(`Validation保存: ${label} · ${researchRatingLabel(rating)} · やり直す場合は「前の問題をやりなおす」`, { undo: true });
-    const cases = activeResearchCases();
-    if (cases.length) await showValidationCase(0);
-    else {
-      renderResearchPanel();
-      showResearchCompletion();
-      setStatus("Validation complete. 結果ファイルを保存できます");
-    }
-  } catch (err) {
-    setStatus(`Validation save failed: ${err.message}`, { error: true });
-  } finally {
-    state.validationSaving = false;
-  }
-}
-
-async function acceptCurrentValidationEpoch() {
-  const item = currentResearchCase();
-  if (!item || state.researchMode !== "validation") return;
-  hideContextMenu();
-  await saveValidationRating(researchExpectedRating(item), "enter_accept");
-}
-
-async function exportValidationJson() {
-  const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
-  if (!datasetPath) return setStatus("Validation用のデータセットパスを入力してください", { error: true });
-  try {
-    setStatus("Validation結果ファイルをDesktopに保存中...", { busy: true });
-    const jsonFilename = "validation_results.json";
-    const jsonResult = await fetchJson("/api/research/validation/export-file", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ datasetPath, filename: jsonFilename }),
-    });
-    if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `Desktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`;
-    }
-    setStatus(`Validation結果ファイルをDesktopに保存しました: ${jsonResult.path || jsonResult.filename || jsonFilename}`);
-  } catch (err) {
-    setStatus(`Validation export failed: ${err.message}`, { error: true });
-  }
-}
-
 async function startResearchTest() {
+  requestMobileFullscreen();
   setResearchSetupMessage("入力内容を確認中...");
   if (!validateResearchProfileForStart()) return;
   saveResearchProfile();
@@ -2520,14 +1591,11 @@ async function startResearchTest() {
   profile.testRunStartedAt = new Date().toISOString();
   const phase = "1";
   const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
-  const iedsPresentPath = els.researchIedsPresentPathInput?.value.trim() || els.researchSetupIedsPresentPathInput?.value.trim() || "";
-  const iedsAbsentPath = els.researchIedsAbsentPathInput?.value.trim() || els.researchSetupIedsAbsentPathInput?.value.trim() || "";
   applyFixedResearchQuestionCount();
-  if (els.researchReaderIdInput && readerId) els.researchReaderIdInput.value = readerId;
-  if (!setupDatasetPath && (!iedsPresentPath || !iedsAbsentPath)) {
-    const existingDatasetPath = profile.datasetPath || state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
+  if (!setupDatasetPath) {
+    const existingDatasetPath = profile.datasetPath || state.researchDatasetPath || "";
     if (!existingDatasetPath) {
-      const message = "GitHub dataset URL、local dataset path、またはIEDs present/absentのDataを入力してください";
+      const message = "テスト用データセットを読み込めません。管理者に連絡してください。";
       setResearchSetupMessage(message, true);
       setStatus(message, { error: true });
       return;
@@ -2537,14 +1605,12 @@ async function startResearchTest() {
   setResearchStartBusy(true);
   setStatus("Starting test...", { busy: true });
   try {
-    const existingDatasetPath = setupDatasetPath || state.researchDatasetPath || els.researchDatasetPathInput?.value.trim() || "";
-    const created = iedsPresentPath && iedsAbsentPath ? await createResearchDataset() : null;
-    let datasetPath = created?.datasetPath || existingDatasetPath || state.researchDatasetPath || "";
-    if (!created && datasetPath) {
+    const existingDatasetPath = setupDatasetPath || state.researchDatasetPath || "";
+    let datasetPath = existingDatasetPath || state.researchDatasetPath || "";
+    if (datasetPath) {
       const dataset = await loadResearchDatasetFromPath(datasetPath);
       datasetPath = dataset.datasetPath || datasetPath;
     }
-    await saveResearchTestDesign(datasetPath);
     const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId, phase })}`);
     if (!Array.isArray(session.cases) || !session.cases.length) {
       throw new Error("No test cases are available for this run. Check the selected dataset or upload status.");
@@ -2559,7 +1625,7 @@ async function startResearchTest() {
     setResearchSetupMessage("");
     setResearchMode("test");
     updateResearchSetupScreen();
-    renderResearchPanel();
+    refreshResearchDisplay();
     await showResearchCase(0);
   } catch (err) {
     const message = `Test start failed: ${err.message}`;
@@ -2580,7 +1646,7 @@ async function showResearchCase(index) {
   }
   state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, index));
   const item = cases[state.researchCaseIndex];
-  renderResearchPanel();
+  refreshResearchDisplay();
   setStatus(`${isResearchPracticeCase(item) ? "Loading explanation practice epoch" : (item.sampleEpoch ? `Loading ${"Phase 1"} sample` : `Loading test epoch ${state.researchCaseIndex + 1}/${cases.length}`)}...`, { busy: true });
   try {
     const opened = await fetchJson("/api/open-file", {
@@ -2592,10 +1658,7 @@ async function showResearchCase(index) {
     await loadMetadata();
     state.start = 0;
     state.cursorTime = null;
-    state.rangeStart = null;
-    state.scalogramSelection = null;
-    state.topomapSelection = null;
-    state.scalogramData = null;
+    state.dragSelection = null;
     const profile = researchProfile();
     const usualMontage = isResearchPracticeCase(item) ? "conventional" : (profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional");
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
@@ -2629,7 +1692,7 @@ function renderResearchRatingContextMenu() {
   const onset = Number(context.onset);
   const target = [channel, Number.isFinite(onset) ? formatSec(onset) : ""].filter(Boolean).join(" · ");
   els.contextMenu.innerHTML = `
-    <div class="context-menu-caption">Test annotation${target ? `: ${escapeHtml(target)}` : ""}</div>
+    <div class="context-menu-caption">Test judgment${target ? `: ${escapeHtml(target)}` : ""}</div>
     ${RESEARCH_RATINGS.map((rating) => `<button data-action="research-rating" data-rating="${escapeHtml(rating)}">${escapeHtml(rating)}</button>`).join("")}
   `;
 }
@@ -2637,11 +1700,10 @@ function renderResearchRatingContextMenu() {
 function researchSpikeSelectionPayload() {
   const context = state.context || {};
   const onset = Number(context.onset);
-  const selected = state.scalogramSelection || null;
   const fallbackDuration = Math.min(1, Math.max(0.05, visibleDuration() || 1));
   const fallbackStart = Number.isFinite(onset) ? Math.max(0, onset - fallbackDuration / 2) : Math.max(0, Number(state.start || 0));
-  const selectionStart = Number.isFinite(Number(selected?.start)) ? Number(selected.start) : fallbackStart;
-  const selectionDuration = Number.isFinite(Number(selected?.duration)) ? Number(selected.duration) : fallbackDuration;
+  const selectionStart = fallbackStart;
+  const selectionDuration = fallbackDuration;
   return {
     usedMontage: activeMontageValue(),
     finalMontage: activeMontageValue(),
@@ -2707,7 +1769,6 @@ async function saveResearchRating(rating) {
     const responsePayload = {
       datasetPath: state.researchDatasetPath,
       readerId: state.researchSession.readerId,
-      outputPath: researchProfile().outputPath,
       readerProfile: researchProfile(),
       phase: state.researchSession.phase,
       caseId: item.caseId,
@@ -2750,7 +1811,6 @@ async function saveResearchRating(rating) {
       const fallbackPayload = {
         datasetPath: state.researchDatasetPath,
         readerId: state.researchSession.readerId,
-        outputPath: researchProfile().outputPath,
         readerProfile: researchProfile(),
         phase: state.researchSession.phase,
         caseId: item.caseId,
@@ -2814,7 +1874,6 @@ async function undoResearchResponse() {
       body: JSON.stringify({
         datasetPath: state.researchDatasetPath,
         readerId: state.researchSession.readerId,
-        outputPath: researchProfile().outputPath,
         responseId: state.lastResearchResponse.responseId,
         sessionToken: state.researchSession.sessionToken || "",
       }),
@@ -2833,42 +1892,12 @@ async function undoResearchResponse() {
   }
 }
 
-async function undoValidationResponse() {
-  if (!state.lastValidationResponse || !state.validationSession) return;
-  try {
-    const data = await fetchJson("/api/research/validation/response/undo", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        datasetPath: state.researchDatasetPath,
-        responseId: state.lastValidationResponse.responseId,
-      }),
-    });
-    state.validationSession = data.session;
-    setValidationResponsesFromSession(data.session);
-    const cases = activeResearchCases();
-    const caseId = data.undone?.caseId;
-    const index = cases.findIndex((row) => row.caseId === caseId);
-    state.lastValidationResponse = null;
-    hideResearchToast();
-    await showValidationCase(index >= 0 ? index : 0);
-    setStatus("Validation undo complete");
-  } catch (err) {
-    setStatus(`Validation undo failed: ${err.message}`, { error: true });
-  }
-}
-
 function undoLastResearchAction() {
-  if (state.researchMode === "validation") {
-    undoValidationResponse();
-    return;
-  }
   undoResearchResponse();
 }
 
 async function exportResearchJson() {
-  if (state.researchMode === "validation") return exportValidationJson();
-  const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
+  const datasetPath = state.researchDatasetPath || "";
   if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
   saveResearchProfile();
   const profile = researchProfile();
@@ -2895,8 +1924,7 @@ async function exportResearchJson() {
 }
 
 async function shareResearchJsonByEmail() {
-  if (state.researchMode === "validation") return;
-  const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
+  const datasetPath = state.researchDatasetPath || "";
   if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
   saveResearchProfile();
   const profile = researchProfile();
@@ -2948,8 +1976,7 @@ async function shareResearchJsonByEmail() {
 }
 
 async function submitResearchJson(options = {}) {
-  if (state.researchMode === "validation") return exportValidationJson();
-  const datasetPath = els.researchDatasetPathInput?.value.trim() || state.researchDatasetPath || "";
+  const datasetPath = state.researchDatasetPath || "";
   if (!datasetPath) {
     const err = new Error("Enter dataset folder path");
     setStatus(err.message, { error: true });
@@ -3011,96 +2038,38 @@ function restorePanelWidths() {
     saved = {};
   }
   applyPanelWidth("right", Number(saved.right));
-  applyPanelWidth("scalogram", Number(saved.scalogram));
 }
 
 function savePanelWidths() {
   const styles = getComputedStyle(document.documentElement);
   const workspaceStyles = els.workspace ? getComputedStyle(els.workspace) : styles;
   const right = parseFloat(workspaceStyles.getPropertyValue("--right-panel-width"));
-  const scalogram = parseFloat(workspaceStyles.getPropertyValue("--scalogram-column-width"));
-  localStorage.setItem(PANEL_WIDTHS_KEY, JSON.stringify({ right, scalogram }));
+  localStorage.setItem(PANEL_WIDTHS_KEY, JSON.stringify({ right }));
 }
 
-function applyPanelWidth(panel, width) {
+function applyPanelWidth(_panel, width) {
   if (!els.workspace || !Number.isFinite(width)) return;
-  const min = panel === "right" ? 210 : 260;
-  const max = Math.max(min, Math.floor(window.innerWidth * (panel === "right" ? 0.62 : 0.58)));
+  const min = 210;
+  const max = Math.max(min, Math.floor(window.innerWidth * 0.62));
   const clamped = Math.max(min, Math.min(max, Math.round(width)));
-  const property = panel === "right" ? "--right-panel-width" : "--scalogram-column-width";
-  els.workspace.style.setProperty(property, clamped + "px");
+  els.workspace.style.setProperty("--right-panel-width", clamped + "px");
 }
 
 function bindPanelResizers() {
   for (const handle of els.panelResizeHandles || []) {
     handle.addEventListener("pointerdown", onPanelResizePointerDown);
   }
-  bindAnnotationListResizer();
   window.addEventListener("pointermove", onPanelResizePointerMove);
   window.addEventListener("pointerup", finishPanelResize);
   window.addEventListener("pointercancel", finishPanelResize);
 }
 
-function restoreAnnotationListHeight() {
-  const saved = Number(localStorage.getItem(ANNOTATION_LIST_HEIGHT_KEY));
-  applyAnnotationListHeight(saved);
-}
-
-function applyAnnotationListHeight(height) {
-  if (!els.annotationList || !Number.isFinite(height)) return;
-  const min = 86;
-  const max = Math.max(min, Math.floor(window.innerHeight * 0.62));
-  const clamped = Math.max(min, Math.min(max, Math.round(height)));
-  els.annotationList.style.setProperty("--annotation-list-height", clamped + "px");
-}
-
-function saveAnnotationListHeight() {
-  if (!els.annotationList) return;
-  localStorage.setItem(ANNOTATION_LIST_HEIGHT_KEY, String(Math.round(els.annotationList.getBoundingClientRect().height)));
-}
-
-function bindAnnotationListResizer() {
-  if (!els.annotationListResize || !els.annotationList) return;
-  els.annotationListResize.addEventListener("pointerdown", onAnnotationListResizePointerDown);
-  window.addEventListener("pointermove", onAnnotationListResizePointerMove);
-  window.addEventListener("pointerup", finishAnnotationListResize);
-  window.addEventListener("pointercancel", finishAnnotationListResize);
-}
-
-function onAnnotationListResizePointerDown(ev) {
-  if (!els.annotationList) return;
-  state.annotationResizeDrag = {
-    startY: ev.clientY,
-    startHeight: els.annotationList.getBoundingClientRect().height,
-  };
-  els.annotationListResize?.classList.add("dragging");
-  ev.preventDefault();
-}
-
-function onAnnotationListResizePointerMove(ev) {
-  const drag = state.annotationResizeDrag;
-  if (!drag) return;
-  applyAnnotationListHeight(drag.startHeight + (ev.clientY - drag.startY));
-}
-
-function finishAnnotationListResize() {
-  if (!state.annotationResizeDrag) return;
-  els.annotationListResize?.classList.remove("dragging");
-  state.annotationResizeDrag = null;
-  saveAnnotationListHeight();
-}
-
-function showEventControls() {
-  if (els.eventControls) els.eventControls.open = true;
-}
-
 function onPanelResizePointerDown(ev) {
   const handle = ev.currentTarget;
   const panel = handle?.dataset?.resizePanel;
-  if (!panel || !els.workspace) return;
+  if (panel !== "right" || !els.workspace) return;
   const styles = getComputedStyle(els.workspace);
-  const property = panel === "right" ? "--right-panel-width" : "--scalogram-column-width";
-  const startWidth = parseFloat(styles.getPropertyValue(property));
+  const startWidth = parseFloat(styles.getPropertyValue("--right-panel-width"));
   state.panelResizeDrag = { panel, startX: ev.clientX, startWidth: Number.isFinite(startWidth) ? startWidth : 0, handle, pointerId: ev.pointerId };
   handle.classList.add("dragging");
   handle.setPointerCapture?.(ev.pointerId);
@@ -3131,43 +2100,6 @@ function finishPanelResize() {
   savePanelWidths();
 }
 
-async function openFileFromPath() {
-  const path = els.filePathInput.value.trim();
-  if (!path) {
-    setStatus("Enter an EEG/EDF file or folder path", { error: true });
-    return;
-  }
-  setOpenFileBusy(true);
-  setStatus("Opening path...", { busy: true, progress: 10 });
-  try {
-    const opened = await fetchJson("/api/open-file", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    state.recordingId = opened.id;
-    state.start = 0;
-    state.cursorTime = null;
-    state.rangeStart = null;
-    state.scalogramSelection = null;
-    state.scalogramData = null;
-    state.selectedScalogramIndex = 0;
-    state.scalogramRequestId += 1;
-    if (els.rangeCancelBtn) els.rangeCancelBtn.disabled = true;
-    rememberRecentFile(path);
-    const count = Array.isArray(opened.recordings) ? opened.recordings.length : 1;
-    setStatus(
-      opened.kind === "folder" ? `Loaded ${count} recording${count === 1 ? "" : "s"} from folder` : "Loaded recording",
-      { busy: true, progress: 30 },
-    );
-    await loadRecordings(opened.id);
-  } catch (err) {
-    setStatus(`Open failed: ${err.message}`, { error: true });
-  } finally {
-    setOpenFileBusy(false);
-  }
-}
-
 function restoreSettings() {
   try {
     const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
@@ -3195,14 +2127,6 @@ function restoreSettings() {
     if (typeof settings.rightPanelVisible === "boolean") {
       state.rightPanelVisible = settings.rightPanelVisible;
     }
-    state.scalogramVisible = false;
-    if (typeof settings.showSourceAnnotations === "boolean") {
-      state.showSourceAnnotations = settings.showSourceAnnotations;
-      if (els.sourceAnnotationToggle) els.sourceAnnotationToggle.checked = settings.showSourceAnnotations;
-    }
-    state.topomapMode = "mean";
-    state.topomapLayout = "system";
-    state.scalogramDisplayScope = "all";
   } catch {
     localStorage.removeItem(SETTINGS_KEY);
   }
@@ -3213,7 +2137,7 @@ function saveSettings() {
     montage: els.montageSelect.value,
     viewMode: "single",
     workspaceMode: "review",
-    rightPanelTab: RIGHT_PANEL_TABS.includes(state.rightPanelTab) ? state.rightPanelTab : "topomap",
+    rightPanelTab: RIGHT_PANEL_TABS.includes(state.rightPanelTab) ? state.rightPanelTab : "metadata",
     sensitivity: els.sensitivitySelect.value,
     tc: els.tcSelect.value,
     hf: els.hfSelect.value,
@@ -3223,7 +2147,6 @@ function saveSettings() {
     ecg: els.ecgToggle.checked,
     ecgFilter: els.ecgFilterToggle?.checked || false,
     rightPanelVisible: state.rightPanelVisible,
-    showSourceAnnotations: state.showSourceAnnotations,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
@@ -3283,14 +2206,6 @@ function activeMontageValue() {
 
 function updateViewModeButtons() {
   const count = activeMultiMontageCount();
-  for (const btn of els.viewModeButtons || []) {
-    const mode = btn.dataset.viewMode || "single";
-    const btnCount = normalizeMultiMontageCount(btn.dataset.montageCount);
-    const active = mode === "single"
-      ? !isMultiMontageMode()
-      : isMultiMontageMode() && btnCount === count;
-    btn.classList.toggle("active", active);
-  }
   document.body.classList.toggle("multi-montage-mode", isMultiMontageMode());
   document.body.classList.toggle("multi-montage-two", isMultiMontageMode() && count === 2);
   document.body.classList.toggle("multi-montage-three", isMultiMontageMode() && count === 3);
@@ -3307,37 +2222,12 @@ function normalizeMultiMontages(value) {
 
 function syncMultiMontageControls() {
   state.multiMontages = normalizeMultiMontages(state.multiMontages);
-  for (const select of els.multiMontageSelects || []) {
-    const index = Number(select.dataset.multiMontageIndex || 0);
-    if (state.multiMontages[index] && select.value !== state.multiMontages[index]) {
-      select.value = state.multiMontages[index];
-    }
-    select.disabled = isMultiMontageMode() && index >= activeMultiMontageCount();
-  }
 }
 
 function multiMontageViews() {
   return normalizeMultiMontages(state.multiMontages)
     .slice(0, activeMultiMontageCount())
     .map((montage) => ({ montage, label: MONTAGE_LABELS[montage] || montage }));
-}
-
-function onMultiMontageSelectChange(ev) {
-  const index = Number(ev.target?.dataset?.multiMontageIndex || 0);
-  state.multiMontages = normalizeMultiMontages(state.multiMontages);
-  state.multiMontages[index] = ev.target.value || DEFAULT_MULTI_MONTAGES[index] || "longitudinal";
-  state.multiMontages = normalizeMultiMontages(state.multiMontages);
-  const visibleMontages = state.multiMontages.slice(0, activeMultiMontageCount());
-  if (!visibleMontages.includes(activeMontageValue())) {
-    setActiveMontage(visibleMontages[Math.min(index, visibleMontages.length - 1)] || visibleMontages[0], { reload: false, reloadScalogram: false });
-  }
-  syncMultiMontageControls();
-  updateResearchMontageTiming();
-  saveSettings();
-  if (isMultiMontageMode()) {
-    state.windowData = null;
-    loadWindow();
-  }
 }
 
 function setViewMode(mode, montageCount = state.multiMontageCount) {
@@ -3384,10 +2274,6 @@ function setActiveMontage(montage, options = {}) {
     loadWindow();
     return;
   }
-  if (options.reloadScalogram !== false && state.scalogramSelection) {
-    state.scalogramData = null;
-    loadScalogram();
-  }
   renderStatus();
   draw();
 }
@@ -3425,14 +2311,10 @@ function applyRightPanelTab() {
     panel.hidden = panel.dataset.rightTabPanel !== activeTab;
   }
   requestAnimationFrame(() => {
-    if (activeTab === "test" || activeTab === "answer") {
+    if (activeTab === "test") {
       renderRightResearchPanels();
     }
   });
-}
-
-function topomapPanelActive() {
-  return false;
 }
 
 function setRightPanelTab(tab, options = {}) {
@@ -3448,14 +2330,6 @@ function setRightPanelTab(tab, options = {}) {
 
 function applyRightPanelVisibility(options = {}) {
   document.body.classList.toggle("right-panel-hidden", !state.rightPanelVisible);
-  if (els.rightPanelToggleBtn) {
-    els.rightPanelToggleBtn.classList.toggle("active", state.rightPanelVisible);
-    const label = els.rightPanelToggleBtn.querySelector(".switch-label");
-    if (label) label.textContent = state.rightPanelVisible ? "Right ON" : "Right OFF";
-    els.rightPanelToggleBtn.title = state.rightPanelVisible ? "Hide event and annotation column" : "Show event and annotation column";
-    els.rightPanelToggleBtn.setAttribute("aria-checked", state.rightPanelVisible ? "true" : "false");
-    els.rightPanelToggleBtn.setAttribute("aria-pressed", state.rightPanelVisible ? "true" : "false");
-  }
   if (options.redraw === false) return;
   scheduleLayoutRefresh();
 }
@@ -3466,38 +2340,6 @@ function setRightPanelVisible(visible, options = {}) {
   applyRightPanelVisibility(options);
 }
 
-function toggleRightPanel() {
-  setRightPanelVisible(!state.rightPanelVisible);
-}
-
-
-function applyScalogramVisibility(options = {}) {
-  state.scalogramVisible = false;
-  document.body.classList.add("scalogram-hidden");
-  if (options.redraw === false) return;
-  scheduleLayoutRefresh();
-}
-
-
-function visibleAnnotations() {
-  const rows = Array.isArray(state.allAnnotations) ? state.allAnnotations : [];
-  return state.showSourceAnnotations ? rows : rows.filter((row) => !row.readOnly && row.source !== "file");
-}
-
-function applyAnnotationVisibility() {
-  state.annotations = visibleAnnotations();
-  renderAnnotations();
-  draw();
-  drawEventStrip();
-}
-
-function applyManualAnnotationUpdate(manualAnnotations) {
-  const sourceRows = (Array.isArray(state.allAnnotations) ? state.allAnnotations : []).filter((row) => row.readOnly || row.source === "file");
-  state.allAnnotations = [...(Array.isArray(manualAnnotations) ? manualAnnotations : []), ...sourceRows]
-    .sort((a, b) => Number(a.onset || 0) - Number(b.onset || 0));
-  applyAnnotationVisibility();
-}
-
 function setSelectValue(select, value) {
   if (!value) return;
   if ([...select.options].some((opt) => opt.value === value || opt.textContent === value)) {
@@ -3505,68 +2347,13 @@ function setSelectValue(select, value) {
   }
 }
 
-function restoreRecentFiles() {
-  try {
-    const files = JSON.parse(localStorage.getItem(RECENT_FILES_KEY) || "[]");
-    state.recentFiles = trimRecentFiles(files);
-    localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(state.recentFiles));
-  } catch {
-    state.recentFiles = [];
-    localStorage.removeItem(RECENT_FILES_KEY);
-  }
-  renderRecentFiles();
-}
-
-function rememberRecentFile(path) {
-  state.recentFiles = trimRecentFiles([path, ...state.recentFiles]);
-  localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(state.recentFiles));
-  renderRecentFiles();
-}
-
-function trimRecentFiles(files) {
-  if (!Array.isArray(files)) return [];
-  const seen = new Set();
-  const recent = [];
-  for (const item of files) {
-    const path = String(item || "").trim();
-    if (!path || seen.has(path)) continue;
-    seen.add(path);
-    recent.push(path);
-    if (recent.length >= RECENT_FILES_LIMIT) break;
-  }
-  return recent;
-}
-
-function renderRecentFiles() {
-  els.recentFileSelect.innerHTML = "<option value=''>Recent</option>";
-  for (const path of state.recentFiles) {
-    const opt = document.createElement("option");
-    opt.value = path;
-    opt.textContent = shortPath(path);
-    opt.title = path;
-    els.recentFileSelect.appendChild(opt);
-  }
-  els.recentFileSelect.disabled = state.recentFiles.length === 0;
-}
-
-function shortPath(path) {
-  const parts = String(path).split("/");
-  return parts.length > 3 ? `.../${parts.slice(-3).join("/")}` : path;
-}
-
 function onKeyDown(ev) {
   const target = ev.target;
   if (
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    els.annotationDialog.open
+    target instanceof HTMLSelectElement
   ) {
-    return;
-  }
-  if (state.researchMode === "validation" && state.validationSession && ev.key === "Enter" && !ev.isComposing) {
-    ev.preventDefault();
-    acceptCurrentValidationEpoch();
     return;
   }
   if (ev.key === "ArrowLeft") {
@@ -3652,7 +2439,7 @@ function onWaveWheel(ev) {
 function setMontage(montage) {
   if (!montage || els.montageSelect.value === montage) return;
   if (isMultiMontageMode()) {
-    setActiveMontage(montage, { reloadScalogram: true });
+    setActiveMontage(montage);
     return;
   }
   els.montageSelect.value = montage;
@@ -3751,12 +2538,7 @@ async function onControlChange(ev) {
     state.recordingId = els.recordingSelect.value;
     state.start = 0;
     state.cursorTime = null;
-    state.rangeStart = null;
-    state.scalogramSelection = null;
-    state.scalogramData = null;
-    state.selectedScalogramIndex = 0;
-    state.scalogramRequestId += 1;
-    if (els.rangeCancelBtn) els.rangeCancelBtn.disabled = true;
+    state.dragSelection = null;
     await loadMetadata();
   } else if ([els.tcSelect, els.hfSelect, els.acSelect, els.ecgToggle, els.ecgFilterToggle].includes(ev.target)) {
     await handleFilterControlChange("change");
@@ -3800,14 +2582,10 @@ function rememberWindowCache(key, data) {
 function applyWindowData(data, requestedMontage) {
   state.windowData = data;
   state.activeMontage = data.montage || requestedMontage;
-  state.allAnnotations = TEST_ONLY_DISTRIBUTION ? [] : (state.windowData.annotations || []);
-  state.annotations = TEST_ONLY_DISTRIBUTION ? [] : visibleAnnotations();
   state.start = state.windowData.start || 0;
-  state.scalogramData = null;
   renderStatus();
   updateWaveScrollbar();
   renderWarnings();
-  if (!TEST_ONLY_DISTRIBUTION) renderAnnotations();
   draw();
 }
 
@@ -3864,56 +2642,6 @@ async function loadWindow() {
   return state.windowLoadPromise;
 }
 
-async function loadPreciseTopomap() {
-  state.topomapRequestId += 1;
-  state.preciseTopomap = null;
-}
-
-function setTopomapSelection(selection) {
-  const normalized = normalizeScalogramSelection(selection);
-  state.topomapSelection = normalized;
-  return normalized;
-}
-
-function defaultTopomapSelection(centerTime) {
-  const total = recordingDuration();
-  const center = Number.isFinite(Number(centerTime)) ? Number(centerTime) : state.start + visibleDuration() / 2;
-  const half = 0.01;
-  const start = Math.max(0, center - half);
-  const endLimit = total || state.start + visibleDuration();
-  const end = Math.min(endLimit, center + half);
-  return { start: preciseNumber(start), duration: preciseNumber(Math.max(0.002, end - start)) };
-}
-
-function fixedTopomapInterval(centerTime, halfWindowSec) {
-  const total = recordingDuration();
-  const center = Number.isFinite(Number(centerTime)) ? Number(centerTime) : state.start + visibleDuration() / 2;
-  const half = Math.max(0.001, Number(halfWindowSec) || 0.005);
-  const endLimit = total || state.start + visibleDuration();
-  const start = Math.max(0, center - half);
-  const end = Math.min(endLimit, center + half);
-  return {
-    start: preciseNumber(start),
-    end: preciseNumber(end),
-    duration: preciseNumber(Math.max(0.002, end - start)),
-    center: preciseNumber(start + Math.max(0.002, end - start) / 2),
-  };
-}
-
-function currentTopomapInterval() {
-  const fallback = defaultTopomapSelection(state.cursorTime);
-  const selection = normalizeScalogramSelection(state.topomapSelection || fallback) || fallback;
-  const start = Number(selection.start || 0);
-  const duration = Math.max(0.002, Number(selection.duration || 0.02));
-  const end = start + duration;
-  return {
-    start: preciseNumber(start),
-    end: preciseNumber(end),
-    duration: preciseNumber(duration),
-    center: preciseNumber(start + duration / 2),
-  };
-}
-
 function renderMetadata() {
   const md = state.metadata;
   const rows = [
@@ -3937,9 +2665,6 @@ function renderWarnings() {
   if (els.warningPanel) {
     els.warningPanel.innerHTML = warningHtml || "<p>No warnings.</p>";
   }
-  for (const panel of [els.resultWarningPanel]) {
-    if (panel) panel.innerHTML = warningHtml;
-  }
 }
 
 function renderStatus() {
@@ -3958,78 +2683,6 @@ function renderStatus() {
   setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${els.acSelect.options[els.acSelect.selectedIndex].text}${ecgFilterText}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
   els.timeReadout.textContent = `${formatSec(state.start)} - ${formatSec(end)}`;
   els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${els.acSelect.options[els.acSelect.selectedIndex].text}${ecgFilterText} · ${els.paperSelect.value} mm/s`;
-}
-
-function renderAnnotations() {
-  if (TEST_ONLY_DISTRIBUTION || !els.annotationList) return;
-  els.annotationList.innerHTML = "";
-  if (!state.annotations.length) {
-    els.annotationList.innerHTML = "<div class='annotation-row empty'><small>No annotations</small></div>";
-    return;
-  }
-  for (const row of state.annotations) {
-    const div = document.createElement("div");
-    const isSource = row.source === "file" || row.readOnly;
-    div.className = `annotation-row${isSource ? " source-annotation" : ""}`;
-    div.tabIndex = 0;
-    const dur = Number(row.duration || 0);
-    const onset = preciseNumber(row.onset || 0);
-    const note = row.note || "";
-    const startText = formatSec(onset);
-    const durationText = dur ? `+${dur.toFixed(3)}s` : "";
-    const timeText = `${startText}${durationText ? ` ${durationText}` : ""}`;
-    const label = row.label || "annotation";
-    const channel = row.channel || (isSource ? "file" : "-");
-    const comment = note || (isSource ? "embedded annotation" : "(no comment)");
-    div.title = `${timeText}  ${label}  ${channel}  ${comment}`;
-    div.innerHTML = `
-      <span class="annotation-time">${escapeHtml(startText)}</span>
-      <span class="annotation-duration">${escapeHtml(durationText)}</span>
-      <strong class="annotation-label">${escapeHtml(label)}</strong>
-      <small class="annotation-channel">${escapeHtml(channel)}</small>
-      <span class="annotation-note">${escapeHtml(comment)}</span>
-      <div class="annotation-actions">
-        ${isSource ? "" : `<button data-edit="${row.id}">Edit</button><button data-delete="${row.id}">Del</button>`}
-      </div>
-    `;
-    div.addEventListener("click", () => jumpToAnnotation(row));
-    div.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" || ev.key === " ") {
-        ev.preventDefault();
-        jumpToAnnotation(row);
-      }
-    });
-    div.querySelector("[data-delete]")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      deleteAnnotation(row.id, { confirm: true });
-    });
-    div.querySelector("[data-edit]")?.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      editAnnotation(row);
-    });
-    div.addEventListener("contextmenu", (ev) => openAnnotationContextMenu(ev, row));
-    els.annotationList.appendChild(div);
-  }
-}
-
-async function loadScalogram() {
-  return;
-}
-
-function renderScalogram() {
-  return;
-}
-
-function renderTopomaps() {
-  return;
-}
-
-function resizeTopomapCanvases() {
-  return;
-}
-
-function applyTopomapLayout() {
-  return;
 }
 
 function isMultiWindowData() {
@@ -4170,7 +2823,6 @@ function drawWaveColumn(ctx, layout, traces, times, options) {
   drawGrid(ctx, left, top, plotW, plotH, duration);
   drawTimeHeader(ctx, left, top, plotW, duration, start, ratio);
   drawRowBaselines(ctx, left, top, plotW, rowH, traces.length, ratio);
-  drawAnnotations(ctx, left, top, plotW, plotH, start, duration);
   drawScalogramSelection(ctx, left, top, plotW, plotH, start, duration, ratio);
 
   ctx.save();
@@ -4203,7 +2855,6 @@ function drawWaveColumn(ctx, layout, traces, times, options) {
     ctx.fillText(nkLabel(trace.label), labelX, centerY + labelPx * 0.35, maxW);
   });
 
-  drawAnnotationLabels(ctx, left, top, plotW, plotH, start, duration, ratio);
   drawCursorLine(ctx, left, top, plotW, plotH, start, duration, ratio);
   if (!options.single) drawMultiMontageHeader(ctx, layout, options, ratio);
   if (options.single) {
@@ -4283,50 +2934,9 @@ function drawRowBaselines(ctx, left, top, plotW, rowH, count, ratio) {
   ctx.restore();
 }
 
-function drawAnnotations(ctx, left, top, plotW, plotH, start, duration) {
-  if (TEST_ONLY_DISTRIBUTION) return;
-  const end = start + duration;
-  for (const ann of state.annotations) {
-    const onset = Number(ann.onset || 0);
-    const annEnd = onset + Number(ann.duration || 0);
-    if (annEnd < start || onset > end) continue;
-    const x = left + ((onset - start) / duration) * plotW;
-    const isSource = ann.source === "file" || ann.readOnly;
-    ctx.strokeStyle = isSource ? "#2d6792" : "#b0362f";
-    ctx.fillStyle = isSource ? "rgba(45,103,146,.14)" : "rgba(176,54,47,.16)";
-    if (ann.duration) {
-      const x2 = left + ((annEnd - start) / duration) * plotW;
-      ctx.fillRect(x, top, Math.max(2, x2 - x), plotH);
-    }
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, top + plotH);
-    ctx.stroke();
-  }
-}
-
-function drawAnnotationLabels(ctx, left, top, plotW, plotH, start, duration, ratio) {
-  if (TEST_ONLY_DISTRIBUTION) return;
-  const end = start + duration;
-  ctx.save();
-  ctx.font = `${11 * ratio}px Arial`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "bottom";
-  for (const ann of state.annotations) {
-    const onset = Number(ann.onset || 0);
-    const annEnd = onset + Number(ann.duration || 0);
-    if (annEnd < start || onset > end) continue;
-    const x = left + ((onset - start) / duration) * plotW;
-    const isSource = ann.source === "file" || ann.readOnly;
-    ctx.fillStyle = isSource ? "#245477" : "#8a1f19";
-    ctx.fillText(ann.label || "event", x + 3 * ratio, top + plotH - 5 * ratio, Math.max(24 * ratio, left + plotW - x - 6 * ratio));
-  }
-  ctx.restore();
-}
-
 function drawScalogramSelection(ctx, left, top, plotW, plotH, start, duration, ratio) {
-  if ((state.researchMode === "test" && state.researchSession) || (state.researchMode === "validation" && state.validationSession)) return;
-  const selection = state.dragSelection || state.topomapSelection || state.scalogramSelection;
+  if (state.researchMode === "test" && state.researchSession) return;
+  const selection = state.dragSelection;
   if (!selection) return;
   const selStart = Number(selection.start || 0);
   const selEnd = selStart + Number(selection.duration || 1);
@@ -4388,53 +2998,15 @@ function drawMarkerRow(ctx, left, top, plotW, plotH, ratio) {
   ctx.restore();
 }
 
-function drawEventStrip() {
-  if (TEST_ONLY_DISTRIBUTION || !els.eventStrip) return;
-  const duration = visibleDuration();
-  const start = state.start;
-  const end = start + duration;
-  const ticks = state.annotations
-    .filter((ann) => Number(ann.onset || 0) >= start && Number(ann.onset || 0) <= end)
-    .map((ann) => {
-      const pct = ((Number(ann.onset || 0) - start) / duration) * 100;
-      const cls = ann.source === "file" || ann.readOnly ? " class=\"source-event\"" : "";
-      return `<span${cls} title="${escapeHtml(ann.label || "event")}" style="left:${pct}%"></span>`;
-    })
-    .join("");
-  els.eventStrip.innerHTML = ticks;
-}
-
-const TOPO_POSITIONS = {};
-
-function renderTopomaps() {
-  return;
-}
-
-function renderFzSpikeTopomap() {
-  return;
-}
-
-async function loadFzSpikeTopomap() {
-  return;
-}
-
-function loadPreciseTopomap() {
-  return;
-}
-
-function setTopomapSelection() {
-  return false;
-}
-
 function onWaveMouseDown(ev) {
   if (ev.button !== 0 || !state.windowData?.traces?.length) return;
-  if ((state.researchMode === "test" && state.researchSession) || (state.researchMode === "validation" && state.validationSession)) {
+  if (state.researchMode === "test" && state.researchSession) {
     state.dragSelection = null;
     state.suppressNextClick = false;
     return;
   }
   const point = canvasToData(ev);
-  if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   const selection = draggedSelection(point.onset, point.onset);
   state.dragSelection = {
     ...selection,
@@ -4466,7 +3038,7 @@ function onWaveMouseUp(ev) {
     return;
   }
   state.suppressNextClick = true;
-  if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.cursorTime = selection.start;
   draw();
 }
@@ -4489,64 +3061,13 @@ function draggedSelection(anchor, pointer) {
   };
 }
 
-function defaultScalogramSelection(centerTime) {
-  const total = recordingDuration();
-  const visible = Math.max(0.05, visibleDuration() || 1);
-  const duration = Math.min(1, visible, total || visible);
-  const center = Number.isFinite(Number(centerTime)) ? Number(centerTime) : state.start + visible / 2;
-  let start = center - duration / 2;
-  start = Math.max(0, start);
-  if (total) start = Math.min(start, Math.max(0, total - duration));
-  return {
-    start: preciseNumber(start),
-    duration: preciseNumber(Math.max(0.05, duration)),
-  };
-}
-
-function normalizeScalogramSelection(selection) {
-  const total = recordingDuration();
-  const visibleEnd = state.start + visibleDuration();
-  const limit = total || visibleEnd;
-  const rawStart = Number(selection?.start);
-  const rawDuration = Number(selection?.duration);
-  if (!Number.isFinite(rawStart)) return null;
-  const start = Math.max(0, Math.min(rawStart, Math.max(0, limit)));
-  const minDuration = 0.002;
-  const duration = Math.max(minDuration, Number.isFinite(rawDuration) ? rawDuration : 1);
-  const end = Math.min(limit, start + duration);
-  return {
-    start: preciseNumber(Math.max(0, Math.min(start, Math.max(0, end - minDuration)))),
-    duration: preciseNumber(Math.max(minDuration, end - start)),
-  };
-}
-
-function setScalogramSelection(selection, options = {}) {
-  const normalized = normalizeScalogramSelection(selection);
-  if (!normalized) return false;
-  state.scalogramSelection = normalized;
-  state.scalogramData = null;
-  if (Number.isFinite(Number(options.cursorTime))) {
-    state.cursorTime = Number(options.cursorTime);
-  } else {
-    state.cursorTime = normalized.start;
-  }
-  if (els.exportAnalysisJsonBtn) els.exportAnalysisJsonBtn.disabled = true;
-  if (els.exportScalogramJpegBtn) els.exportScalogramJpegBtn.disabled = true;
-  if (els.rangeCancelBtn) els.rangeCancelBtn.disabled = false;
-  showEventControls();
-  if (options.drawWave !== false) draw();
-  return true;
-}
-
 function openContextMenu(ev) {
   ev.preventDefault();
   const point = canvasToData(ev);
-  if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
-  const annotation = nearestAnnotation(point.onset);
-  state.context = { ...point, annotationId: annotation?.id || "", annotation };
-  if (state.researchMode === "validation" && state.validationSession) renderValidationRatingContextMenu();
-  else if (state.researchMode === "test" && state.researchSession) renderResearchRatingContextMenu();
-  else renderWaveContextMenu(annotation);
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
+  state.context = { ...point };
+  if (state.researchMode === "test" && state.researchSession) renderResearchRatingContextMenu();
+  else renderWaveContextMenu();
   els.contextMenu.style.left = `${ev.clientX}px`;
   els.contextMenu.style.top = `${ev.clientY}px`;
   els.contextMenu.classList.remove("hidden");
@@ -4556,24 +3077,12 @@ function openResearchRatingMenu(ev) {
   ev.preventDefault();
   ev.stopPropagation();
   const point = canvasToData(ev);
-  if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.cursorTime = point.onset;
-  state.context = { ...point, annotationId: "", annotation: null };
+  state.context = { ...point };
   draw();
   renderResearchRatingContextMenu();
   setStatus(`Selected ${point.channel || point.montageChannel || "waveform"} at ${formatSec(point.onset)}`);
-  els.contextMenu.style.left = `${ev.clientX}px`;
-  els.contextMenu.style.top = `${ev.clientY}px`;
-  els.contextMenu.classList.remove("hidden");
-}
-
-function openAnnotationContextMenu(ev, annotation) {
-  ev.preventDefault();
-  ev.stopPropagation();
-  state.context = { annotationId: annotation.id, annotation };
-  if (state.researchMode === "validation" && state.validationSession) renderValidationRatingContextMenu();
-  else if (state.researchMode === "test" && state.researchSession) renderResearchRatingContextMenu();
-  else renderAnnotationContextMenu(annotation);
   els.contextMenu.style.left = `${ev.clientX}px`;
   els.contextMenu.style.top = `${ev.clientY}px`;
   els.contextMenu.classList.remove("hidden");
@@ -4585,15 +3094,12 @@ function onWaveClick(ev) {
     state.suppressNextClick = false;
     return;
   }
-  if (state.researchMode === "validation" && state.validationSession) {
-    return;
-  }
   if (state.researchMode === "test" && state.researchSession) {
     openResearchRatingMenu(ev);
     return;
   }
   const point = canvasToData(ev);
-  if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.cursorTime = point.onset;
   draw();
 }
@@ -4602,8 +3108,7 @@ function onWaveDoubleClick(ev) {
   if (ev.button !== 0) return;
   ev.preventDefault();
   const point = canvasToData(ev);
-  if (isMultiMontageMode()) setActiveMontage(point.montage, { reloadScalogram: false });
-  state.rangeStart = null;
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.dragSelection = null;
   state.suppressNextClick = true;
   hideContextMenu();
@@ -4615,27 +3120,8 @@ function hideContextMenu() {
   els.contextMenu.classList.add("hidden");
 }
 
-function renderAnnotationContextMenu(annotation) {
-  const label = annotation.label || "annotation";
-  const time = formatSec(Number(annotation.onset || 0));
-  if (annotation.readOnly) {
-    els.contextMenu.innerHTML = `
-      <button data-action="jump-annotation">Go to ${escapeHtml(label)} at ${escapeHtml(time)}</button>
-    `;
-    return;
-  }
+function renderWaveContextMenu() {
   els.contextMenu.innerHTML = `
-    <button data-action="edit-annotation">Edit ${escapeHtml(label)} at ${escapeHtml(time)}</button>
-    <button data-action="delete-annotation" class="danger-action">Delete annotation</button>
-  `;
-}
-
-function renderWaveContextMenu(annotation) {
-  const deleteButton = annotation
-    ? `<button data-action="delete-annotation" class="danger-action">Delete ${escapeHtml(annotation.label || "annotation")} at ${escapeHtml(formatSec(Number(annotation.onset || 0)))}</button><hr />`
-    : "";
-  els.contextMenu.innerHTML = `
-    ${deleteButton}
     <button data-action="point" data-label="spike">spike</button>
     <button data-action="point" data-label="focal">focal</button>
     <button data-action="point" data-label="generalized">generalized</button>
@@ -4645,27 +3131,7 @@ function renderWaveContextMenu(annotation) {
     <button data-action="point" data-label="sleep stage">sleep stage</button>
     <button data-action="point" data-label="ECG artifact">ECG artifact</button>
     <button data-action="point" data-label="comment">comment</button>
-    <hr />
-    <button data-action="range-start">Start range here</button>
-    <button data-action="range-end">End range here</button>
   `;
-}
-
-function nearestAnnotation(onset) {
-  const duration = visibleDuration();
-  const threshold = Math.max(0.05, duration * 0.015);
-  let nearest = null;
-  let nearestDistance = Infinity;
-  for (const ann of state.annotations) {
-    const annStart = Number(ann.onset || 0);
-    const annEnd = annStart + Number(ann.duration || 0);
-    const distance = onset >= annStart && onset <= annEnd ? 0 : Math.min(Math.abs(onset - annStart), Math.abs(onset - annEnd));
-    if (distance < nearestDistance && distance <= threshold) {
-      nearest = ann;
-      nearestDistance = distance;
-    }
-  }
-  return nearest;
 }
 
 function canvasToData(ev) {
@@ -4724,234 +3190,9 @@ function onContextMenuClick(ev) {
     saveResearchRating(rating);
     return;
   }
-  if (action === "validation-rating") {
-    saveValidationRating(rating, "manual_override");
-    return;
-  }
-  if (action === "delete-annotation") {
-    if (state.context.annotationId) deleteAnnotation(state.context.annotationId, { confirm: true });
-    return;
-  }
-  if (action === "edit-annotation") {
-    if (state.context.annotation) editAnnotation(state.context.annotation);
-    return;
-  }
-  if (action === "jump-annotation") {
-    if (state.context.annotation) jumpToAnnotation(state.context.annotation);
-    return;
-  }
-  if (action === "range-start") {
-    state.rangeStart = { ...state.context };
-    els.rangeCancelBtn.disabled = false;
-    showEventControls();
-    draw();
-    return;
-  }
-  if (action === "range-end") {
-    if (!state.rangeStart) return;
-    const start = Math.min(state.rangeStart.onset, state.context.onset);
-    const stop = Math.max(state.rangeStart.onset, state.context.onset);
-    const startPoint = state.rangeStart.onset <= state.context.onset ? state.rangeStart : state.context;
-    openAnnotationDialog({
-      label: "artifact",
-      onset: start,
-      sampleIndex: startPoint.sampleIndex,
-      sfreq: startPoint.sfreq,
-      duration: preciseNumber(stop - start),
-      channel: state.rangeStart.channel,
-      montageChannel: state.rangeStart.montageChannel,
-      montage: startPoint.montage || state.rangeStart.montage || activeMontageValue(),
-    });
-    state.rangeStart = null;
-    els.rangeCancelBtn.disabled = true;
-    return;
-  }
   if (action === "point") {
-    openAnnotationDialog({
-      label,
-      onset: state.context.onset,
-      duration: 0,
-      channel: state.context.channel,
-      montageChannel: state.context.montageChannel,
-      montage: state.context.montage || activeMontageValue(),
-    });
+    setStatus(`${label || "point"}: ${formatSec(state.context.onset)}`);
   }
-}
-
-function openAnnotationDialog(annotation) {
-  state.pendingAnnotation = annotation;
-  els.dialogTitle.textContent = annotation.id ? "Edit annotation" : "New annotation";
-  els.annotationLabel.value = annotation.label || "";
-  els.annotationNote.value = annotation.note || "";
-  els.annotationDialog.showModal();
-}
-
-async function saveDialogAnnotation() {
-  const annotation = {
-    ...state.pendingAnnotation,
-    label: els.annotationLabel.value.trim() || "comment",
-    note: els.annotationNote.value.trim(),
-    settings: {
-      montage: state.pendingAnnotation?.montage || activeMontageValue(),
-      sensitivityUvPerMm: sensitivityValue(),
-      tc: els.tcSelect.value,
-      hf: els.hfSelect.value,
-      ac: normalizeAcSelect(),
-      timebaseSec: Number(els.durationSelect.value),
-      paperSpeedMmPerSec: Number(els.paperSelect.value),
-    },
-  };
-  const action = annotation.id ? "update" : "add";
-  const manualAnnotations = await fetchJson(`/api/annotations?${qs({ id: state.recordingId })}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, annotation }),
-  });
-  els.annotationDialog.close();
-  applyManualAnnotationUpdate(manualAnnotations);
-}
-
-function editAnnotation(annotation) {
-  if (annotation?.readOnly) return;
-  openAnnotationDialog({ ...annotation });
-}
-
-async function deleteAnnotation(id, options = {}) {
-  if (!id) return;
-  const annotation = state.annotations.find((row) => row.id === id);
-  if (annotation?.readOnly) return;
-  if (options.confirm && !window.confirm("Delete this annotation?")) return;
-  const manualAnnotations = await fetchJson(`/api/annotations?${qs({ id: state.recordingId })}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "delete", id }),
-  });
-  applyManualAnnotationUpdate(manualAnnotations);
-}
-
-function exportJson() {
-  downloadFromUrl(`/api/annotations.json?${qs({ id: state.recordingId })}`, `${state.recordingId}.annotations.json`);
-}
-
-function exportViewerJpeg() {
-  notifyScreenshotExportDisabled();
-}
-
-function exportTopomapJpeg() {
-  notifyScreenshotExportDisabled();
-}
-
-function exportScalogramJpeg() {
-  notifyScreenshotExportDisabled();
-}
-
-function notifyScreenshotExportDisabled() {
-  setStatus("スクリーンショット/JPEG保存は無効です。");
-}
-
-async function importJson(ev) {
-  const file = ev.target.files[0];
-  if (!file) return;
-  const text = await file.text();
-  const annotations = JSON.parse(text);
-  const manualAnnotations = await fetchJson(`/api/annotations?${qs({ id: state.recordingId })}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "replace", annotations }),
-  });
-  applyManualAnnotationUpdate(manualAnnotations);
-  ev.target.value = "";
-}
-
-function downloadBlob(blob, filename) {
-  saveBlobToDesktop(blob, filename).catch((err) => {
-    console.error(err);
-    window.alert(err.message || "Export failed");
-  });
-}
-
-async function downloadFromUrl(url, filename) {
-  try {
-    const headers = new Headers();
-    if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error(res.statusText || "Export failed");
-    await saveBlobToDesktop(await res.blob(), filename);
-  } catch (err) {
-    console.error(err);
-    window.alert(err.message || "Export failed");
-  }
-}
-
-async function saveBlobToDesktop(blob, filename) {
-  const contentBase64 = await blobToBase64(blob);
-  const result = await fetchJson("/api/export-file", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, mimeType: blob.type || "application/octet-stream", contentBase64 }),
-  });
-  setStatus(`Saved to Desktop: ${result.path || result.filename || filename}`);
-  return result;
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || "");
-      resolve(text.includes(",") ? text.split(",").pop() : text);
-    };
-    reader.onerror = () => reject(reader.error || new Error("Could not read export file"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function canvasToWhiteJpegBlob(sourceCanvas, quality = 0.92) {
-  return new Promise((resolve, reject) => {
-    if (!sourceCanvas || !sourceCanvas.width || !sourceCanvas.height) {
-      reject(new Error("Canvas is empty"));
-      return;
-    }
-    const out = document.createElement("canvas");
-    out.width = sourceCanvas.width;
-    out.height = sourceCanvas.height;
-    const ctx = out.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, out.width, out.height);
-    ctx.drawImage(sourceCanvas, 0, 0);
-    out.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("Could not create JPEG"));
-    }, "image/jpeg", quality);
-  });
-}
-
-async function exportCanvasAsJpeg(canvas, filename) {
-  notifyScreenshotExportDisabled();
-}
-
-async function exportCanvasGroupAsJpeg(items, filename, options = {}) {
-  notifyScreenshotExportDisabled();
-}
-
-function isElementVisible(el) {
-  let current = el;
-  while (current && current !== document.body) {
-    if (current.hidden) return false;
-    const style = window.getComputedStyle(current);
-    if (style.display === "none" || style.visibility === "hidden") return false;
-    current = current.parentElement;
-  }
-  return true;
-}
-
-function canvasExportLabel(canvas) {
-  if (canvas === els.scalogramDetailCanvas) return els.scalogramDetailTitle?.textContent || "Scalogram detail";
-  if (canvas === els.fzSpikeTopomapCanvas) return els.fzSpikeTopomapTitle?.textContent || "Fz spike topomap";
-  if (canvas === els.fzAfterSlowTopomapCanvas) return els.fzAfterSlowTopomapTitle?.textContent || "Fz after-slow topomap";
-  const card = canvas.closest(".scalogram-card, .psd-card, .attenuation-card, .topomap-card");
-  const title = card?.querySelector(".scalogram-channel, .psd-channel, .attenuation-channel, .topomap-title");
-  return title?.textContent?.trim() || canvas.id || "Canvas";
 }
 
 function labelForMontage() {
