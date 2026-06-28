@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260628-prefetch2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260628-ac60" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -60,9 +60,9 @@
         <label class="nk-select ac-control">
           <span class="select-caption">AC</span>
           <select id="acSelect">
-            <option value="OFF" selected>OFF</option>
+            <option value="OFF">OFF</option>
             <option value="50">50 Hz</option>
-            <option value="60">60 Hz</option>
+            <option value="60" selected>60 Hz</option>
           </select>
         </label>
         <label class="nk-select duration-control">
@@ -196,7 +196,7 @@
           <div class="calibration">
             <span id="timeReadout">00:00.000 - 00:10.000</span>
             <span>Major grid 1 s</span>
-            <span id="calReadout">10 uV/mm · TC 0.3s · AC OFF · 30 mm/s</span>
+            <span id="calReadout">10 uV/mm · TC 0.3s · AC 60 Hz · 30 mm/s</span>
           </div>
         </section>
 
@@ -227,6 +227,6 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260628-prefetch2"></script>
+    <script src="/static/app.js?v=20260628-ac60"></script>
   </body>
 </html>
