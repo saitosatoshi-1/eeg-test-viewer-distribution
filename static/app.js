@@ -1160,7 +1160,7 @@ function isMobileViewport() {
 }
 
 function defaultResearchTimebaseSec() {
-  return TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 5 : 10;
+  return TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 4 : 10;
 }
 
 function researchCaseCenterTime(item) {
