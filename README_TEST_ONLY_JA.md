@@ -17,6 +17,7 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Agakkai_v1
 - `tools/`: private dataset作成・アップロード用スクリプト
 - `Dockerfile` / `render.yaml`: Renderデプロイ設定
 - `DEPLOY_WEB.md`: Web運用手順
+- `DATASET_SWAP.md`: Render上のprivate dataset差し替え手順
 
 ## 削除したもの
 
@@ -29,3 +30,5 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Agakkai_v1
 ## データ方針
 
 Temple University由来など再配布禁止の可能性があるEDFはGitHubに置きません。学会用データは `private:gakkai_v1` としてRenderの永続ディスク上に置く運用です。
+
+データセットを差し替える・追加する場合は `DATASET_SWAP.md` を参照します。既存データを上書きせず、`validation_tuea_v2` のように新しいdataset idを作るのを基本方針とします。

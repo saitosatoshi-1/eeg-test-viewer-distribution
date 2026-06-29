@@ -30,6 +30,8 @@ Keep this repository focused on the web test workflow:
 - `Dockerfile`, `render.yaml`, and `DEPLOY_WEB.md`
 - documentation for Render and private dataset operation
 
+For dataset replacement or adding a new Render private dataset, read `DATASET_SWAP.md` first. Prefer adding a new `private:<dataset_id>` such as `validation_tuea_v2` instead of overwriting an existing dataset.
+
 Do not reintroduce old Windows/macOS distribution bundles, launchers, installer scripts, or packaged collaborator folders unless the user explicitly asks to rebuild desktop distribution.
 
 ## Security Rules
@@ -39,6 +41,7 @@ Do not reintroduce old Windows/macOS distribution bundles, launchers, installer 
 - Shared links should not include the password. Users enter `ncnp` on the password screen.
 - Do not commit Temple University-derived or otherwise redistribution-restricted EDF files.
 - Do not commit private EDF datasets to GitHub. Use the private dataset upload workflow.
+- Never commit `EEG_VIEWER_ADMIN_CODE`; use it only as an environment variable or one-time command value for private dataset upload.
 
 ## Standard Workflow
 
