@@ -881,9 +881,26 @@ function activeResearchReaderId(profile = researchProfile()) {
   return state.researchSession?.readerId || researchReaderDisplayId(profile);
 }
 
+function researchDatasetIdForFilename() {
+  const datasetId = state.researchDataset?.datasetId || state.researchSession?.datasetId || "";
+  if (datasetId) return safeResultFilenamePart(datasetId, "dataset");
+  const privateMatch = String(state.researchDatasetPath || "").match(/^private:([^/]+)$/);
+  if (privateMatch) return safeResultFilenamePart(privateMatch[1], "dataset");
+  return safeResultFilenamePart(String(state.researchDatasetPath || "dataset").split("/").filter(Boolean).pop() || "dataset", "dataset");
+}
+
+function researchResultTimestampPart() {
+  const source = state.researchTestCompletedAt || new Date().toISOString();
+  const parsed = new Date(source);
+  if (Number.isNaN(parsed.getTime())) return new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  return parsed.toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+}
+
 function researchJsonFilename(_readerId, profile = researchProfile()) {
   const readerName = safeResultFilenamePart(profile.readerName || "", "EEG_test_results");
-  return `${readerName}.json`;
+  const datasetId = researchDatasetIdForFilename();
+  const stamp = researchResultTimestampPart();
+  return `${datasetId}_${stamp}_${readerName}.json`;
 }
 
 function saveResearchProfile() {

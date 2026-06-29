@@ -103,6 +103,32 @@ For the current viewer settings:
 
 Note: Creating a validation session through the session API records assignment exposure counts. This is usually fine because future sampling prioritizes less-exposed cases, but avoid unnecessary repeated test-session API calls before formal testing.
 
+## Submitted Result JSON Storage
+
+When a participant completes the test, the viewer automatically submits the compact JSON result to Render.
+
+Render stores submitted JSON files under:
+
+```text
+/data/research/submitted_results/<dataset_id>/
+```
+
+For example:
+
+```text
+/data/research/submitted_results/validation_tuea_v1/
+```
+
+Result filenames include the dataset id, completion timestamp, and reader name:
+
+```text
+validation_tuea_v1_20260629_035027_Taro_Yamada.json
+```
+
+This makes it clear which dataset version each participant belongs to after datasets are swapped. The participant download/share filename uses the same pattern.
+
+Use the admin submitted-results APIs or `tools/download_submitted_results.py` to download stored JSON files. Keep the participant's downloaded/emailed JSON as a backup because automatic Render submission can fail if the network drops at completion.
+
 ## Files That Must Not Be Committed
 
 - EDF files

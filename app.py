@@ -2487,6 +2487,30 @@ def research_reader_json_filename(reader_id: str | None, profile: dict[str, Any]
     return f"{name}.json"
 
 
+def research_result_timestamp_part(value: Any = None) -> str:
+    text = str(value or "").strip()
+    if text:
+        try:
+            normalized = text.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        except Exception:
+            cleaned = re.sub(r"[^0-9]+", "", text)
+            if len(cleaned) >= 8:
+                return cleaned[:14]
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
+def research_result_json_filename(dataset_id: str, reader_id: str | None = None, profile: dict[str, Any] | None = None, completed_at: Any = None) -> str:
+    profile = profile if isinstance(profile, dict) else {}
+    dataset_part = safe_filename_part(dataset_id or "dataset", "dataset")
+    reader_part = safe_filename_part(str(profile.get("readerName") or reader_id or ""), "EEG_test_results")
+    stamp = research_result_timestamp_part(completed_at)
+    return f"{dataset_part}_{stamp}_{reader_part}.json"
+
+
 def research_response_path(dataset_dir: Path, reader_id: str) -> Path:
     return dataset_dir / "responses" / f"{research_reader_id(reader_id)}.json"
 
@@ -3568,7 +3592,12 @@ def save_research_responses_json_to_desktop(payload: dict[str, Any]) -> dict[str
         if reader_id:
             responses = load_research_responses(dataset_dir, reader_id)
             profile = response_reader_profile(*responses)
-        filename = research_reader_json_filename(reader_id, profile)
+        filename = research_result_json_filename(
+            str(dataset.get("datasetId") or dataset_dir.name),
+            reader_id,
+            profile,
+            payload.get("testCompletedAt") or payload.get("completedAt"),
+        )
     return save_desktop_text_export(filename, json_text)
 
 
@@ -3608,7 +3637,12 @@ def save_research_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
         if reader_id:
             responses = load_research_responses(dataset_dir, reader_id)
             profile = response_reader_profile(*responses)
-        filename = research_reader_json_filename(reader_id, profile)
+        filename = research_result_json_filename(
+            str(dataset.get("datasetId") or dataset_dir.name),
+            reader_id,
+            profile,
+            payload.get("testCompletedAt") or payload.get("completedAt"),
+        )
     target = unique_submission_path(str(dataset.get("datasetId") or dataset_dir.name), filename)
     target.write_text(json_text, encoding="utf-8")
     return {
