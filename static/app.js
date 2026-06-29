@@ -81,6 +81,7 @@ const state = {
   researchPrefetchQueuedKeys: new Set(),
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
+  researchUsualMontage: "",
   lastResearchResponse: null,
   lastResearchResponseCaseIndex: -1,
 };
@@ -767,7 +768,7 @@ function researchProfile() {
     position: els.researchPositionSelect?.value || "",
     epilepsySpecialist: els.researchEpilepsySpecialistSelect?.value || "",
     clinicalNeurophysEegSpecialist: els.researchClinicalNeurophysEegSpecialistSelect?.value || "",
-    usualMontage: storedProfile.usualMontage || "",
+    usualMontage: state.researchUsualMontage || storedProfile.usualMontage || "",
     medicalPracticeYears: els.researchMedicalYearsInput?.value === "" ? "" : Number(els.researchMedicalYearsInput?.value || 0),
     epilepsyCenterTraining: els.researchEpilepsyCenterTrainingSelect?.value || "",
     epilepsyCenterTrainingDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
@@ -918,6 +919,7 @@ function saveResearchProfile() {
 function saveUsualResearchMontage(montage) {
   const value = String(montage || "").trim() || activeMontageValue();
   if (!value) return "";
+  state.researchUsualMontage = value;
   if (!PUBLIC_WEB_MODE) {
     try {
       const profile = { ...storedResearchProfile(), ...researchProfile(), usualMontage: value };
@@ -931,6 +933,7 @@ function saveUsualResearchMontage(montage) {
 
 function restoreResearchProfile() {
   const profile = storedResearchProfile();
+  state.researchUsualMontage = profile.usualMontage || "";
   if (els.researchSetupDatasetPathInput) els.researchSetupDatasetPathInput.value = profile.datasetPath || "";
   if (els.researchSetupReaderIdInput) els.researchSetupReaderIdInput.value = profile.readerId || "";
   if (els.researchSetupReaderNameInput) els.researchSetupReaderNameInput.value = profile.readerName || "";
@@ -1682,6 +1685,7 @@ async function startResearchTest() {
   state.researchTestStartedMs = 0;
   state.researchTestCompletedAt = "";
   state.researchResultAutoSubmitted = false;
+  state.researchUsualMontage = "";
   resetResearchPrefetch({ clearRecords: true });
   hideResearchTutorial();
   const profile = researchProfile();
@@ -1760,11 +1764,11 @@ async function showResearchCase(index) {
     state.cursorTime = null;
     state.dragSelection = null;
     const profile = researchProfile();
-    const usualMontage = isResearchPracticeCase(item) ? "conventional" : (profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional");
+    const usualMontage = isResearchPracticeCase(item) ? "conventional" : (state.researchUsualMontage || profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional");
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
     if (els.tcSelect) els.tcSelect.value = "0.3";
     if (els.hfSelect) els.hfSelect.value = "120";
-    if (els.acSelect) els.acSelect.value = "60";
+    if (els.acSelect) els.acSelect.value = "OFF";
     const researchTimebase = defaultResearchTimebaseSec();
     if (els.durationSelect) els.durationSelect.value = String(researchTimebase);
     state.start = centeredStartForResearchCase(item, researchTimebase);
