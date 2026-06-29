@@ -2010,6 +2010,7 @@ body.test-only-distribution.mobile-viewport .wave-scrollbar-row {
 body.test-only-distribution.mobile-viewport .research-tutorial {
   left: 6px;
   right: 6px;
+  top: auto;
   bottom: max(16px, env(safe-area-inset-bottom));
   max-height: min(28svh, 150px);
   overflow: auto;
@@ -2036,11 +2037,15 @@ body.test-only-distribution.mobile-viewport .research-tutorial-head button {
 
 body.test-only-distribution.mobile-viewport .research-tutorial p {
   margin-bottom: 3px;
+  font-size: 11px;
+  line-height: 1.28;
 }
 
 body.test-only-distribution.mobile-viewport .research-tutorial ol {
   gap: 2px;
   padding-left: 14px;
+  font-size: 11px;
+  line-height: 1.28;
 }
 
 body.test-only-distribution.mobile-viewport .context-menu {

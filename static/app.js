@@ -1220,8 +1220,9 @@ function showResearchCompletion() {
   els.researchCompleteScreen.setAttribute("aria-hidden", "false");
   if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
   if (els.researchCompleteMessage) {
+    els.researchCompleteMessage.hidden = mobile;
     els.researchCompleteMessage.textContent = mobile
-      ? "「JSONをメールで送る」を押して、結果JSONをメールで提出してください。"
+      ? ""
       : "JSONをダウンロードし、メールに添付して送ってください。";
   }
   if (els.researchMailBox) els.researchMailBox.hidden = mobile;
