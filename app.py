@@ -3339,17 +3339,10 @@ def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path)
         source_annotation = str(row.get("sourceAnnotation") or "")
         extraction_sources[source_annotation or "unknown"] = extraction_sources.get(source_annotation or "unknown", 0) + 1
         extraction_rows.append({
-            "caseId": row.get("caseId", ""),
-            "recordingId": row.get("recordingId", ""),
             "edfFile": Path(str(row.get("edfPath") or "")).name,
             "sourceGroup": row.get("sourceGroup", ""),
-            "referenceLabel": row.get("referenceLabel", ""),
             "labelGroup": row.get("labelGroup", ""),
-            "eventTime": row.get("eventTime", ""),
-            "epochStart": row.get("epochStart", ""),
-            "durationSec": row.get("durationSec", ""),
             "sourceAnnotation": source_annotation,
-            "phase1Montage": row.get("phase1Montage", ""),
         })
     return {
         "datasetId": dataset.get("datasetId", ""),
