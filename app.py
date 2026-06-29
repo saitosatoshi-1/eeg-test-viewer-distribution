@@ -3564,20 +3564,18 @@ def research_export_response_payload(response: dict[str, Any]) -> dict[str, Any]
     for key in ("eventTime", "epochStart", "durationSec"):
         if payload.get(key) in ("", None):
             payload.pop(key, None)
-    display = payload.get("display") if isinstance(payload.get("display"), dict) else {}
-    compact_display = {
-        "initialMontage": display.get("initialMontage", ""),
-        "finalMontage": display.get("finalMontage", ""),
+    display = payload.pop("display", None) if isinstance(payload.get("display"), dict) else {}
+    settings_at_answer = {
         "sensitivityUvPerMm": display.get("sensitivityUvPerMm", ""),
-        "tc": display.get("tc", ""),
-        "hf": display.get("hf", ""),
-        "ac": display.get("ac", ""),
+        "tcSec": display.get("tc", ""),
+        "hfHz": display.get("hf", ""),
+        "acFilter": display.get("ac", ""),
         "acFilterUsed": bool(display.get("acFilterUsed")),
         "timebaseSec": display.get("timebaseSec", ""),
     }
-    payload["display"] = {
+    payload["settingsAtAnswer"] = {
         key: value
-        for key, value in compact_display.items()
+        for key, value in settings_at_answer.items()
         if value not in ("", None, [])
     }
     montage_log = payload.get("montageLog") if isinstance(payload.get("montageLog"), dict) else {}
