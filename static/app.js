@@ -59,6 +59,8 @@ const state = {
   durationRefreshTimer: null,
   durationSelectFocusedAt: 0,
   panelResizeDrag: null,
+  researchTutorialDrag: null,
+  researchTutorialMoved: false,
   researchMode: "test",
   researchDataset: null,
   researchDatasetPath: "",
@@ -662,6 +664,10 @@ function bindResearchControls() {
     state.researchTutorialDismissed = true;
     updateResearchTutorial();
   });
+  els.researchTutorial?.addEventListener("pointerdown", onResearchTutorialPointerDown);
+  window.addEventListener("pointermove", onResearchTutorialPointerMove);
+  window.addEventListener("pointerup", finishResearchTutorialDrag);
+  window.addEventListener("pointercancel", finishResearchTutorialDrag);
   els.researchUndoBtn?.addEventListener("click", undoLastResearchAction);
   [
     els.researchMedicalYearsInput,
@@ -1359,6 +1365,7 @@ function updateResearchTutorial(item = currentResearchCase()) {
   if (!els.researchTutorial) return;
   const show = isResearchPracticeCase(item) && !state.researchTutorialDismissed;
   const isMontageSetup = isResearchMontageSetupPractice(item);
+  if (show && isMobileViewport() && !state.researchTutorialDrag && !state.researchTutorialMoved) resetResearchTutorialPosition();
   if (els.researchTutorialTitle) els.researchTutorialTitle.textContent = researchPracticeLabel(item);
   if (els.researchTutorialLead) {
     els.researchTutorialLead.textContent = isMontageSetup
@@ -1380,6 +1387,86 @@ function hideResearchTutorial() {
   if (!els.researchTutorial) return;
   els.researchTutorial.hidden = true;
   els.researchTutorial.setAttribute("aria-hidden", "true");
+  state.researchTutorialDrag = null;
+  state.researchTutorialMoved = false;
+}
+
+function resetResearchTutorialPosition() {
+  const panel = els.researchTutorial;
+  if (!panel) return;
+  panel.style.left = "";
+  panel.style.right = "";
+  panel.style.top = "";
+  panel.style.bottom = "";
+  state.researchTutorialMoved = false;
+}
+
+function clampResearchTutorialPosition(left, top) {
+  const panel = els.researchTutorial;
+  const parent = panel?.offsetParent || els.workspace || document.body;
+  if (!panel || !parent) return { left: 0, top: 0 };
+  const parentRect = parent.getBoundingClientRect();
+  const width = panel.offsetWidth || panel.getBoundingClientRect().width || 0;
+  const height = panel.offsetHeight || panel.getBoundingClientRect().height || 0;
+  const maxLeft = Math.max(0, parentRect.width - width - 4);
+  const maxTop = Math.max(0, parentRect.height - height - 4);
+  return {
+    left: Math.min(maxLeft, Math.max(4, left)),
+    top: Math.min(maxTop, Math.max(4, top)),
+  };
+}
+
+function onResearchTutorialPointerDown(ev) {
+  const panel = els.researchTutorial;
+  if (!panel || panel.hidden || !isMobileViewport()) return;
+  if (ev.target?.closest?.("button, a, input, select, textarea")) return;
+  const parent = panel.offsetParent || els.workspace || document.body;
+  const panelRect = panel.getBoundingClientRect();
+  const parentRect = parent.getBoundingClientRect();
+  const startLeft = panelRect.left - parentRect.left;
+  const startTop = panelRect.top - parentRect.top;
+  state.researchTutorialDrag = {
+    pointerId: ev.pointerId,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    startLeft,
+    startTop,
+  };
+  panel.classList.add("dragging");
+  panel.setPointerCapture?.(ev.pointerId);
+  ev.preventDefault();
+  ev.stopPropagation();
+}
+
+function onResearchTutorialPointerMove(ev) {
+  const drag = state.researchTutorialDrag;
+  const panel = els.researchTutorial;
+  if (!drag || !panel || drag.pointerId !== ev.pointerId) return;
+  const next = clampResearchTutorialPosition(
+    drag.startLeft + ev.clientX - drag.startX,
+    drag.startTop + ev.clientY - drag.startY,
+  );
+  panel.style.left = `${Math.round(next.left)}px`;
+  panel.style.top = `${Math.round(next.top)}px`;
+  panel.style.right = "auto";
+  panel.style.bottom = "auto";
+  state.researchTutorialMoved = true;
+  ev.preventDefault();
+}
+
+function finishResearchTutorialDrag(ev) {
+  const drag = state.researchTutorialDrag;
+  const panel = els.researchTutorial;
+  if (!drag || (ev?.pointerId != null && drag.pointerId !== ev.pointerId)) return;
+  state.researchTutorialDrag = null;
+  panel?.classList.remove("dragging");
+  if (panel && typeof panel.releasePointerCapture === "function") {
+    try {
+      panel.releasePointerCapture(drag.pointerId);
+    } catch {
+      // The browser may already have released this pointer.
+    }
+  }
 }
 
 function refreshResearchDisplay() {

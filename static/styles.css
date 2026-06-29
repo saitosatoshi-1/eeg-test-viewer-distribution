@@ -2018,6 +2018,14 @@ body.test-only-distribution.mobile-viewport .research-tutorial {
   border-radius: 5px;
   font-size: 9px;
   line-height: 1.25;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+body.test-only-distribution.mobile-viewport .research-tutorial.dragging {
+  cursor: grabbing;
 }
 
 body.test-only-distribution.mobile-viewport .research-tutorial-head {
