@@ -82,9 +82,9 @@ Build a local zip:
 
 ```bash
 python tools/build_private_dataset_zip.py \
-  --epilepsy "/Users/saitosatoshi/Desktop/montage/test_data/学会用/epilepsy" \
-  --no-epilepsy "/Users/saitosatoshi/Desktop/montage/test_data/学会用/no_epilepsy" \
-  --out /tmp/gakkai_v1_private.zip
+  --epilepsy "/path/to/epilepsy" \
+  --no-epilepsy "/path/to/no_epilepsy" \
+  --out /tmp/<dataset_id>_private.zip
 ```
 
 Upload it to the deployed viewer:
@@ -94,15 +94,21 @@ python tools/upload_private_dataset.py \
   --viewer-url "https://<your-viewer-host>" \
   --access-code ncnp \
   --admin-code "<admin-code>" \
-  --dataset-id gakkai_v1 \
-  --name "Gakkai EEG Test v1" \
-  --zip /tmp/gakkai_v1_private.zip
+  --dataset-id <dataset_id> \
+  --name "<Dataset display name>" \
+  --zip /tmp/<dataset_id>_private.zip
 ```
 
-Then share this link:
+Then set the default dataset and share this link:
+
+```bash
+python tools/set_default_dataset.py \
+  --dataset-id <dataset_id> \
+  --cache-tag <yyyymmdd-datasetN>
+```
 
 ```text
-https://<your-viewer-host>/?dataset=private:gakkai_v1
+https://<your-viewer-host>/?dataset=private:<dataset_id>
 ```
 
 This keeps EDF files off GitHub. They are stored only in the Render persistent disk at `/data`.

@@ -30,6 +30,16 @@ validation_tuea_v3
 
 This keeps old test links reproducible and avoids accidental data loss.
 
+After uploading and verifying a new dataset, update the viewer default and shared links with:
+
+```bash
+python3 tools/set_default_dataset.py \
+  --dataset-id validation_tuea_v2 \
+  --cache-tag 20260629-dataset2
+```
+
+This updates `static/app.js`, `static/index.html`, `APP_ID.json`, and the main instruction/readme files together. Do this before committing and pushing, otherwise links without a `dataset=` query can fall back to an older dataset.
+
 ## Build Zip
 
 Use `tools/build_private_dataset_zip.py`. It expects two folders:
@@ -91,6 +101,13 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
 ```
 
 For API checks, log in first and use the `eeg-viewer-token` from the HTML as `X-EEG-Viewer-Token`.
+
+If a downloaded result JSON filename or JSON `dataset.datasetId` shows the previous dataset, check:
+
+- The opened URL includes the intended `dataset=private%3A...`.
+- `static/app.js` has the intended `DEFAULT_PUBLIC_DATASET_PATH`.
+- `static/index.html` has the intended hidden `researchSetupDatasetPathInput` value.
+- The HTML served by Render has the latest cache tag from `tools/set_default_dataset.py`.
 
 ## Expected Test Session
 
