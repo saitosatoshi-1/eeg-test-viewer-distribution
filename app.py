@@ -1939,6 +1939,16 @@ def build_montage_traces(
             return True
         return False
 
+    def ear_reference_or_source_ref(a: str, b: str, group: str = "") -> bool:
+        if diff(a, b, group):
+            return True
+        if b in {"A1", "A2"} and a in index:
+            if not any("source REF" in warning for warning in warnings):
+                warnings.append("A1/A2 reference channels were not found; source REF channels are shown in the requested ear-reference order.")
+            add(f"{a}-REF", data[index[a]], group=group or channel_group(a))
+            return True
+        return False
+
     if montage == "longitudinal":
         pairs = [
             ("Fp1", "F7", "left_temporal"),
@@ -2014,7 +2024,7 @@ def build_montage_traces(
             ("Cz", "A2", "midline"),
         ]
         for a, b, group in pairs:
-            diff(a, b, group)
+            ear_reference_or_source_ref(a, b, group)
     elif montage in {"conventional", "conventional_average"}:
         trace_channels = [
             ("Fp1", "A1", "left_temporal"),
@@ -2045,7 +2055,7 @@ def build_montage_traces(
                         add(f"{ch}-AVG", data[index[ch]] - avg, group=group)
         else:
             for a, b, group in trace_channels:
-                diff(a, b, group)
+                ear_reference_or_source_ref(a, b, group)
     elif montage == "cz":
         for ch in [c for c in SCALP_ORDER if c in index and c != "Cz"]:
             diff(ch, "Cz", channel_group(ch))
@@ -4040,7 +4050,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         qs.get("montage", ["longitudinal"])[0],
                         qs.get("tc", ["0.3"])[0],
                         qs.get("hf", ["120"])[0],
-                        qs.get("ac", ["OFF"])[0],
+                        qs.get("ac", ["60"])[0],
                         qs.get("ecg", ["1"])[0] == "1",
                         qs.get("ecgFilter", ["0"])[0] == "1",
                         qs.get("topomap", ["1"])[0] != "0",

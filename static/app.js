@@ -1768,7 +1768,7 @@ async function showResearchCase(index) {
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
     if (els.tcSelect) els.tcSelect.value = "0.3";
     if (els.hfSelect) els.hfSelect.value = "120";
-    if (els.acSelect) els.acSelect.value = "OFF";
+    if (els.acSelect) els.acSelect.value = "60";
     const researchTimebase = defaultResearchTimebaseSec();
     if (els.durationSelect) els.durationSelect.value = String(researchTimebase);
     state.start = centeredStartForResearchCase(item, researchTimebase);
