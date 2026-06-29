@@ -3344,16 +3344,9 @@ def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path)
     cases = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
     extraction_sources: dict[str, int] = {}
-    extraction_rows = []
     for row in cases:
         source_annotation = str(row.get("sourceAnnotation") or "")
         extraction_sources[source_annotation or "unknown"] = extraction_sources.get(source_annotation or "unknown", 0) + 1
-        extraction_rows.append({
-            "edfFile": Path(str(row.get("edfPath") or "")).name,
-            "sourceGroup": row.get("sourceGroup", ""),
-            "labelGroup": row.get("labelGroup", ""),
-            "sourceAnnotation": source_annotation,
-        })
     return {
         "datasetId": dataset.get("datasetId", ""),
         "name": dataset.get("name", ""),
@@ -3370,7 +3363,6 @@ def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path)
         "extractionLog": {
             "sourceRoots": dataset.get("sourceRoots", []),
             "sourceAnnotationCounts": extraction_sources,
-            "cases": extraction_rows,
         },
         "settings": {
             "epochDurationSec": settings.get("epochDurationSec", 10),
@@ -3378,6 +3370,20 @@ def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path)
             "phase1TotalSampleCount": research_phase1_total_count(settings),
         },
     }
+
+
+def research_export_case_payload(dataset: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for row in research_case_rows(dataset):
+        if not bool(row.get("include", True)):
+            continue
+        rows.append({
+            "edfFile": Path(str(row.get("edfPath") or "")).name,
+            "sourceGroup": row.get("sourceGroup", ""),
+            "labelGroup": row.get("labelGroup", ""),
+            "sourceAnnotation": str(row.get("sourceAnnotation") or ""),
+        })
+    return rows
 
 
 def research_compact_response_payload(response: dict[str, Any], case: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -3540,6 +3546,78 @@ def research_reader_summary(responses: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def research_export_response_payload(response: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(response)
+    for key in (
+        "recordingId",
+        "referenceLabel",
+        "testDate",
+        "testStartedAt",
+        "testCompletedAt",
+        "tutorialCompletedAt",
+        "tutorialToTestCompletedMs",
+        "tutorialToTestCompletedSec",
+        "totalElapsedMs",
+        "totalElapsedSec",
+    ):
+        payload.pop(key, None)
+    for key in ("eventTime", "epochStart", "durationSec"):
+        if payload.get(key) in ("", None):
+            payload.pop(key, None)
+    display = payload.get("display") if isinstance(payload.get("display"), dict) else {}
+    compact_display = {
+        "initialMontage": display.get("initialMontage", ""),
+        "finalMontage": display.get("finalMontage", ""),
+        "sensitivityUvPerMm": display.get("sensitivityUvPerMm", ""),
+        "tc": display.get("tc", ""),
+        "hf": display.get("hf", ""),
+        "ac": display.get("ac", ""),
+        "acFilterUsed": bool(display.get("acFilterUsed")),
+        "timebaseSec": display.get("timebaseSec", ""),
+    }
+    payload["display"] = {
+        key: value
+        for key, value in compact_display.items()
+        if value not in ("", None, [])
+    }
+    montage_log = payload.get("montageLog") if isinstance(payload.get("montageLog"), dict) else {}
+
+    def compact_usage_rows(rows: Any) -> list[dict[str, Any]]:
+        if not isinstance(rows, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            out.append({
+                key: value
+                for key, value in {
+                    "order": row.get("order", ""),
+                    "montage": row.get("montage", ""),
+                    "startSec": row.get("startSec", ""),
+                    "endSec": row.get("endSec", ""),
+                    "durationSec": row.get("durationSec", ""),
+                }.items()
+                if value not in ("", None, [])
+            })
+        return [row for row in out if row.get("montage")]
+
+    payload["montageLog"] = {
+        "totalSecByMontage": montage_log.get("totalSecByMontage", {}),
+        "usage": compact_usage_rows(montage_log.get("usage")),
+        "analysisTotalSecByMontage": montage_log.get("analysisTotalSecByMontage", {}),
+        "analysisUsage": compact_usage_rows(montage_log.get("analysisUsage")),
+        "montageConfirmationBehavior": bool(montage_log.get("montageConfirmationBehavior")),
+    }
+    if not payload["montageLog"]["usage"]:
+        payload["montageLog"].pop("usage", None)
+    if not payload["montageLog"]["analysisUsage"]:
+        payload["montageLog"].pop("analysisUsage", None)
+    if not payload["montageLog"]["analysisTotalSecByMontage"]:
+        payload["montageLog"].pop("analysisTotalSecByMontage", None)
+    return payload
+
+
 def export_research_responses_json(dataset_dir: Path, reader_id: str | None = None, auth_payload: dict[str, Any] | None = None) -> str:
     if PUBLIC_MODE and not str(reader_id or "").strip():
         raise ValueError("readerId is required for public result export.")
@@ -3572,7 +3650,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
             "readerId": rid,
             "readerProfile": research_compact_reader_profile(profile),
             "summary": research_reader_summary(compact_responses),
-            "responses": compact_responses,
+            "responses": [research_export_response_payload(response) for response in compact_responses],
         })
     payload = {
         "exportVersion": "compact-1",
@@ -3580,6 +3658,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
         "montageMap": RESEARCH_MONTAGE_LABELS,
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "readers": readers,
+        "cases": research_export_case_payload(dataset),
     }
     json_text = json.dumps(payload, ensure_ascii=False, indent=2, default=json_safe) + "\n"
     return json_text
