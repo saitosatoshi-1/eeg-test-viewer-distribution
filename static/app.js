@@ -27,6 +27,7 @@ const MONTAGE_LABELS = {
   c3c4: "C3/C4参照基準",
 };
 const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitudinal", "transverse"];
+const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
 const RIGHT_PANEL_TABS = ["metadata", "test"];
 const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
 
@@ -496,6 +497,10 @@ function acFilterLabel(value = normalizeAcValue(els.acSelect?.value)) {
 
 function preferredWindowMontages(activeMontage = activeMontageValue()) {
   return [...new Set([activeMontage, ...DEFAULT_MULTI_MONTAGES].filter(Boolean))].slice(0, 4);
+}
+
+function preferredResearchWindowMontages(activeMontage = activeMontageValue()) {
+  return [...new Set([activeMontage, ...RESEARCH_PREFETCH_MONTAGES].filter(Boolean))];
 }
 
 async function handleMontageControlChange(source = "change") {
@@ -1304,32 +1309,13 @@ function activeResearchCases() {
 
 function cappedResearchSessionCases(cases) {
   const samples = [];
-  const groups = { epileptiform: [], non_epileptiform: [], other: [] };
+  const selected = [];
   for (const row of cases || []) {
     if (row?.sampleEpoch) {
       samples.push(row);
       continue;
     }
-    const group = row?.labelGroup === "epileptiform" || row?.labelGroup === "non_epileptiform"
-      ? row.labelGroup
-      : "other";
-    groups[group].push(row);
-  }
-  const perGroup = Math.floor(fixedResearchQuestionCount() / 2);
-  const selected = [
-    ...groups.epileptiform.slice(0, perGroup),
-    ...groups.non_epileptiform.slice(0, perGroup),
-  ];
-  if (selected.length < fixedResearchQuestionCount()) {
-    const selectedIds = new Set(selected.map((row) => String(row.caseId || "")));
-    for (const row of [...groups.epileptiform, ...groups.non_epileptiform, ...groups.other]) {
-      if (selected.length >= fixedResearchQuestionCount()) break;
-      const id = String(row.caseId || "");
-      if (!selectedIds.has(id)) {
-        selected.push(row);
-        selectedIds.add(id);
-      }
-    }
+    if (selected.length < fixedResearchQuestionCount()) selected.push(row);
   }
   return [...samples, ...selected];
 }
@@ -2879,12 +2865,13 @@ function researchCasePrefetchMontage(item) {
 function researchWindowPrefetchParams(recordId, item, options = {}) {
   const duration = Number(options.duration || defaultResearchTimebaseSec()) || defaultResearchTimebaseSec();
   const montage = options.montage || researchCasePrefetchMontage(item);
+  const montages = options.montages || preferredResearchWindowMontages(montage).join(",");
   return {
     id: recordId,
     start: options.start ?? researchCasePrefetchStart(item, duration),
     duration,
     montage,
-    montages: preferredWindowMontages(montage).join(","),
+    montages,
     tc: options.tc || "0.3",
     hf: options.hf || "120",
     ac: normalizeAcValue(options.ac || "60"),
@@ -3038,7 +3025,7 @@ async function loadWindow() {
           start: state.start,
           duration: requestedDuration,
           montage: requestedMontage,
-          montages: preferredWindowMontages(requestedMontage).join(","),
+          montages: TEST_ONLY_DISTRIBUTION ? preferredResearchWindowMontages(requestedMontage).join(",") : preferredWindowMontages(requestedMontage).join(","),
           tc: els.tcSelect.value,
           hf: els.hfSelect.value,
           ac: normalizeAcSelect(),
