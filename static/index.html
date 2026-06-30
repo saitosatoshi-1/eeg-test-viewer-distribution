@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260630-debrief2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260630-debrief3" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -157,7 +157,7 @@
           <div class="research-debrief-screen" id="researchDebriefScreen" hidden>
             <div class="research-debrief-panel">
               <div class="research-complete-title">事後アンケート</div>
-              <label class="research-debrief-check"><input id="researchDebriefContinueConsentInput" type="checkbox" />本テストでは, 回答内容に加えて, 判読中のモンタージュ切り替え, 表示時間, 判読時間などの操作ログが記録されます. 私は, これらの情報が研究目的で集計・解析されることを理解し, 本研究への参加に同意します。</label>
+              <label class="research-debrief-check"><input id="researchDebriefContinueConsentInput" type="checkbox" /><span>本テストでは, 回答内容に加えて, 判読中のモンタージュ切り替え, 表示時間, 判読時間などの操作ログが記録されます. 私は, これらの情報が研究目的で集計・解析されることを理解し, 本研究への参加に同意します。</span></label>
               <div class="research-debrief-message" id="researchDebriefMessage" role="status" aria-live="polite"></div>
               <fieldset class="research-debrief-field">
                 <legend>普段の判読と比べてモンタージュ切り替えを意識的に増やしましたか</legend>
@@ -169,10 +169,10 @@
                   <label><input type="radio" name="researchDebriefMontageLikert" value="5" />5 非常にそう思う</label>
                 </div>
               </fieldset>
-              <label class="research-debrief-field">研究参加中, 判読行動を変えた点があれば記載してください
+              <label class="research-debrief-field">普段の判読と比較して, 本テストで判読行動を変えた点があれば記載して下さい
                 <textarea id="researchDebriefBehaviorChangeInput" rows="4" placeholder="自由記述"></textarea>
               </label>
-              <label class="research-debrief-check"><input id="researchDebriefFeedbackInput" type="checkbox" />個人の判読結果フィードバックの提供を希望します。</label>
+              <label class="research-debrief-check"><input id="researchDebriefFeedbackInput" type="checkbox" /><span>個人の判読結果フィードバックの提供を希望します。</span></label>
               <button class="export-button" id="researchDebriefSubmitBtn" type="button">送信して完了画面へ進む</button>
             </div>
           </div>
@@ -249,6 +249,6 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260630-debrief2"></script>
+    <script src="/static/app.js?v=20260630-debrief3"></script>
   </body>
 </html>
