@@ -3269,11 +3269,11 @@ def save_research_debriefing(payload: dict[str, Any]) -> dict[str, Any]:
     if likert_value < 1 or likert_value > 5:
         raise ValueError("Post-test montage switch Likert response must be 1-5.")
     if not bool(payload.get("continuedDataUseConsent")):
-        raise ValueError("Continued data use consent is required.")
+        raise ValueError("Research participation consent is required.")
     debriefing = {
         "completedAt": str(payload.get("completedAt") or utc_now_iso()),
-        "primaryEndpointDisclosure": str(payload.get("primaryEndpointDisclosure") or "montage confirmation行動とIED判定エラーの関連"),
-        "operationLogDisclosure": str(payload.get("operationLogDisclosure") or "montageの切り替え操作などの判読時操作状況を記録"),
+        "primaryEndpointDisclosure": str(payload.get("primaryEndpointDisclosure") or ""),
+        "operationLogDisclosure": str(payload.get("operationLogDisclosure") or "回答内容に加えて, 判読中のモンタージュ切り替え, 表示時間, 判読時間などの操作ログを記録"),
         "montageSwitchIncreaseLikert": likert_value,
         "behaviorChangeFreeText": str(payload.get("behaviorChangeFreeText") or "").strip()[:4000],
         "continuedDataUseConsent": True,

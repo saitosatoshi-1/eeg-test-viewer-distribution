@@ -993,19 +993,6 @@ dd {
   font-weight: 700;
 }
 
-.research-debrief-note {
-  display: grid;
-  gap: 5px;
-  border: 1px solid #d7dde5;
-  border-radius: 6px;
-  padding: 9px 10px;
-  background: #f8fafc;
-  color: #263241;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.5;
-}
-
 .research-debrief-field {
   display: grid;
   gap: 8px;

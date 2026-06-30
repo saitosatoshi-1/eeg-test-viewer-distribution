@@ -1248,18 +1248,18 @@ function showResearchCompletion() {
     els.researchCompleteMessage.hidden = mobile;
     els.researchCompleteMessage.textContent = mobile
       ? ""
-      : "JSONをダウンロードし、メールに添付して送ってください。";
+      : "JSONファイルをダウンロードし、メールに添付して送ってください。";
   }
   if (els.researchMailBox) els.researchMailBox.hidden = mobile;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = mobile;
   if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = !mobile;
   if (els.researchCompleteSaveDesktopBtn) {
     els.researchCompleteSaveDesktopBtn.hidden = mobile;
-    els.researchCompleteSaveDesktopBtn.textContent = "JSONをダウンロード";
+    els.researchCompleteSaveDesktopBtn.textContent = "JSONファイルをダウンロード";
   }
   updateResearchEmailBody();
   if (els.researchSavedCsvName) {
-    els.researchSavedCsvName.textContent = "JSONはまだダウンロードされていません。";
+    els.researchSavedCsvName.textContent = "JSONファイルはまだダウンロードされていません。";
   }
   hideResearchWaveProgress();
 }
@@ -1527,8 +1527,8 @@ function researchDebriefingPayload() {
     readerId: state.researchSession?.readerId || activeResearchReaderId(researchProfile()),
     sessionToken: state.researchSession?.sessionToken || "",
     completedAt: new Date().toISOString(),
-    primaryEndpointDisclosure: "montage confirmation行動とIED判定エラーの関連",
-    operationLogDisclosure: "回答内容に加えて, montageの切り替え操作などの判読時の操作状況を記録",
+    primaryEndpointDisclosure: "",
+    operationLogDisclosure: "回答内容に加えて, 判読中のモンタージュ切り替え, 表示時間, 判読時間などの操作ログを記録",
     montageSwitchIncreaseLikert: selected ? Number(selected.value) : null,
     behaviorChangeFreeText: els.researchDebriefBehaviorChangeInput?.value.trim() || "",
     continuedDataUseConsent: Boolean(els.researchDebriefContinueConsentInput?.checked),
@@ -1546,7 +1546,7 @@ async function submitResearchDebriefing() {
     return;
   }
   if (!payload.continuedDataUseConsent) {
-    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "データ使用の継続同意を確認してください。";
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "研究参加への同意を確認してください。";
     return;
   }
   if (els.researchDebriefSubmitBtn) els.researchDebriefSubmitBtn.disabled = true;
@@ -1582,7 +1582,7 @@ async function completeResearchTest() {
     await submitResearchJson({ automatic: true });
   } catch (err) {
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = "JSONをダウンロードしてメールに添付してください。";
+      els.researchSavedCsvName.textContent = "JSONファイルをダウンロードしてメールに添付してください。";
     }
     setStatus(`Result auto submit failed: ${err.message}`, { error: true });
   }
@@ -1907,7 +1907,7 @@ async function showResearchCase(index) {
   if (!cases.length) {
     hideResearchTutorial();
     await completeResearchTest();
-    setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
+    setStatus("Test complete. JSONファイルをダウンロードしてメールに添付してください");
     return;
   }
   state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, index));
@@ -2036,7 +2036,7 @@ async function saveResearchRating(rating) {
       if (nextIndex >= 0) await showResearchCase(nextIndex);
       else {
         await completeResearchTest();
-        setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
+        setStatus("Test complete. JSONファイルをダウンロードしてメールに添付してください");
       }
       return;
     }
@@ -2078,7 +2078,7 @@ async function saveResearchRating(rating) {
     else {
       state.researchCaseIndex = cases.length ? cases.length - 1 : 0;
       await completeResearchTest();
-      setStatus("Test complete. JSONをダウンロードしてメールに添付してください");
+      setStatus("Test complete. JSONファイルをダウンロードしてメールに添付してください");
     }
   } catch (err) {
     if (!item.sampleEpoch) {
@@ -2181,7 +2181,7 @@ async function exportResearchJson() {
   const profile = researchProfile();
   const readerId = activeResearchReaderId(profile);
   try {
-    setStatus("結果JSONをダウンロード中...", { busy: true });
+    setStatus("結果JSONファイルをダウンロード中...", { busy: true });
     await retryPendingResearchResponses();
     const jsonFilename = researchJsonFilename(readerId, profile);
     const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
@@ -2190,7 +2190,7 @@ async function exportResearchJson() {
     if (els.researchSavedCsvName) {
       els.researchSavedCsvName.textContent = `ダウンロードしました: ${jsonFilename}。メールに添付してください。`;
     }
-    setStatus(`結果JSONをダウンロードしました: ${jsonFilename}`);
+    setStatus(`結果JSONファイルをダウンロードしました: ${jsonFilename}`);
   } catch (err) {
     const backup = downloadResearchResultBackup();
     if (backup) {
@@ -2209,7 +2209,7 @@ async function shareResearchJsonByEmail() {
   const readerId = activeResearchReaderId(profile);
   const jsonFilename = researchJsonFilename(readerId, profile);
   try {
-    setStatus("結果JSONを共有準備中...", { busy: true });
+    setStatus("結果JSONファイルを共有準備中...", { busy: true });
     await retryPendingResearchResponses();
     const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
     saveResearchResultBackup(jsonFilename, jsonText);
@@ -2224,7 +2224,7 @@ async function shareResearchJsonByEmail() {
       if (els.researchSavedCsvName) {
         els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
       }
-      setStatus(`結果JSONを共有しました: ${jsonFilename}`);
+      setStatus(`結果JSONファイルを共有しました: ${jsonFilename}`);
       return;
     }
     downloadTextFile(jsonFilename, jsonText);
@@ -2232,10 +2232,10 @@ async function shareResearchJsonByEmail() {
     if (els.researchSavedCsvName) {
       els.researchSavedCsvName.textContent = `この端末では直接添付共有できません。${jsonFilename}をダウンロードした後、メールに添付してください。`;
     }
-    setStatus("JSONをダウンロードしました。メールに添付してください");
+    setStatus("JSONファイルをダウンロードしました。メールに添付してください");
   } catch (err) {
     if (err?.name === "AbortError") {
-      setStatus("JSON共有をキャンセルしました");
+      setStatus("JSONファイル共有をキャンセルしました");
       return;
     }
     const backup = downloadResearchResultBackup();
@@ -2248,7 +2248,7 @@ async function shareResearchJsonByEmail() {
     }
     setStatus(`Share failed: ${err.message}`, { error: true });
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = "共有できませんでした。JSONをダウンロードしてメールに添付してください。";
+      els.researchSavedCsvName.textContent = "共有できませんでした。JSONファイルをダウンロードしてメールに添付してください。";
     }
   }
 }
@@ -2276,10 +2276,10 @@ async function submitResearchJson(options = {}) {
     const label = result.submissionId || result.filename || jsonFilename;
     if (els.researchSavedCsvName) {
       els.researchSavedCsvName.textContent = options.automatic
-        ? "JSONをダウンロードしてメールに添付してください。"
+        ? "JSONファイルをダウンロードしてメールに添付してください。"
         : `送信しました: ${label}`;
     }
-    setStatus(options.automatic ? "テスト完了。JSONをダウンロードしてメールに添付してください。" : `結果を送信しました: ${label}`);
+    setStatus(options.automatic ? "テスト完了。JSONファイルをダウンロードしてメールに添付してください。" : `結果を送信しました: ${label}`);
     return result;
   } catch (err) {
     setStatus(`Submit failed: ${err.message}`, { error: true });
