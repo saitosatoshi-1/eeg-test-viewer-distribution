@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260629-dataset2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260630-debrief1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -144,14 +144,42 @@
               <input id="researchSetupEpochCountInput" type="hidden" value="20" />
               <div class="research-fixed-count" aria-label="テスト問題数">テスト問題数: <strong>20問</strong></div>
               <div class="research-consent-box">
-                <div>本研究は個々の判読者の能力や成績を評価するものではありません.</div>
-                <div>どのような脳波波形で判定が難しくなるか, また判読時の操作状況が判定とどのように関連するかを, 集計データとして明らかにすることを目的とします.</div>
+                <div>判読開始前に, 本研究は個々の判読者の能力や成績を評価するものではなく, どのような脳波波形で判定が難しくなるか, また判読時の操作状況が判定とどのように関連するかを, 集計データとして明らかにすることを目的とする研究であることを説明します.</div>
                 <div>入力いただいた個人情報は、論文化にあたり必要な連絡を行う場合にのみ使用します。研究計画終了後、速やかに破棄します。</div>
                 <div>取得した情報は個人が特定されない形で解析し, 学会・論文等で公表することがあります.</div>
                 <div>データ流出予防のため, 脳波データ提供元である米国の大学, Temple Universityへ回答者名, 所属, メールアドレスを提供する必要があります.</div>
                 <label class="research-consent-check"><input id="researchConsentConfirmInput" type="checkbox" />上記を確認しました.</label>
               </div>
               <button class="export-button" id="researchSetupStartBtn" type="button">開始</button>
+            </div>
+          </div>
+          <div class="research-debrief-screen" id="researchDebriefScreen" hidden>
+            <div class="research-debrief-panel">
+              <div class="research-complete-title">事後アンケート</div>
+              <div class="research-complete-message">全判読者のデータ収集完了後, 事後デブリーフィングを実施し, Hawthorne効果の事後評価として以下を確認します。</div>
+              <div class="research-debrief-message" id="researchDebriefMessage" role="status" aria-live="polite"></div>
+              <div class="research-debrief-note">
+                <div>研究の主要評価項目は, montage confirmation行動とIED判定エラーの関連です。</div>
+                <div>本研究では, 回答内容に加えて, montageの切り替え操作などの判読時の操作状況が記録されます。</div>
+                <div>研究の主要仮説を開示し, データ使用の継続同意を確認します。</div>
+                <div>データ使用への同意は撤回できます。同意撤回を希望する場合は研究担当者へ連絡してください。</div>
+              </div>
+              <fieldset class="research-debrief-field">
+                <legend>普段の判読と比べてモンタージュ切り替えを意識的に増やしましたか</legend>
+                <div class="research-likert-row">
+                  <label><input type="radio" name="researchDebriefMontageLikert" value="1" />1 全くそう思わない</label>
+                  <label><input type="radio" name="researchDebriefMontageLikert" value="2" />2 あまりそう思わない</label>
+                  <label><input type="radio" name="researchDebriefMontageLikert" value="3" />3 どちらともいえない</label>
+                  <label><input type="radio" name="researchDebriefMontageLikert" value="4" />4 ややそう思う</label>
+                  <label><input type="radio" name="researchDebriefMontageLikert" value="5" />5 非常にそう思う</label>
+                </div>
+              </fieldset>
+              <label class="research-debrief-field">研究参加中, 判読行動を変えた点があれば記載してください
+                <textarea id="researchDebriefBehaviorChangeInput" rows="4" placeholder="自由記述"></textarea>
+              </label>
+              <label class="research-debrief-check"><input id="researchDebriefContinueConsentInput" type="checkbox" />主要仮説の開示を受けたうえで, 研究データ使用の継続に同意します。</label>
+              <label class="research-debrief-check"><input id="researchDebriefFeedbackInput" type="checkbox" />教育的還元として, 個人の判読結果フィードバックの提供を希望します。</label>
+              <button class="export-button" id="researchDebriefSubmitBtn" type="button">送信して完了画面へ進む</button>
             </div>
           </div>
           <div class="research-complete-screen" id="researchCompleteScreen" hidden>
@@ -227,6 +255,6 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260630-random-prefetch"></script>
+    <script src="/static/app.js?v=20260630-debrief1"></script>
   </body>
 </html>

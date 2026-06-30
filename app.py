@@ -128,6 +128,7 @@ MUTATING_PATHS = {
     "/api/open-file",
     "/api/research/test/response",
     "/api/research/test/response/undo",
+    "/api/research/test/debriefing",
     "/api/research/test/export-file",
     "/api/research/test/submit-result",
     "/api/admin/private-dataset/upload",
@@ -2534,6 +2535,15 @@ def load_research_responses(dataset_dir: Path, reader_id: str) -> list[dict[str,
     return []
 
 
+def load_research_response_payload(dataset_dir: Path, reader_id: str) -> dict[str, Any]:
+    payload = json_read(research_response_path(dataset_dir, reader_id), {"responses": []})
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        return {"readerId": research_reader_id(reader_id), "responses": payload}
+    return {"readerId": research_reader_id(reader_id), "responses": []}
+
+
 def research_assignment_path(dataset_dir: Path, phase: str = "1") -> Path:
     return dataset_dir / "assignments" / f"phase{safe_filename_part(phase, '1')}.json"
 
@@ -2636,12 +2646,15 @@ def research_assignment_case_ids(dataset_dir: Path, reader_id: str, phase: str =
 def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[dict[str, Any]], reader_profile: dict[str, Any] | None = None) -> None:
     if reader_profile is None:
         reader_profile = response_reader_profile(*responses)
+    existing = load_research_response_payload(dataset_dir, reader_id)
     payload = {
         "readerId": research_reader_id(reader_id),
         "updatedAt": utc_now_iso(),
         "readerProfile": reader_profile or {},
         "responses": responses,
     }
+    if isinstance(existing.get("postTestDebriefing"), dict):
+        payload["postTestDebriefing"] = existing["postTestDebriefing"]
     cookie_hash = next((str(row.get("accessCookieHash") or "") for row in responses if row.get("accessCookieHash")), "")
     if cookie_hash:
         payload["accessCookieHash"] = cookie_hash
@@ -3245,6 +3258,47 @@ def undo_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     })}
 
 
+def save_research_debriefing(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+    reader_id = research_reader_id(payload.get("readerId"))
+    verify_research_session_token(payload, str(dataset_dir), reader_id, "1")
+    try:
+        likert_value = int(payload.get("montageSwitchIncreaseLikert"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Post-test montage switch Likert response is required.") from exc
+    if likert_value < 1 or likert_value > 5:
+        raise ValueError("Post-test montage switch Likert response must be 1-5.")
+    if not bool(payload.get("continuedDataUseConsent")):
+        raise ValueError("Continued data use consent is required.")
+    debriefing = {
+        "completedAt": str(payload.get("completedAt") or utc_now_iso()),
+        "primaryEndpointDisclosure": str(payload.get("primaryEndpointDisclosure") or "montage confirmation行動とIED判定エラーの関連"),
+        "operationLogDisclosure": str(payload.get("operationLogDisclosure") or "montageの切り替え操作などの判読時操作状況を記録"),
+        "montageSwitchIncreaseLikert": likert_value,
+        "behaviorChangeFreeText": str(payload.get("behaviorChangeFreeText") or "").strip()[:4000],
+        "continuedDataUseConsent": True,
+        "withdrawalOpportunityProvided": bool(payload.get("withdrawalOpportunityProvided", True)),
+        "individualFeedbackRequested": bool(payload.get("individualFeedbackRequested")),
+        "testStartedAt": str(payload.get("testStartedAt") or ""),
+        "testCompletedAt": str(payload.get("testCompletedAt") or ""),
+        "totalElapsedMs": payload.get("totalElapsedMs", ""),
+        "totalElapsedSec": payload.get("totalElapsedSec", ""),
+        "accessCookieHash": str(payload.get("accessCookieHash") or ""),
+        "updatedAt": utc_now_iso(),
+    }
+    with RESEARCH_RESPONSE_LOCK:
+        current = load_research_response_payload(dataset_dir, reader_id)
+        current["readerId"] = reader_id
+        current["updatedAt"] = utc_now_iso()
+        current["postTestDebriefing"] = debriefing
+        if not isinstance(current.get("responses"), list):
+            current["responses"] = []
+        if str(payload.get("accessCookieHash") or ""):
+            current["accessCookieHash"] = str(payload.get("accessCookieHash") or "")
+        json_write(research_response_path(dataset_dir, reader_id), current)
+    return {"ok": True, "postTestDebriefing": debriefing}
+
+
 def research_rating_correct(rating: str, label_group: str) -> bool | str:
     if rating == RESEARCH_RATING_UNKNOWN or not rating:
         return ""
@@ -3668,6 +3722,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
     case_by_id = {str(row.get("caseId", "")): row for row in research_case_rows(dataset)}
     readers = []
     for rid in reader_ids:
+        response_payload = load_research_response_payload(dataset_dir, rid)
         responses = load_research_responses(dataset_dir, rid)
         active = assigned_active_response_map(dataset_dir, rid, "1", responses)
         assignment_ids = research_assignment_case_ids(dataset_dir, rid, "1")
@@ -3690,6 +3745,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
             "readerId": rid,
             "readerProfile": research_compact_reader_profile(profile),
             "summary": research_reader_summary(compact_responses),
+            "postTestDebriefing": response_payload.get("postTestDebriefing") if isinstance(response_payload.get("postTestDebriefing"), dict) else {},
             "responses": [research_export_response_payload(response) for response in compact_responses],
         })
     payload = {
@@ -4232,6 +4288,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(save_research_response(payload))
             if parsed.path == "/api/research/test/response/undo":
                 return self.send_json(undo_research_response(payload))
+            if parsed.path == "/api/research/test/debriefing":
+                return self.send_json(save_research_debriefing(payload))
             if parsed.path == "/api/research/test/export-file":
                 return self.send_json(save_research_responses_json_to_desktop(payload))
             if parsed.path == "/api/research/test/submit-result":

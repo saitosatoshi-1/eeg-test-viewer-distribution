@@ -73,6 +73,7 @@ const state = {
   researchTestStartedMs: 0,
   researchTestCompletedAt: "",
   researchResultAutoSubmitted: false,
+  researchDebriefSubmitted: false,
   researchSaving: false,
   researchRetryingPending: false,
   researchMontageTiming: null,
@@ -124,6 +125,12 @@ const els = {
   researchSetupScreen: document.getElementById("researchSetupScreen"),
   researchSetupMessage: document.getElementById("researchSetupMessage"),
   researchSetupDatasetPathInput: document.getElementById("researchSetupDatasetPathInput"),
+  researchDebriefScreen: document.getElementById("researchDebriefScreen"),
+  researchDebriefMessage: document.getElementById("researchDebriefMessage"),
+  researchDebriefBehaviorChangeInput: document.getElementById("researchDebriefBehaviorChangeInput"),
+  researchDebriefContinueConsentInput: document.getElementById("researchDebriefContinueConsentInput"),
+  researchDebriefFeedbackInput: document.getElementById("researchDebriefFeedbackInput"),
+  researchDebriefSubmitBtn: document.getElementById("researchDebriefSubmitBtn"),
   researchCompleteScreen: document.getElementById("researchCompleteScreen"),
   researchCompleteTitle: document.getElementById("researchCompleteTitle"),
   researchCompleteMessage: document.getElementById("researchCompleteMessage"),
@@ -665,6 +672,7 @@ function bindResearchControls() {
   els.researchCompleteSaveDesktopBtn?.addEventListener("click", exportResearchJson);
   els.researchShareJsonBtn?.addEventListener("click", shareResearchJsonByEmail);
   els.researchCopyEmailBtn?.addEventListener("click", copyResearchEmailBody);
+  els.researchDebriefSubmitBtn?.addEventListener("click", submitResearchDebriefing);
   els.researchTutorialDismissBtn?.addEventListener("click", () => {
     state.researchTutorialDismissed = true;
     updateResearchTutorial();
@@ -1227,6 +1235,7 @@ async function requestMobileFullscreen() {
 function showResearchCompletion() {
   if (!els.researchCompleteScreen) return;
   const mobile = isMobileViewport();
+  hideResearchDebriefing();
   els.researchCompleteScreen.hidden = false;
   els.researchCompleteScreen.setAttribute("aria-hidden", "false");
   if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
@@ -1257,6 +1266,25 @@ function hideResearchCompletion() {
   if (els.researchMailBox) els.researchMailBox.hidden = false;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = false;
   if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = false;
+}
+
+function showResearchDebriefing() {
+  if (!els.researchDebriefScreen) {
+    showResearchCompletion();
+    return;
+  }
+  hideResearchCompletion();
+  hideResearchDebriefing();
+  els.researchDebriefScreen.hidden = false;
+  els.researchDebriefScreen.setAttribute("aria-hidden", "false");
+  if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "";
+  hideResearchWaveProgress();
+}
+
+function hideResearchDebriefing() {
+  if (!els.researchDebriefScreen) return;
+  els.researchDebriefScreen.hidden = true;
+  els.researchDebriefScreen.setAttribute("aria-hidden", "true");
 }
 
 function setResearchSetupMessage(message = "", isError = false) {
@@ -1487,9 +1515,61 @@ function firstUnansweredResearchCaseIndex() {
   return index >= 0 ? index : -1;
 }
 
+function researchDebriefingPayload() {
+  const selected = document.querySelector('input[name="researchDebriefMontageLikert"]:checked');
+  return {
+    datasetPath: state.researchDatasetPath,
+    readerId: state.researchSession?.readerId || activeResearchReaderId(researchProfile()),
+    sessionToken: state.researchSession?.sessionToken || "",
+    completedAt: new Date().toISOString(),
+    primaryEndpointDisclosure: "montage confirmation行動とIED判定エラーの関連",
+    operationLogDisclosure: "回答内容に加えて, montageの切り替え操作などの判読時の操作状況を記録",
+    montageSwitchIncreaseLikert: selected ? Number(selected.value) : null,
+    behaviorChangeFreeText: els.researchDebriefBehaviorChangeInput?.value.trim() || "",
+    continuedDataUseConsent: Boolean(els.researchDebriefContinueConsentInput?.checked),
+    withdrawalOpportunityProvided: true,
+    individualFeedbackRequested: Boolean(els.researchDebriefFeedbackInput?.checked),
+    ...researchTestTimingPayload(state.researchTestCompletedAt || new Date().toISOString()),
+  };
+}
+
+async function submitResearchDebriefing() {
+  if (!state.researchSession) return;
+  const payload = researchDebriefingPayload();
+  if (!payload.montageSwitchIncreaseLikert) {
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "5段階評価を選択してください。";
+    return;
+  }
+  if (!payload.continuedDataUseConsent) {
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "データ使用の継続同意を確認してください。";
+    return;
+  }
+  if (els.researchDebriefSubmitBtn) els.researchDebriefSubmitBtn.disabled = true;
+  if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "";
+  try {
+    await fetchJson("/api/research/test/debriefing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    state.researchDebriefSubmitted = true;
+    await completeResearchTest();
+  } catch (err) {
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = `保存できませんでした: ${err.message}`;
+    setStatus(`Debriefing save failed: ${err.message}`, { error: true });
+  } finally {
+    if (els.researchDebriefSubmitBtn) els.researchDebriefSubmitBtn.disabled = false;
+  }
+}
+
 async function completeResearchTest() {
   hideResearchTutorial();
   refreshResearchDisplay();
+  if (!state.researchDebriefSubmitted && els.researchDebriefScreen) {
+    showResearchDebriefing();
+    setStatus("事後アンケートに回答してください");
+    return;
+  }
   showResearchCompletion();
   if (state.researchMode !== "test" || state.researchResultAutoSubmitted) return;
   state.researchResultAutoSubmitted = true;
@@ -1506,7 +1586,7 @@ async function completeResearchTest() {
 function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
   if (!els.researchWaveProgress) return;
   const session = state.researchSession;
-  if (!session || state.researchMode !== "test" || els.researchCompleteScreen?.hidden === false) {
+  if (!session || state.researchMode !== "test" || els.researchCompleteScreen?.hidden === false || els.researchDebriefScreen?.hidden === false) {
     hideResearchWaveProgress();
     return;
   }
@@ -1541,7 +1621,7 @@ function updateResearchUndoButton() {
 
 function renderResearchInlineProgress(snapshot = null) {
   updateResearchUndoButton();
-  if (els.researchCompleteScreen?.hidden === false && state.researchMode === "test") {
+  if ((els.researchCompleteScreen?.hidden === false || els.researchDebriefScreen?.hidden === false) && state.researchMode === "test") {
     const el = els.researchInlineProgress;
     hideResearchInlineProgress();
     if (el) {
@@ -1753,12 +1833,14 @@ async function startResearchTest() {
   saveResearchProfile();
   retryPendingResearchResponses();
   hideResearchCompletion();
+  hideResearchDebriefing();
   state.researchTutorialDismissed = false;
   state.researchSampleCompletedPhases = {};
   state.researchTestStartedAt = "";
   state.researchTestStartedMs = 0;
   state.researchTestCompletedAt = "";
   state.researchResultAutoSubmitted = false;
+  state.researchDebriefSubmitted = false;
   state.researchUsualMontage = "";
   resetResearchPrefetch({ clearRecords: true });
   hideResearchTutorial();
