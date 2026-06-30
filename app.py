@@ -2739,6 +2739,20 @@ def research_order_group(row: dict[str, Any]) -> str:
     return str(row.get("labelGroup") or "other")
 
 
+def research_case_patient_key(row: dict[str, Any]) -> str:
+    for key in ("patientId", "subjectId", "sourcePatientId", "sourceSubjectId"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    recording_id = str(row.get("recordingId") or "").strip()
+    if not recording_id:
+        edf_path = str(row.get("edfPath") or "").strip()
+        recording_id = Path(edf_path).stem if edf_path else str(row.get("caseId") or "").strip()
+    if "_start" in recording_id:
+        recording_id = recording_id.split("_start", 1)[0]
+    return recording_id or str(row.get("caseId") or "")
+
+
 def research_max_consecutive_group_count(rows: list[dict[str, Any]]) -> int:
     max_count = 0
     last_group = None
@@ -2809,6 +2823,7 @@ def balanced_research_sample_by_exposure(
     limit: int,
     exposure_counts: dict[str, int],
     seed_parts: tuple[str, ...],
+    excluded_patient_keys: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     seed = hashlib.sha256("|".join(seed_parts).encode("utf-8")).hexdigest()
     rng = random.Random(seed)
@@ -2816,14 +2831,26 @@ def balanced_research_sample_by_exposure(
     for row in rows:
         count = int(exposure_counts.get(str(row.get("caseId", "")), 0))
         buckets.setdefault(count, []).append(row)
+    excluded_patients = excluded_patient_keys if excluded_patient_keys is not None else set()
     selected: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
     for count in sorted(buckets):
         bucket = list(buckets[count])
         rng.shuffle(bucket)
         for row in bucket:
             if limit > 0 and len(selected) >= limit:
                 return selected
+            patient_key = research_case_patient_key(row)
+            if patient_key and patient_key in excluded_patients:
+                deferred.append(row)
+                continue
             selected.append(row)
+            if patient_key:
+                excluded_patients.add(patient_key)
+    for row in deferred:
+        if limit > 0 and len(selected) >= limit:
+            break
+        selected.append(row)
     return selected
 
 
@@ -2831,6 +2858,7 @@ def research_phase1_sample(
     dataset: dict[str, Any],
     reader_id: str,
     excluded_case_ids: set[str] | None = None,
+    excluded_patient_keys: set[str] | None = None,
     exposure_counts: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
@@ -2843,19 +2871,32 @@ def research_phase1_sample(
     exposure_counts = exposure_counts or {}
     sampled: list[dict[str, Any]] = []
     selected_ids: set[str] = set()
+    selected_patient_keys = set(excluded_patient_keys or set())
     group_limits = {
         "epileptiform": total_count // 2 + total_count % 2,
         "non_epileptiform": total_count // 2,
     }
     for group, limit in group_limits.items():
         rows = [row for row in included if row.get("labelGroup") == group]
-        group_sample = balanced_research_sample_by_exposure(rows, limit, exposure_counts, (str(dataset.get("datasetId", "")), reader_id, "phase1", group))
+        group_sample = balanced_research_sample_by_exposure(
+            rows,
+            limit,
+            exposure_counts,
+            (str(dataset.get("datasetId", "")), reader_id, "phase1", group),
+            selected_patient_keys,
+        )
         sampled.extend(group_sample)
         selected_ids.update(str(row.get("caseId", "")) for row in group_sample)
     remaining = total_count - len(sampled)
     if remaining > 0:
         fill_pool = [row for row in included if str(row.get("caseId", "")) not in selected_ids]
-        sampled.extend(balanced_research_sample_by_exposure(fill_pool, remaining, exposure_counts, (str(dataset.get("datasetId", "")), reader_id, "phase1", "fill")))
+        sampled.extend(balanced_research_sample_by_exposure(
+            fill_pool,
+            remaining,
+            exposure_counts,
+            (str(dataset.get("datasetId", "")), reader_id, "phase1", "fill"),
+            selected_patient_keys,
+        ))
     return stable_balanced_research_order(sampled, (str(dataset.get("datasetId", "")), reader_id, "phase1", "balanced-order"))
 
 
@@ -2897,9 +2938,10 @@ def research_phase_case_pool(dataset: dict[str, Any], reader_id: str, phase: str
     included = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
     sample = research_sample_case(dataset, reader_id, "phase1", included)
     sample_source_ids = {str(row.get("originalCaseId") or str(row.get("caseId", "")).split(":")[-1]) for row in sample}
+    sample_patient_keys = {research_case_patient_key(row) for row in sample if research_case_patient_key(row)}
     dataset_dir = research_dataset_path(dataset.get("datasetPath"))
     exposure_counts = research_case_exposure_counts(dataset_dir, phase)
-    phase1_cases = research_phase1_sample(dataset, reader_id, sample_source_ids, exposure_counts)
+    phase1_cases = research_phase1_sample(dataset, reader_id, sample_source_ids, sample_patient_keys, exposure_counts)
     return sample + phase1_cases
 
 
