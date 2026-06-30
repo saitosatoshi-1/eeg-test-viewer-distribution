@@ -3416,7 +3416,7 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
         for key in (
             "readerName", "email", "affiliation", "specialty", "position",
             "epilepsySpecialist", "clinicalNeurophysEegSpecialist",
-            "medicalPracticeYears",
+            "medicalPracticeYears", "monthlyEegReadingCount",
             "epilepsyCenterTraining", "epilepsyCenterTrainingDuration",
             "usualMontage", "ethicsNoticeConfirmed",
             "dataProviderSharingAcknowledged",
