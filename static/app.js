@@ -271,8 +271,9 @@ function clearSharedBrowserResearchState() {
 function isLikelyMobileViewport() {
   const uaMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
   const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches;
+  const narrowViewport = window.matchMedia?.("(max-width: 700px)")?.matches;
   const compactHeight = window.matchMedia?.("(orientation: landscape) and (max-height: 620px)")?.matches;
-  return Boolean(uaMobile || (coarsePointer && compactHeight));
+  return Boolean(uaMobile || narrowViewport || (coarsePointer && compactHeight));
 }
 
 function updateMobileViewportClass() {
@@ -2793,6 +2794,12 @@ function setMontage(montage) {
   els.montageSelect.value = montage;
   state.activeMontage = montage;
   saveSettings();
+  updateResearchMontageTiming();
+  if (syncActiveMontageData({ requireExact: true })) {
+    renderStatus();
+    draw();
+    return;
+  }
   state.windowData = null;
   loadWindow();
 }

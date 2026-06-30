@@ -4217,6 +4217,28 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/recording":
                 return self.send_json(self.store.metadata(required(qs, "id")))
             if path == "/api/window":
+                requested_montages = [
+                    item.strip()
+                    for item in qs.get("montages", [""])[0].split(",")
+                    if item.strip()
+                ]
+                if requested_montages:
+                    return self.send_json(
+                        self.store.window_multi(
+                            required(qs, "id"),
+                            float(qs.get("start", ["0"])[0]),
+                            float(qs.get("duration", ["10"])[0]),
+                            qs.get("montage", ["longitudinal"])[0],
+                            qs.get("tc", ["0.3"])[0],
+                            qs.get("hf", ["120"])[0],
+                            qs.get("ac", ["60"])[0],
+                            qs.get("ecg", ["1"])[0] == "1",
+                            qs.get("ecgFilter", ["0"])[0] == "1",
+                            requested_montages,
+                            qs.get("topomap", ["1"])[0] != "0",
+                            qs.get("annotations", ["1"])[0] != "0",
+                        )
+                    )
                 return self.send_json(
                     self.store.window(
                         required(qs, "id"),
