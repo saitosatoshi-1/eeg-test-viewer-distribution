@@ -1679,7 +1679,7 @@ function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
   const { total, answered, currentQuestion, remaining, pct, isPractice } = snapshot;
   const currentCase = currentResearchCase();
   const title = isValidationWorkflow() ? `Validation ${currentQuestion}/${total || 0}` : (isPractice ? researchPracticeLabel(currentCase) : `本番 ${currentQuestion}/${total || 0}`);
-  const detail = isValidationWorkflow() ? `${selectedValidationDatasetKindLabel()} · ${validationDatasetKindLabel(currentCase)} · 確認済み ${answered}/${total || 0} · 残り ${remaining} 件` : (isPractice ? `本番は未開始 · 全 ${total || 0} 問` : `回答済み ${answered}/${total || 0} · 残り ${remaining} 問`);
+  const detail = isValidationWorkflow() ? `現在: ${validationDatasetKindLabel(currentCase)} · 選択: ${selectedValidationDatasetKindLabel()} · 確認済み ${answered}/${total || 0} · 残り ${remaining} 件` : (isPractice ? `本番は未開始 · 全 ${total || 0} 問` : `回答済み ${answered}/${total || 0} · 残り ${remaining} 問`);
   const hint = isValidationWorkflow() ? '<div class="research-wave-progress-hint">Enter=採用 / Backspace・Delete=除外</div>' : '';
   els.researchWaveProgress.hidden = false;
   els.researchWaveProgress.setAttribute("aria-hidden", "false");
@@ -2255,7 +2255,13 @@ async function showResearchCase(index) {
     state.activeMontage = els.montageSelect.value;
     updateViewModeButtons();
     syncMultiMontageControls();
-    setRightPanelVisible(false, { save: false });
+    if (isValidationWorkflow()) {
+      state.rightPanelTab = "test";
+      applyRightPanelTab();
+      setRightPanelVisible(true, { save: false });
+    } else {
+      setRightPanelVisible(false, { save: false });
+    }
     state.windowData = null;
     await loadWindow();
     scheduleLayoutRefresh();

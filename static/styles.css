@@ -2422,3 +2422,38 @@ body.validation-workflow .research-wave-progress-hint {
   font-weight: 700;
   letter-spacing: 0;
 }
+
+body.validation-workflow .research-wave-progress {
+  top: auto;
+  left: auto;
+  right: 16px;
+  bottom: 30px;
+  width: min(430px, calc(100% - 32px));
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  border-color: rgba(12, 18, 28, 0.2);
+  background: rgba(18, 24, 38, 0.76);
+  color: #ffffff;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+}
+
+body.validation-workflow .research-wave-progress-main {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+  white-space: normal;
+}
+
+body.validation-workflow .research-wave-progress-main strong,
+body.validation-workflow .research-wave-progress-main span,
+body.validation-workflow .research-wave-progress-pct {
+  color: #ffffff;
+}
+
+body.validation-workflow .research-wave-progress-meter {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+body.validation-workflow .research-wave-progress-meter span {
+  background: #78c3ff;
+}
