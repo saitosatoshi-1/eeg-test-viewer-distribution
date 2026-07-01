@@ -391,9 +391,9 @@ function applyWorkflowChrome() {
   const title = document.querySelector(".research-setup-title");
   if (title) title.textContent = validation ? "Validation設定" : "テスト設定";
   const readerLabel = els.researchSetupReaderNameInput?.closest("label");
-  if (readerLabel?.firstChild) readerLabel.firstChild.textContent = validation ? "Reviewer ID" : "回答者名 (English)";
+  if (readerLabel?.firstChild) readerLabel.firstChild.textContent = validation ? "名前" : "回答者名 (English)";
   if (els.researchSetupReaderNameInput) {
-    els.researchSetupReaderNameInput.placeholder = validation ? "例: reviewer01" : "例: Taro Yamada";
+    els.researchSetupReaderNameInput.placeholder = validation ? "例: 斉藤 太郎" : "例: Taro Yamada";
     els.researchSetupReaderNameInput.autocomplete = validation ? "off" : "name";
   }
   if (els.researchSetupStartBtn) els.researchSetupStartBtn.textContent = validation ? "Validation開始" : "開始";
@@ -799,7 +799,7 @@ function validateResearchProfileForStart() {
     }
     const reviewerId = String(els.researchSetupReaderNameInput?.value || els.researchSetupReaderIdInput?.value || "").trim();
     if (reviewerId) return true;
-    const message = "Reviewer IDを入力してください。";
+    const message = "名前を入力してください。";
     setResearchSetupMessage(message, true);
     setStatus(message, { error: true });
     els.researchSetupReaderNameInput?.focus();
@@ -1965,7 +1965,7 @@ function renderRightValidationPanel() {
     ["Selected", selectedValidationDatasetKindLabel()],
     ["Reference", researchCaseLabelGroup(current)],
     ["操作", "Enter=採用 / Backspace・Delete=除外"],
-    ["Reviewer", session?.reviewerId || ""],
+    ["名前", session?.reviewerId || ""],
   ] : [];
   const resultCards = responses.map((response, index) => {
     const rows = [
@@ -2242,7 +2242,7 @@ async function showResearchCase(index) {
     state.cursorTime = null;
     state.dragSelection = null;
     const profile = researchProfile();
-    const usualMontage = isValidationWorkflow() ? (item.phase1Montage || activeMontageValue() || "conventional") : (isResearchPracticeCase(item) ? "conventional" : (state.researchUsualMontage || profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional"));
+    const usualMontage = isValidationWorkflow() ? "longitudinal" : (isResearchPracticeCase(item) ? "conventional" : (state.researchUsualMontage || profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional"));
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
     if (els.tcSelect) els.tcSelect.value = "0.3";
     if (els.hfSelect) els.hfSelect.value = "120";

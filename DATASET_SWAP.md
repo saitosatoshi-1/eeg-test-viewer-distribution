@@ -26,6 +26,18 @@ This repository does not store EDF data in GitHub. Private EDF datasets are uplo
 ```text
 https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
 ```
+- `private:validation_before_v1`
+  - Uploaded on 2026-07-01.
+  - Validation dataset from:
+    - epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/epilepsy`
+    - no_epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/no_epilepsy`
+  - Counts: epilepsy 31, no_epilepsy 30, total 61.
+  - Validation URLs:
+
+```text
+https://eeg-test-viewer.onrender.com/?mode=validation&dataset=private%3Avalidation_before_v1
+https://eeg-test-viewer.onrender.com/?mode=test&dataset=private%3Avalidation_before_v1
+```
 
 ## Standard Rule
 

@@ -19,7 +19,7 @@ https://eeg-test-viewer.onrender.com/?mode=test&dataset=private%3Avalidation_tue
 https://eeg-test-viewer.onrender.com/?mode=validation&dataset=private%3Avalidation_tuea_v2
 ```
 
-`mode` defaults to `test` for compatibility. Validation asks only for Reviewer ID and evaluation target, then records `採用` / `除外` decisions. Results are saved separately from test submissions under `/data/research/validation_results/<datasetId>/<reviewerId>.json`.
+`mode` defaults to `test` for compatibility. Validation asks only for reviewer name and evaluation target, then records `採用` / `除外` decisions. Results are saved separately from test submissions under `/data/research/validation_results/<datasetId>/<reviewerName>.json`.
 
 ## What This Repo Contains
 
