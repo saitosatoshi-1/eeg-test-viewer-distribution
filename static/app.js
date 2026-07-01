@@ -988,6 +988,17 @@ function researchJsonFilename(_readerId, profile = researchProfile()) {
   return `${datasetId}_${stamp}_${readerName}.json`;
 }
 
+function validationReviewerId(profile = researchProfile()) {
+  return state.validationSession?.reviewerId || safeResultFilenamePart(profile.readerName || profile.readerId || "reviewer", "reviewer");
+}
+
+function validationJsonFilename(profile = researchProfile()) {
+  const reviewer = safeResultFilenamePart(validationReviewerId(profile), "reviewer");
+  const datasetId = researchDatasetIdForFilename();
+  const stamp = researchResultTimestampPart();
+  return `${datasetId}_${stamp}_${reviewer}_validation.json`;
+}
+
 function saveResearchProfile() {
   if (PUBLIC_WEB_MODE) {
     clearSharedBrowserResearchState();
@@ -1183,6 +1194,20 @@ function updateResearchSetupScreen() {
 }
 
 function researchEmailBodyText(profile = researchProfile()) {
+  if (isValidationWorkflow()) {
+    const name = profile.readerName || validationReviewerId(profile);
+    return [
+      "斉藤先生",
+      "",
+      "Validation結果ファイルを提出します。",
+      "添付ファイルをご確認ください。",
+      "",
+      "よろしくお願いいたします。",
+      "",
+      `氏名: ${name}`,
+      `データセット: ${researchDatasetIdForFilename()}`,
+    ].join("\n");
+  }
   const name = profile.readerName || "";
   const email = profile.email || "";
   return [
@@ -1306,18 +1331,18 @@ function showResearchCompletion() {
   els.researchCompleteScreen.hidden = false;
   els.researchCompleteScreen.setAttribute("aria-hidden", "false");
   const validation = isValidationWorkflow();
-  if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = validation ? "Validation完了" : "お疲れ様でした!";
+  if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
   if (els.researchCompleteMessage) {
     els.researchCompleteMessage.hidden = mobile && !validation;
     els.researchCompleteMessage.textContent = validation
-      ? "Validation結果はサーバーに保存されました。"
+      ? "Validation結果JSONファイルをダウンロードし、メールに添付して送ってください。"
       : (mobile ? "" : "JSONファイルをダウンロードし、メールに添付して送ってください。");
   }
-  if (els.researchMailBox) els.researchMailBox.hidden = validation || mobile;
-  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validation || mobile;
+  if (els.researchMailBox) els.researchMailBox.hidden = mobile && !validation;
+  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = mobile && !validation;
   if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = validation || !mobile;
   if (els.researchCompleteSaveDesktopBtn) {
-    els.researchCompleteSaveDesktopBtn.hidden = validation || mobile;
+    els.researchCompleteSaveDesktopBtn.hidden = mobile && !validation;
     els.researchCompleteSaveDesktopBtn.textContent = "JSONファイルをダウンロード";
   }
   updateResearchEmailBody();
@@ -2152,10 +2177,10 @@ async function submitValidationJson(options = {}) {
   });
   if (els.researchSavedCsvName) {
     els.researchSavedCsvName.textContent = options.automatic
-      ? "Validation結果はサーバーに保存されました。"
+      ? "Validation結果はサーバーに保存されました。JSONファイルをダウンロードしてメールに添付してください。"
       : `Validation結果を保存しました: ${result.submissionId || result.filename || reviewerId}`;
   }
-  setStatus("Validation complete. 結果はサーバーに保存されました。");
+  setStatus("Validation complete. JSONファイルをダウンロードしてメールに添付してください。");
   return result;
 }
 
@@ -2518,6 +2543,28 @@ async function exportResearchJson() {
   if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
   saveResearchProfile();
   const profile = researchProfile();
+  if (isValidationWorkflow()) {
+    const reviewerId = validationReviewerId(profile);
+    try {
+      setStatus("Validation結果JSONファイルをダウンロード中...", { busy: true });
+      const jsonFilename = validationJsonFilename(profile);
+      const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId })}`);
+      saveResearchResultBackup(jsonFilename, jsonText);
+      downloadTextFile(jsonFilename, jsonText);
+      if (els.researchSavedCsvName) {
+        els.researchSavedCsvName.textContent = `ダウンロードしました: ${jsonFilename}。メールに添付してください。`;
+      }
+      setStatus(`Validation結果JSONファイルをダウンロードしました: ${jsonFilename}`);
+    } catch (err) {
+      const backup = downloadResearchResultBackup();
+      if (backup) {
+        setStatus(`Export failed. 最後のバックアップをダウンロードしました: ${backup.filename}`, { error: true });
+        return;
+      }
+      setStatus(`Validation export failed: ${err.message}`, { error: true });
+    }
+    return;
+  }
   const readerId = activeResearchReaderId(profile);
   try {
     setStatus("結果JSONファイルをダウンロード中...", { busy: true });
@@ -2545,6 +2592,48 @@ async function shareResearchJsonByEmail() {
   if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
   saveResearchProfile();
   const profile = researchProfile();
+  if (isValidationWorkflow()) {
+    const reviewerId = validationReviewerId(profile);
+    const jsonFilename = validationJsonFilename(profile);
+    try {
+      setStatus("Validation結果JSONファイルを共有準備中...", { busy: true });
+      const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId })}`);
+      saveResearchResultBackup(jsonFilename, jsonText);
+      const file = new File([jsonText], jsonFilename, { type: "application/json" });
+      const shareData = {
+        title: "脳波Validation結果",
+        text: researchEmailBodyText(profile),
+        files: [file],
+      };
+      if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+        await navigator.share(shareData);
+        if (els.researchSavedCsvName) els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
+        setStatus(`Validation結果JSONファイルを共有しました: ${jsonFilename}`);
+        return;
+      }
+      downloadTextFile(jsonFilename, jsonText);
+      window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent("脳波Validation結果")}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
+      if (els.researchSavedCsvName) {
+        els.researchSavedCsvName.textContent = `${jsonFilename}をダウンロードしました。メールに添付してください。`;
+      }
+      setStatus("Validation結果JSONファイルをダウンロードしました。メールに添付してください");
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        setStatus("JSONファイル共有をキャンセルしました");
+        return;
+      }
+      const backup = downloadResearchResultBackup();
+      if (backup) {
+        setStatus(`Share failed. 最後のバックアップをダウンロードしました: ${backup.filename}`, { error: true });
+        return;
+      }
+      setStatus(`Validation share failed: ${err.message}`, { error: true });
+      if (els.researchSavedCsvName) {
+        els.researchSavedCsvName.textContent = "共有できませんでした。JSONファイルをダウンロードしてメールに添付してください。";
+      }
+    }
+    return;
+  }
   const readerId = activeResearchReaderId(profile);
   const jsonFilename = researchJsonFilename(readerId, profile);
   try {
