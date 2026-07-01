@@ -1,6 +1,6 @@
-# EEG Test Viewer Distribution
+# EEG Test / Validation Viewer Distribution
 
-Web-based EEG reading test viewer for research use. This repository is now maintained for the Render-hosted test workflow, not for Windows/macOS desktop distribution packages.
+Web-based EEG reading test and cut-epoch validation viewer for research use. This repository is now maintained for the Render-hosted web workflow, not for Windows/macOS desktop distribution packages.
 
 ## Current Test Link
 
@@ -12,11 +12,20 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
 
 The link shows a password screen. Enter `ncnp` to set an HTTP-only access cookie. Do not place the password in the URL.
 
+Use URL parameters to select the workflow:
+
+```text
+https://eeg-test-viewer.onrender.com/?mode=test&dataset=private%3Avalidation_tuea_v2
+https://eeg-test-viewer.onrender.com/?mode=validation&dataset=private%3Avalidation_tuea_v2
+```
+
+`mode` defaults to `test` for compatibility. Validation asks only for Reviewer ID and evaluation target, then records `採用` / `除外` decisions. Results are saved separately from test submissions under `/data/research/validation_results/<datasetId>/<reviewerId>.json`.
+
 ## What This Repo Contains
 
-- `app.py`: backend server, test session APIs, private dataset support, and result submission
-- `static/`: test-only frontend UI
-- `tools/`: private dataset zip builder and uploader
+- `app.py`: backend server, test/validation APIs, private dataset support, and result submission
+- `static/`: web frontend UI for test and validation workflows
+- `tools/`: private dataset zip builder/uploader and result download helpers
 - `Dockerfile`, `render.yaml`: Render deployment
 - `DEPLOY_WEB.md`: deployment and private dataset upload notes
 

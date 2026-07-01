@@ -2396,3 +2396,29 @@ body.test-only-distribution.mobile-viewport .context-menu button {
     max-height: min(30svh, 132px);
   }
 }
+
+
+.validation-only {
+  display: none;
+}
+
+body.validation-workflow .validation-only {
+  display: block;
+}
+
+body.validation-workflow .research-setup-panel label:not(:has(#researchSetupReaderNameInput)):not(:has(#validationDatasetKindSelect)),
+body.validation-workflow .research-fixed-count,
+body.validation-workflow .research-consent-box {
+  display: none;
+}
+
+body.validation-workflow .research-setup-panel {
+  max-width: 460px;
+}
+
+body.validation-workflow .research-wave-progress-hint {
+  grid-column: 1 / -1;
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0;
+}

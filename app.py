@@ -88,6 +88,7 @@ RESEARCH_DIR = USER_DATA_DIR / "research"
 RESEARCH_DATASET_DIR = RESEARCH_DIR / "datasets"
 REMOTE_DATASET_CACHE_DIR = RESEARCH_DIR / "remote_cache"
 SUBMITTED_RESULTS_DIR = RESEARCH_DIR / "submitted_results"
+VALIDATION_RESULTS_DIR = RESEARCH_DIR / "validation_results"
 PRIVATE_DATASET_DIR = RESEARCH_DIR / "private_datasets"
 USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
@@ -131,6 +132,9 @@ MUTATING_PATHS = {
     "/api/research/test/debriefing",
     "/api/research/test/export-file",
     "/api/research/test/submit-result",
+    "/api/research/validation/response",
+    "/api/research/validation/response/undo",
+    "/api/research/validation/submit-result",
     "/api/admin/private-dataset/upload",
 }
 LOGIN_PATH = "/login"
@@ -3759,6 +3763,369 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
     return json_text
 
 
+VALIDATION_DECISION_ADOPT = "adopt"
+VALIDATION_DECISION_EXCLUDE = "exclude"
+VALIDATION_DECISIONS = {VALIDATION_DECISION_ADOPT, VALIDATION_DECISION_EXCLUDE}
+VALIDATION_DECISION_LABELS = {
+    VALIDATION_DECISION_ADOPT: "採用",
+    VALIDATION_DECISION_EXCLUDE: "除外",
+}
+VALIDATION_DECISION_ALIASES = {
+    "adopt": VALIDATION_DECISION_ADOPT,
+    "accept": VALIDATION_DECISION_ADOPT,
+    "採用": VALIDATION_DECISION_ADOPT,
+    "include": VALIDATION_DECISION_ADOPT,
+    "keep": VALIDATION_DECISION_ADOPT,
+    "exclude": VALIDATION_DECISION_EXCLUDE,
+    "除外": VALIDATION_DECISION_EXCLUDE,
+    "reject": VALIDATION_DECISION_EXCLUDE,
+    "drop": VALIDATION_DECISION_EXCLUDE,
+}
+
+
+def validation_reviewer_id(value: Any) -> str:
+    return research_reader_id(value)
+
+
+def validation_result_path(dataset_id: str, reviewer_id: str) -> Path:
+    return VALIDATION_RESULTS_DIR / safe_filename_part(dataset_id or "dataset", "dataset") / f"{validation_reviewer_id(reviewer_id)}.json"
+
+
+def validation_result_payload(dataset_id: str, reviewer_id: str) -> dict[str, Any]:
+    payload = json_read(validation_result_path(dataset_id, reviewer_id), {"responses": []})
+    if isinstance(payload, dict):
+        payload.setdefault("responses", [])
+        return payload
+    if isinstance(payload, list):
+        return {"responses": payload}
+    return {"responses": []}
+
+
+def validation_case_rows(dataset: dict[str, Any]) -> list[dict[str, Any]]:
+    return [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
+
+
+def validation_set(value: Any) -> str:
+    text = str(value or "ied").strip().lower()
+    if text in {"artifact", "artifacts", "no_epilepsy", "non_epileptiform", "ied_absent"}:
+        return "artifact"
+    return "ied"
+
+
+def validation_case_in_set(row: dict[str, Any], selected: str) -> bool:
+    source = str(row.get("sourceGroup") or "").lower()
+    group = str(row.get("labelGroup") or "").lower()
+    if selected == "artifact":
+        return source in {"no_epilepsy", "artifact", "artifacts"} or group == "non_epileptiform"
+    return (source == "epilepsy" or group == "epileptiform") and source != "no_epilepsy"
+
+
+def validation_case_rows_for_set(dataset: dict[str, Any], selected: str) -> list[dict[str, Any]]:
+    selected = validation_set(selected)
+    return [row for row in validation_case_rows(dataset) if validation_case_in_set(row, selected)]
+
+
+def active_validation_response_map(responses: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    active: dict[str, dict[str, Any]] = {}
+    for row in responses:
+        if row.get("superseded") or row.get("undoneAt"):
+            continue
+        case_id = str(row.get("caseId") or "")
+        if case_id:
+            active[case_id] = row
+    return active
+
+
+def validation_summary(cases: list[dict[str, Any]], active: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    reviewed = list(active.values())
+    adopted = sum(1 for row in reviewed if row.get("decision") == VALIDATION_DECISION_ADOPT)
+    excluded = sum(1 for row in reviewed if row.get("decision") == VALIDATION_DECISION_EXCLUDE)
+    return {
+        "caseCount": len(cases),
+        "reviewedCount": len(reviewed),
+        "adoptedCount": adopted,
+        "excludedCount": excluded,
+        "remainingCount": max(0, len(cases) - len(reviewed)),
+    }
+
+
+def save_validation_payload(dataset: dict[str, Any], dataset_dir: Path, reviewer_id: str, payload: dict[str, Any]) -> None:
+    dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+    cases = validation_case_rows(dataset)
+    active = active_validation_response_map(list(payload.get("responses") or []))
+    payload["workflow"] = "validation"
+    payload["datasetId"] = dataset_id
+    payload["datasetPath"] = str(dataset_dir)
+    payload["reviewerId"] = validation_reviewer_id(reviewer_id)
+    payload["summary"] = validation_summary(cases, active)
+    payload["updatedAt"] = utc_now_iso()
+    json_write(validation_result_path(dataset_id, reviewer_id), payload)
+
+
+def validation_session(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset = load_research_dataset(payload.get("datasetPath") or payload.get("dataset"))
+    dataset_dir = research_dataset_path(dataset.get("datasetPath"))
+    dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+    reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+    selected = validation_set(payload.get("validationSet"))
+    cases = validation_case_rows_for_set(dataset, selected)
+    case_ids = {str(row.get("caseId") or "") for row in cases}
+    result = validation_result_payload(dataset_id, reviewer_id)
+    responses = list(result.get("responses") or [])
+    active = {
+        case_id: row
+        for case_id, row in active_validation_response_map(responses).items()
+        if case_id in case_ids
+    }
+    active_rows = sorted(active.values(), key=lambda row: (int(row.get("answerOrder") or 0), str(row.get("answeredAt") or "")))
+    return {
+        "workflow": "validation",
+        "datasetPath": str(dataset_dir),
+        "datasetId": dataset_id,
+        "name": dataset.get("name"),
+        "reviewerId": reviewer_id,
+        "validationSet": selected,
+        "cases": cases,
+        "responses": active_rows,
+        "answeredCount": len(active_rows),
+        "totalCount": len(cases),
+        "displayCount": len(cases),
+        "summary": validation_summary(cases, active),
+        "decisions": [
+            {"value": VALIDATION_DECISION_ADOPT, "label": VALIDATION_DECISION_LABELS[VALIDATION_DECISION_ADOPT]},
+            {"value": VALIDATION_DECISION_EXCLUDE, "label": VALIDATION_DECISION_LABELS[VALIDATION_DECISION_EXCLUDE]},
+        ],
+    }
+
+
+def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
+    with RESEARCH_RESPONSE_LOCK:
+        dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+        dataset = load_research_dataset(str(dataset_dir))
+        dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+        reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+        selected = validation_set(payload.get("validationSet"))
+        case_id = str(payload.get("caseId") or "")
+        raw_decision = str(payload.get("decision") or payload.get("action") or "").strip()
+        decision = VALIDATION_DECISION_ALIASES.get(raw_decision.lower(), VALIDATION_DECISION_ALIASES.get(raw_decision, raw_decision))
+        if decision not in VALIDATION_DECISIONS:
+            raise ValueError("Unsupported validation decision.")
+        cases = validation_case_rows_for_set(dataset, selected)
+        case = next((row for row in cases if str(row.get("caseId")) == case_id), None)
+        if not case:
+            raise PermissionError("This case is not part of the selected validation dataset.")
+        result = validation_result_payload(dataset_id, reviewer_id)
+        responses = list(result.get("responses") or [])
+        now = utc_now_iso()
+        response_id = str(uuid.uuid4())
+        for row in responses:
+            if str(row.get("caseId") or "") == case_id and not row.get("superseded") and not row.get("undoneAt"):
+                row["superseded"] = True
+                row["supersededAt"] = now
+                row["replacedByResponseId"] = response_id
+        answer_order = 1 + sum(1 for row in responses if not row.get("superseded") and not row.get("undoneAt"))
+        response = {
+            "responseId": response_id,
+            "reviewerId": reviewer_id,
+            "validationSet": selected,
+            "caseId": case_id,
+            "answerOrder": answer_order,
+            "decision": decision,
+            "decisionLabel": VALIDATION_DECISION_LABELS[decision],
+            "acceptedForTest": decision == VALIDATION_DECISION_ADOPT,
+            "excludedFromTest": decision == VALIDATION_DECISION_EXCLUDE,
+            "labelGroup": case.get("labelGroup", ""),
+            "referenceLabel": case.get("referenceLabel", ""),
+            "sourceGroup": case.get("sourceGroup", ""),
+            "recordingId": case.get("recordingId", ""),
+            "edfPath": case.get("edfPath", ""),
+            "eventTime": profile_value(payload, "eventTime") or profile_value(case, "eventTime"),
+            "epochStart": profile_value(payload, "epochStart") or profile_value(case, "epochStart"),
+            "durationSec": profile_value(payload, "durationSec") or profile_value(case, "durationSec"),
+            "startedAt": str(payload.get("startedAt") or now).strip(),
+            "answeredAt": str(payload.get("answeredAt") or now).strip(),
+            "elapsedMs": int(float(payload.get("elapsedMs") or 0)),
+            "displayMode": payload.get("displayMode") or "validation_single",
+            "initialMontage": payload.get("initialMontage") or payload.get("usedMontage") or "",
+            "usedMontage": payload.get("usedMontage") or "",
+            "finalMontage": payload.get("finalMontage") or payload.get("usedMontage") or "",
+            "sensitivity": payload.get("sensitivity") or "",
+            "sensitivityUvPerMm": payload.get("sensitivityUvPerMm") or "",
+            "tc": payload.get("tc") or "",
+            "timeConstant": payload.get("timeConstant") or payload.get("tc") or "",
+            "timeConstantLabel": payload.get("timeConstantLabel") or "",
+            "hf": payload.get("hf") or "",
+            "highCutFilter": payload.get("highCutFilter") or payload.get("hf") or "",
+            "highCutFilterLabel": payload.get("highCutFilterLabel") or "",
+            "ac": payload.get("ac") or "",
+            "acFilter": payload.get("acFilter") or payload.get("ac") or "",
+            "acFilterLabel": payload.get("acFilterLabel") or "",
+            "acFilterUsed": bool(payload.get("acFilterUsed")),
+            "timebaseSec": payload.get("timebaseSec") or "",
+            "clickedElectrode": payload.get("clickedElectrode") or "",
+            "clickedCanvasX": payload.get("clickedCanvasX") or "",
+            "clickedCanvasY": payload.get("clickedCanvasY") or "",
+            "clickedRowIndex": payload.get("clickedRowIndex") or "",
+            "spikeTime": payload.get("spikeTime") or "",
+            "spikeSampleIndex": payload.get("spikeSampleIndex") or "",
+            "spikeSfreq": payload.get("spikeSfreq") or "",
+            "superseded": False,
+            "undoneAt": "",
+            "replacedByResponseId": "",
+        }
+        responses.append(response)
+        result["responses"] = responses
+        result["reviewerProfile"] = payload.get("reviewerProfile") if isinstance(payload.get("reviewerProfile"), dict) else {}
+        save_validation_payload(dataset, dataset_dir, reviewer_id, result)
+        return {"response": response, "session": validation_session({"datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
+
+
+def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
+    with RESEARCH_RESPONSE_LOCK:
+        dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+        dataset = load_research_dataset(str(dataset_dir))
+        dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+        reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+        selected = validation_set(payload.get("validationSet"))
+        response_id = str(payload.get("responseId") or "")
+        result = validation_result_payload(dataset_id, reviewer_id)
+        responses = list(result.get("responses") or [])
+        candidates = [row for row in responses if not row.get("superseded") and not row.get("undoneAt")]
+        target = None
+        if response_id:
+            target = next((row for row in candidates if row.get("responseId") == response_id), None)
+        if target is None and candidates:
+            target = max(candidates, key=lambda row: str(row.get("answeredAt") or ""))
+        if target is None:
+            raise ValueError("No active validation response to undo.")
+        target["undoneAt"] = utc_now_iso()
+        result["responses"] = responses
+        save_validation_payload(dataset, dataset_dir, reviewer_id, result)
+        return {"undone": target, "session": validation_session({"datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
+
+
+def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None) -> dict[str, Any]:
+    dataset = load_research_dataset(str(dataset_dir))
+    dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+    case_by_id = {str(row.get("caseId") or ""): row for row in validation_case_rows(dataset)}
+    result_dir = VALIDATION_RESULTS_DIR / safe_filename_part(dataset_id, "dataset")
+    reviewer_ids = [validation_reviewer_id(reviewer_id)] if reviewer_id else []
+    if not reviewer_ids and result_dir.exists():
+        reviewer_ids = sorted(path.stem for path in result_dir.glob("*.json") if path.is_file())
+    reviewers = []
+    case_decisions: dict[str, list[dict[str, Any]]] = {case_id: [] for case_id in case_by_id}
+    for rid in reviewer_ids:
+        payload = validation_result_payload(dataset_id, rid)
+        active = active_validation_response_map(list(payload.get("responses") or []))
+        rows = []
+        for response in sorted(active.values(), key=lambda row: (int(row.get("answerOrder") or 0), str(row.get("answeredAt") or ""))):
+            case = case_by_id.get(str(response.get("caseId") or ""), {})
+            row = {
+                "caseId": response.get("caseId", ""),
+                "decision": response.get("decision", ""),
+                "decisionLabel": response.get("decisionLabel", ""),
+                "acceptedForTest": bool(response.get("acceptedForTest")),
+                "excludedFromTest": bool(response.get("excludedFromTest")),
+                "answeredAt": response.get("answeredAt", ""),
+                "recordingId": response.get("recordingId") or case.get("recordingId", ""),
+                "labelGroup": response.get("labelGroup") or case.get("labelGroup", ""),
+                "sourceGroup": response.get("sourceGroup") or case.get("sourceGroup", ""),
+            }
+            rows.append(row)
+            if row["caseId"] in case_decisions:
+                case_decisions[row["caseId"]].append({"reviewerId": rid, **row})
+        reviewers.append({
+            "reviewerId": rid,
+            "summary": validation_summary(list(case_by_id.values()), active),
+            "responses": rows,
+        })
+    aggregate = {
+        "reviewerCount": len(reviewers),
+        "caseCount": len(case_by_id),
+        "reviewedCount": sum(row["summary"]["reviewedCount"] for row in reviewers),
+        "adoptedCount": sum(row["summary"]["adoptedCount"] for row in reviewers),
+        "excludedCount": sum(row["summary"]["excludedCount"] for row in reviewers),
+        "caseDecisions": case_decisions,
+    }
+    return {
+        "exportVersion": "validation-1",
+        "exportedAt": utc_now_iso(),
+        "workflow": "validation",
+        "dataset": research_compact_dataset_payload(dataset, dataset_dir),
+        "aggregate": aggregate,
+        "reviewers": reviewers,
+        "cases": research_export_case_payload(dataset),
+    }
+
+
+def export_validation_results_json(dataset_dir: Path, reviewer_id: str | None = None) -> str:
+    return json.dumps(validation_export_payload(dataset_dir, reviewer_id), ensure_ascii=False, indent=2, default=json_safe) + "\n"
+
+
+def save_validation_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+    dataset = load_research_dataset(str(dataset_dir))
+    dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+    reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+    selected = validation_set(payload.get("validationSet"))
+    current = validation_result_payload(dataset_id, reviewer_id)
+    current["submittedAt"] = utc_now_iso()
+    current["lastSubmittedValidationSet"] = selected
+    save_validation_payload(dataset, dataset_dir, reviewer_id, current)
+    target = validation_result_path(dataset_id, reviewer_id)
+    return {
+        "ok": True,
+        "submittedAt": current["submittedAt"],
+        "submissionId": target.relative_to(VALIDATION_RESULTS_DIR).as_posix(),
+        "path": str(target),
+        "filename": target.name,
+        "sizeBytes": target.stat().st_size if target.exists() else 0,
+        "datasetId": dataset_id,
+        "reviewerId": reviewer_id,
+    }
+
+
+def validation_result_inventory() -> dict[str, Any]:
+    VALIDATION_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for path in sorted(VALIDATION_RESULTS_DIR.rglob("*.json")):
+        if not path.is_file():
+            continue
+        payload = json_read(path, {})
+        summary = payload.get("summary") if isinstance(payload, dict) else {}
+        stat = path.stat()
+        rows.append({
+            "submissionId": path.relative_to(VALIDATION_RESULTS_DIR).as_posix(),
+            "datasetId": path.parent.name,
+            "reviewerId": path.stem,
+            "filename": path.name,
+            "sizeBytes": stat.st_size,
+            "updatedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            "summary": summary if isinstance(summary, dict) else {},
+        })
+    rows.sort(key=lambda row: row.get("updatedAt", ""), reverse=True)
+    return {
+        "ok": True,
+        "validationResultsDir": str(VALIDATION_RESULTS_DIR),
+        "resultCount": len(rows),
+        "results": rows,
+    }
+
+
+def validation_result_text(submission_id: str) -> str:
+    text = str(submission_id or "").strip().lstrip("/")
+    if not text:
+        raise ValueError("submissionId is required.")
+    target = (VALIDATION_RESULTS_DIR / text).resolve()
+    root = VALIDATION_RESULTS_DIR.resolve()
+    if not path_is_relative_to(target, root) or target.suffix.lower() != ".json":
+        raise ValueError("Invalid submissionId.")
+    if not target.exists() or not target.is_file():
+        raise FileNotFoundError(f"Validation result not found: {text}")
+    return target.read_text(encoding="utf-8")
+
+
+
 def save_research_responses_json_to_desktop(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
     reader_id = str(payload.get("readerId") or "").strip() or None
@@ -4190,6 +4557,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         "userDataDir": str(USER_DATA_DIR),
                         "researchDir": str(RESEARCH_DIR),
                         "privateDatasetDir": str(PRIVATE_DATASET_DIR),
+                        "validationResultsDir": str(VALIDATION_RESULTS_DIR),
                         "allowedResearchWriteRoots": [str(root) for root in ALLOWED_RESEARCH_WRITE_ROOTS],
                         "buildInfo": app_build_info(),
                         "appFingerprint": app_fingerprint(),
@@ -4207,6 +4575,14 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_text(submitted_result_text(required(qs, "id")), "application/json; charset=utf-8")
+            if path == "/api/admin/validation-results/list":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
+                return self.send_json(validation_result_inventory())
+            if path == "/api/admin/validation-results/item":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
+                return self.send_text(validation_result_text(required(qs, "id")), "application/json; charset=utf-8")
             if path == "/api/recordings":
                 if qs.get("refresh", ["0"])[0] == "1":
                     self.store.refresh()
@@ -4270,6 +4646,16 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     "sessionToken": qs.get("sessionToken", [""])[0],
                     "accessCookieHash": self.access_cookie_hash(),
                 }), "application/json; charset=utf-8")
+            if path == "/api/research/validation/session":
+                return self.send_json(validation_session({
+                    "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
+                    "reviewerId": qs.get("reviewerId", qs.get("readerId", ["reviewer"]))[0],
+                    "validationSet": qs.get("validationSet", ["ied"])[0],
+                }))
+            if path == "/api/research/validation/export.json":
+                dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
+                reviewer = qs.get("reviewerId", [""])[0] or None
+                return self.send_text(export_validation_results_json(dataset_dir, reviewer), "application/json; charset=utf-8")
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
         except FileNotFoundError as exc:
             self.send_json({"error": str(exc)}, status=404)
@@ -4315,6 +4701,12 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(save_research_responses_json_to_desktop(payload))
             if parsed.path == "/api/research/test/submit-result":
                 return self.send_json(save_research_result_submission(payload))
+            if parsed.path == "/api/research/validation/response":
+                return self.send_json(save_validation_response(payload))
+            if parsed.path == "/api/research/validation/response/undo":
+                return self.send_json(undo_validation_response(payload))
+            if parsed.path == "/api/research/validation/submit-result":
+                return self.send_json(save_validation_result_submission(payload))
             if parsed.path == "/api/admin/private-dataset/upload":
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
@@ -4368,6 +4760,7 @@ def main() -> None:
     RESEARCH_DATASET_DIR.mkdir(parents=True, exist_ok=True)
     PRIVATE_DATASET_DIR.mkdir(parents=True, exist_ok=True)
     SUBMITTED_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    VALIDATION_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     store = RecordingStore(fds_dir, edf_dirs)
     store.refresh()

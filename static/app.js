@@ -30,6 +30,13 @@ const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitu
 const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
 const RIGHT_PANEL_TABS = ["metadata", "test"];
 const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
+const WORKFLOW_MODE = new URLSearchParams(window.location.search || "").get("mode") === "validation" ? "validation" : "test";
+const VALIDATION_DECISION_ADOPT = "adopt";
+const VALIDATION_DECISION_EXCLUDE = "exclude";
+const VALIDATION_DECISION_LABELS = {
+  [VALIDATION_DECISION_ADOPT]: "採用",
+  [VALIDATION_DECISION_EXCLUDE]: "除外",
+};
 
 const state = {
   recordings: [],
@@ -88,6 +95,10 @@ const state = {
   researchUsualMontage: "",
   lastResearchResponse: null,
   lastResearchResponseCaseIndex: -1,
+  validationSession: null,
+  validationResponses: [],
+  lastValidationResponse: null,
+  lastValidationResponseCaseIndex: -1,
 };
 
 const els = {
@@ -125,6 +136,7 @@ const els = {
   researchSetupScreen: document.getElementById("researchSetupScreen"),
   researchSetupMessage: document.getElementById("researchSetupMessage"),
   researchSetupDatasetPathInput: document.getElementById("researchSetupDatasetPathInput"),
+  validationDatasetKindSelect: document.getElementById("validationDatasetKindSelect"),
   researchDebriefScreen: document.getElementById("researchDebriefScreen"),
   researchDebriefMessage: document.getElementById("researchDebriefMessage"),
   researchDebriefBehaviorChangeInput: document.getElementById("researchDebriefBehaviorChangeInput"),
@@ -344,7 +356,7 @@ async function init() {
   if (els.recordingLabel) els.recordingLabel.hidden = true;
   state.rightPanelVisible = false;
   applyRightPanelVisibility({ redraw: false });
-  setResearchMode("test");
+  setResearchMode(WORKFLOW_MODE);
   rememberControlValues();
   startControlValueWatcher();
   await loadRecordings();
@@ -366,6 +378,31 @@ function applyLaunchParams() {
     els.researchSetupDatasetPathInput.value = dataset;
   }
   applyFixedResearchQuestionCount();
+  applyWorkflowChrome();
+}
+
+function isValidationWorkflow() {
+  return state.researchMode === "validation";
+}
+
+function applyWorkflowChrome() {
+  const validation = WORKFLOW_MODE === "validation" || isValidationWorkflow();
+  document.body.classList.toggle("validation-workflow", validation);
+  const title = document.querySelector(".research-setup-title");
+  if (title) title.textContent = validation ? "Validation設定" : "テスト設定";
+  const readerLabel = els.researchSetupReaderNameInput?.closest("label");
+  if (readerLabel?.firstChild) readerLabel.firstChild.textContent = validation ? "Reviewer ID" : "回答者名 (English)";
+  if (els.researchSetupReaderNameInput) {
+    els.researchSetupReaderNameInput.placeholder = validation ? "例: reviewer01" : "例: Taro Yamada";
+    els.researchSetupReaderNameInput.autocomplete = validation ? "off" : "name";
+  }
+  if (els.researchSetupStartBtn) els.researchSetupStartBtn.textContent = validation ? "Validation開始" : "開始";
+  if (els.validationDatasetKindSelect) els.validationDatasetKindSelect.closest("label").hidden = !validation;
+  const tab = document.querySelector('[data-right-tab="test"]');
+  if (tab) tab.textContent = validation ? "Validation" : "Test";
+  const panelTitle = document.querySelector('[data-right-tab-panel="test"] .panel-title');
+  if (panelTitle) panelTitle.textContent = validation ? "Validation" : "Test";
+  if (els.researchUndoBtn) els.researchUndoBtn.title = validation ? "前のvalidation回答を取り消して、そのepochに戻ります" : "前の回答を取り消して、その問題に戻ります";
 }
 
 function scheduleLayoutRefresh() {
@@ -668,8 +705,8 @@ function bindControls() {
 
 
 function bindResearchControls() {
-  els.researchStartTestBtn?.addEventListener("click", startResearchTest);
-  els.researchSetupStartBtn?.addEventListener("click", startResearchTest);
+  els.researchStartTestBtn?.addEventListener("click", startWorkflow);
+  els.researchSetupStartBtn?.addEventListener("click", startWorkflow);
   els.researchSetupResetProfileBtn?.addEventListener("click", resetResearchProfileForm);
   els.researchCompleteSaveDesktopBtn?.addEventListener("click", exportResearchJson);
   els.researchShareJsonBtn?.addEventListener("click", shareResearchJsonByEmail);
@@ -704,6 +741,12 @@ function bindResearchControls() {
   }));
   updateEpilepsyCenterDurationRequirement();
 }
+function startWorkflow() {
+  if (isValidationWorkflow()) return startValidationWorkflow();
+  return startResearchTest();
+}
+
+
 
 function resetResearchProfileForm() {
   const textInputs = [
@@ -746,6 +789,22 @@ function updateEpilepsyCenterDurationRequirement() {
 
 function validateResearchProfileForStart() {
   updateEpilepsyCenterDurationRequirement();
+  if (isValidationWorkflow()) {
+    if (!String(els.validationDatasetKindSelect?.value || "").trim()) {
+      const message = "評価対象を選択してください。";
+      setResearchSetupMessage(message, true);
+      setStatus(message, { error: true });
+      els.validationDatasetKindSelect?.focus();
+      return false;
+    }
+    const reviewerId = String(els.researchSetupReaderNameInput?.value || els.researchSetupReaderIdInput?.value || "").trim();
+    if (reviewerId) return true;
+    const message = "Reviewer IDを入力してください。";
+    setResearchSetupMessage(message, true);
+    setStatus(message, { error: true });
+    els.researchSetupReaderNameInput?.focus();
+    return false;
+  }
   const requiredFields = [
     [els.researchSetupReaderNameInput, "回答者名 (English)"],
     [els.researchSetupReaderEmailInput, "メール"],
@@ -1114,7 +1173,8 @@ function updateResearchControlsVisibility() {
 
 function updateResearchSetupScreen() {
   if (!els.researchSetupScreen) return;
-  const showSetup = state.researchMode === "test" && !state.researchSession;
+  applyWorkflowChrome();
+  const showSetup = state.researchMode === "validation" ? !state.validationSession : (state.researchMode === "test" && !state.researchSession);
   document.body.classList.toggle("research-setup-active", showSetup);
   els.researchSetupScreen.hidden = !showSetup;
   els.researchSetupScreen.setAttribute("aria-hidden", showSetup ? "false" : "true");
@@ -1244,18 +1304,19 @@ function showResearchCompletion() {
   hideResearchDebriefing();
   els.researchCompleteScreen.hidden = false;
   els.researchCompleteScreen.setAttribute("aria-hidden", "false");
-  if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
+  const validation = isValidationWorkflow();
+  if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = validation ? "Validation完了" : "お疲れ様でした!";
   if (els.researchCompleteMessage) {
-    els.researchCompleteMessage.hidden = mobile;
-    els.researchCompleteMessage.textContent = mobile
-      ? ""
-      : "JSONファイルをダウンロードし、メールに添付して送ってください。";
+    els.researchCompleteMessage.hidden = mobile && !validation;
+    els.researchCompleteMessage.textContent = validation
+      ? "Validation結果はサーバーに保存されました。"
+      : (mobile ? "" : "JSONファイルをダウンロードし、メールに添付して送ってください。");
   }
-  if (els.researchMailBox) els.researchMailBox.hidden = mobile;
-  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = mobile;
-  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = !mobile;
+  if (els.researchMailBox) els.researchMailBox.hidden = validation || mobile;
+  if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = validation || mobile;
+  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = validation || !mobile;
   if (els.researchCompleteSaveDesktopBtn) {
-    els.researchCompleteSaveDesktopBtn.hidden = mobile;
+    els.researchCompleteSaveDesktopBtn.hidden = validation || mobile;
     els.researchCompleteSaveDesktopBtn.textContent = "JSONファイルをダウンロード";
   }
   updateResearchEmailBody();
@@ -1304,12 +1365,13 @@ function setResearchStartBusy(isBusy) {
   for (const btn of [els.researchStartTestBtn, els.researchSetupStartBtn]) {
     if (!btn) continue;
     btn.disabled = isBusy;
-    btn.textContent = isBusy ? "開始中..." : (btn === els.researchSetupStartBtn ? "開始" : "Start");
+    btn.textContent = isBusy ? "開始中..." : (btn === els.researchSetupStartBtn ? (isValidationWorkflow() ? "Validation開始" : "開始") : "Start");
   }
 }
 
 function setResearchMode(mode) {
-  state.researchMode = "test";
+  state.researchMode = mode === "validation" ? "validation" : "test";
+  applyWorkflowChrome();
   hideResearchCompletion();
   document.body.classList.add("research-mode");
   updateResearchControlsVisibility();
@@ -1321,6 +1383,10 @@ function setResearchMode(mode) {
     state.researchSession = null;
     state.researchResponses = [];
     state.lastResearchResponse = null;
+  } else {
+    state.validationSession = null;
+    state.validationResponses = [];
+    state.lastValidationResponse = null;
   }
   renderRightResearchPanels();
   hideResearchToast();
@@ -1329,7 +1395,10 @@ function setResearchMode(mode) {
 }
 
 function activeResearchCases() {
-  if (state.researchMode === "test" && state.researchSession) {
+  if (state.researchMode === "validation" && state.validationSession) {
+    return state.validationSession.cases || [];
+  }
+  if ((state.researchMode === "test" && state.researchSession) || (isValidationWorkflow() && state.validationSession)) {
     const phase = String(state.researchSession.phase || "");
     const cases = cappedResearchSessionCases(state.researchSession.cases || []);
     if (Number(state.researchSession.answeredCount || 0) > 0) {
@@ -1503,7 +1572,7 @@ function hideResearchWaveProgress() {
 }
 
 function researchProgressSnapshot() {
-  const session = state.researchSession;
+  const session = isValidationWorkflow() ? state.validationSession : state.researchSession;
   const cases = activeResearchCases();
   const current = currentResearchCase();
   const total = Number(session?.totalCount || cases.filter((row) => !row.sampleEpoch).length || 0);
@@ -1517,7 +1586,8 @@ function researchProgressSnapshot() {
 
 function firstUnansweredResearchCaseIndex() {
   const cases = activeResearchCases();
-  const answeredIds = new Set((state.researchSession?.responses || []).map((row) => String(row.caseId || "")));
+  const responseSource = isValidationWorkflow() ? state.validationSession?.responses : state.researchSession?.responses;
+  const answeredIds = new Set((responseSource || []).map((row) => String(row.caseId || "")));
   const index = cases.findIndex((row) => !row.sampleEpoch && !answeredIds.has(String(row.caseId || "")));
   return index >= 0 ? index : -1;
 }
@@ -1572,6 +1642,15 @@ async function submitResearchDebriefing() {
 async function completeResearchTest() {
   hideResearchTutorial();
   refreshResearchDisplay();
+  if (isValidationWorkflow()) {
+    showResearchCompletion();
+    try {
+      await submitValidationJson({ automatic: true });
+    } catch (err) {
+      setStatus(`Validation submit failed: ${err.message}`, { error: true });
+    }
+    return;
+  }
   if (!state.researchDebriefSubmitted && els.researchDebriefScreen) {
     showResearchDebriefing();
     setStatus("事後アンケートに回答してください");
@@ -1592,14 +1671,16 @@ async function completeResearchTest() {
 
 function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
   if (!els.researchWaveProgress) return;
-  const session = state.researchSession;
-  if (!session || state.researchMode !== "test" || els.researchCompleteScreen?.hidden === false || els.researchDebriefScreen?.hidden === false) {
+  const session = isValidationWorkflow() ? state.validationSession : state.researchSession;
+  if (!session || (state.researchMode !== "test" && state.researchMode !== "validation") || els.researchCompleteScreen?.hidden === false || els.researchDebriefScreen?.hidden === false) {
     hideResearchWaveProgress();
     return;
   }
   const { total, answered, currentQuestion, remaining, pct, isPractice } = snapshot;
-  const title = isPractice ? researchPracticeLabel(currentResearchCase()) : `本番 ${currentQuestion}/${total || 0}`;
-  const detail = isPractice ? `本番は未開始 · 全 ${total || 0} 問` : `回答済み ${answered}/${total || 0} · 残り ${remaining} 問`;
+  const currentCase = currentResearchCase();
+  const title = isValidationWorkflow() ? `Validation ${currentQuestion}/${total || 0}` : (isPractice ? researchPracticeLabel(currentCase) : `本番 ${currentQuestion}/${total || 0}`);
+  const detail = isValidationWorkflow() ? `${selectedValidationDatasetKindLabel()} · ${validationDatasetKindLabel(currentCase)} · 確認済み ${answered}/${total || 0} · 残り ${remaining} 件` : (isPractice ? `本番は未開始 · 全 ${total || 0} 問` : `回答済み ${answered}/${total || 0} · 残り ${remaining} 問`);
+  const hint = isValidationWorkflow() ? '<div class="research-wave-progress-hint">Enter=採用 / Backspace・Delete=除外</div>' : '';
   els.researchWaveProgress.hidden = false;
   els.researchWaveProgress.setAttribute("aria-hidden", "false");
   els.researchWaveProgress.innerHTML = `
@@ -1609,6 +1690,7 @@ function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
     </div>
     <div class="research-wave-progress-meter" aria-label="テスト進捗 ${pct}%"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
     <div class="research-wave-progress-pct">${pct}%</div>
+    ${hint}
   `;
 }
 
@@ -1622,7 +1704,7 @@ function hideResearchInlineProgress() {
 
 function updateResearchUndoButton() {
   if (!els.researchUndoBtn) return;
-  const hasUndoTarget = activeResearchResponses().length > 0;
+  const hasUndoTarget = isValidationWorkflow() ? activeValidationResponses().length > 0 : activeResearchResponses().length > 0;
   els.researchUndoBtn.disabled = !hasUndoTarget;
 }
 
@@ -1634,6 +1716,15 @@ function renderResearchInlineProgress(snapshot = null) {
     if (el) {
       el.hidden = false;
       el.textContent = "完了";
+    }
+    return;
+  }
+  if (isValidationWorkflow() && state.validationSession) {
+    const data = snapshot || researchProgressSnapshot();
+    hideResearchInlineProgress();
+    if (els.researchInlineProgress) {
+      els.researchInlineProgress.hidden = false;
+      els.researchInlineProgress.textContent = `残り ${data.remaining} 件`;
     }
     return;
   }
@@ -1654,8 +1745,8 @@ function renderResearchInlineProgress(snapshot = null) {
 
 function renderResearchProgress() {
   if (!els.researchTestProgress) return;
-  const session = state.researchSession;
-  if (!session || state.researchMode !== "test") {
+  const session = isValidationWorkflow() ? state.validationSession : state.researchSession;
+  if (!session || (state.researchMode !== "test" && state.researchMode !== "validation")) {
     els.researchTestProgress.innerHTML = '<div class="research-empty">No test running.</div>';
     renderResearchWaveProgress();
     renderResearchInlineProgress();
@@ -1665,11 +1756,11 @@ function renderResearchProgress() {
   const snapshot = researchProgressSnapshot();
   const { cases, current, total, answered, currentQuestion, remaining, pct, isPractice } = snapshot;
   const displayIndex = cases.length ? state.researchCaseIndex + 1 : 0;
-  const currentLabel = isPractice ? researchPracticeLabel(current) : `本番 ${currentQuestion}/${total || 0}`;
+  const currentLabel = isValidationWorkflow() ? `Validation ${currentQuestion}/${total || 0}` : (isPractice ? researchPracticeLabel(current) : `本番 ${currentQuestion}/${total || 0}`);
   els.researchTestProgress.innerHTML = `
     <div class="research-progress-card">
       <div class="research-progress-head"><strong>${escapeHtml(currentLabel)}</strong><span>${pct}%</span></div>
-      <div>回答済み ${answered}/${total} · 残り ${remaining} 問</div>
+      <div>${isValidationWorkflow() ? "確認済み" : "回答済み"} ${answered}/${total} · 残り ${remaining} ${isValidationWorkflow() ? "件" : "問"}</div>
       <div class="research-progress-bar"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
       <div class="research-small">Showing ${displayIndex}/${cases.length || 0}${isPractice ? " · 説明用テスト問題" : (current?.sampleEpoch ? " · sample epoch" : "")}</div>
     </div>
@@ -1782,6 +1873,7 @@ function renderRightResearchPanels() {
 
 function renderRightTestPanel() {
   if (!els.rightTestPanel) return;
+  if (isValidationWorkflow()) return renderRightValidationPanel();
   const session = state.researchSession;
   const current = currentResearchCase();
   const responses = activeResearchResponses();
@@ -1832,6 +1924,229 @@ async function loadResearchDatasetFromPath(path) {
   refreshResearchDisplay();
   return dataset;
 }
+
+function activeValidationResponses() {
+  return state.validationSession?.responses || state.validationResponses || [];
+}
+
+function validationDatasetKindLabel(row = currentResearchCase()) {
+  const source = String(row?.sourceGroup || "").toLowerCase();
+  const group = String(row?.labelGroup || "").toLowerCase();
+  if (source.includes("epilepsy") && !source.includes("no_")) return "IEDありデータセット";
+  if (group === "epileptiform") return "IEDありデータセット";
+  if (source.includes("artifact") || source.includes("no_epilepsy") || group === "non_epileptiform") return "アーチファクト/IEDなしデータセット";
+  return row?.sourceGroup || row?.labelGroup || "データセット種別未設定";
+}
+
+function selectedValidationDatasetKind() {
+  return String(els.validationDatasetKindSelect?.value || "ied").trim() || "ied";
+}
+
+function selectedValidationDatasetKindLabel() {
+  return selectedValidationDatasetKind() === "artifact" ? "アーチファクトデータセット" : "IEDありデータセット";
+}
+
+function setValidationResponsesFromSession(session) {
+  state.validationResponses = Array.isArray(session?.responses) ? session.responses : [];
+}
+
+function renderRightValidationPanel() {
+  if (!els.rightTestPanel) return;
+  const session = state.validationSession;
+  const current = currentResearchCase();
+  const responses = activeValidationResponses();
+  const currentRows = current ? [
+    ["Workflow", "Validation"],
+    ["Current", `${state.researchCaseIndex + 1}/${activeResearchCases().length || 0}`],
+    ["Case", current.caseId || ""],
+    ["Recording", current.recordingId || ""],
+    ["Epoch", `${formatSec(Number(current.epochStart || 0))} + ${Number(current.durationSec || 10)}s`],
+    ["Dataset", validationDatasetKindLabel(current)],
+    ["Selected", selectedValidationDatasetKindLabel()],
+    ["Reference", researchCaseLabelGroup(current)],
+    ["操作", "Enter=採用 / Backspace・Delete=除外"],
+    ["Reviewer", session?.reviewerId || ""],
+  ] : [];
+  const resultCards = responses.map((response, index) => {
+    const rows = [
+      ["Case", response.caseId || ""],
+      ["Decision", response.decisionLabel || VALIDATION_DECISION_LABELS[response.decision] || response.decision || ""],
+      ["Recording", response.recordingId || ""],
+      ["Reference", researchCaseLabelGroup(response)],
+      ["Answered", response.answeredAt || ""],
+    ];
+    return `<div class="research-result-card"><div class="research-result-head"><strong>${Number(response.answerOrder || index + 1)}件目</strong><span>${escapeHtml(response.decisionLabel || VALIDATION_DECISION_LABELS[response.decision] || "-")}</span></div>${researchDetailRows(rows)}</div>`;
+  }).join("");
+  els.rightTestPanel.innerHTML = `
+    ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No validation epoch loaded.</div>'}
+    <div class="research-result-title">Validation記録 (${responses.length})</div>
+    <div class="research-result-list">${resultCards || '<div class="research-empty">No saved decision yet.</div>'}</div>
+  `;
+}
+
+async function startValidationWorkflow() {
+  requestMobileFullscreen();
+  setResearchSetupMessage("入力内容を確認中...");
+  if (!validateResearchProfileForStart()) return;
+  saveResearchProfile();
+  hideResearchCompletion();
+  hideResearchDebriefing();
+  hideResearchTutorial();
+  state.researchTestStartedAt = "";
+  state.researchTestStartedMs = 0;
+  state.researchTestCompletedAt = "";
+  state.researchResultAutoSubmitted = false;
+  resetResearchPrefetch({ clearRecords: true });
+  const profile = researchProfile();
+  const reviewerId = safeResultFilenamePart(profile.readerName || profile.readerId || "reviewer", "reviewer");
+  const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
+  if (!setupDatasetPath) {
+    const message = "Validation用データセットを読み込めません。管理者に連絡してください。";
+    setResearchSetupMessage(message, true);
+    setStatus(message, { error: true });
+    return;
+  }
+  setResearchSetupMessage("Starting validation...");
+  setResearchStartBusy(true);
+  setStatus("Starting validation...", { busy: true });
+  try {
+    let datasetPath = setupDatasetPath || state.researchDatasetPath || "";
+    const dataset = await loadResearchDatasetFromPath(datasetPath);
+    datasetPath = dataset.datasetPath || datasetPath;
+    const validationSet = selectedValidationDatasetKind();
+    const session = await fetchJson(`/api/research/validation/session?${qs({ dataset: datasetPath, reviewerId, validationSet })}`);
+    if (!Array.isArray(session.cases) || !session.cases.length) {
+      throw new Error("No validation cases are available for this dataset.");
+    }
+    state.validationSession = session;
+    setValidationResponsesFromSession(session);
+    state.researchDatasetPath = session.datasetPath || datasetPath;
+    state.researchCaseIndex = Math.max(0, firstUnansweredResearchCaseIndex());
+    if (state.researchCaseIndex < 0) state.researchCaseIndex = 0;
+    markResearchTestStarted(new Date());
+    setResearchSetupMessage("");
+    setResearchMode("validation");
+    state.rightPanelTab = "test";
+    applyRightPanelTab();
+    setRightPanelVisible(true, { save: false });
+    updateResearchSetupScreen();
+    refreshResearchDisplay();
+    if (firstUnansweredResearchCaseIndex() < 0) await completeResearchTest();
+    else await showResearchCase(state.researchCaseIndex);
+  } catch (err) {
+    const message = `Validation start failed: ${err.message}`;
+    setResearchSetupMessage(message, true);
+    setStatus(message, { error: true });
+  } finally {
+    setResearchStartBusy(false);
+  }
+}
+
+function renderValidationContextMenu() {
+  const context = state.context || {};
+  const channel = context.channel || context.montageChannel || "";
+  const onset = Number(context.onset);
+  const target = [channel, Number.isFinite(onset) ? formatSec(onset) : ""].filter(Boolean).join(" · ");
+  els.contextMenu.innerHTML = `
+    <div class="context-menu-caption">Validation${target ? `: ${escapeHtml(target)}` : ""}<br>Enter=採用 / Backspace・Delete=除外</div>
+    <button data-action="validation-decision" data-decision="${VALIDATION_DECISION_ADOPT}">採用</button>
+    <button data-action="validation-decision" data-decision="${VALIDATION_DECISION_EXCLUDE}" class="danger-action">除外</button>
+  `;
+}
+
+async function saveValidationDecision(decision) {
+  const item = currentResearchCase();
+  if (!item || !state.validationSession || state.researchSaving) return;
+  state.researchSaving = true;
+  const answeredAt = new Date().toISOString();
+  const elapsedMs = state.researchCaseStartedAt ? Date.now() - Date.parse(state.researchCaseStartedAt) : 0;
+  const reviewerId = state.validationSession.reviewerId || safeResultFilenamePart(researchProfile().readerName || "reviewer", "reviewer");
+  try {
+    const responsePayload = {
+      datasetPath: state.researchDatasetPath,
+      reviewerId,
+      validationSet: selectedValidationDatasetKind(),
+      reviewerProfile: { reviewerId, reviewerName: researchProfile().readerName || reviewerId },
+      caseId: item.caseId,
+      eventTime: item.eventTime ?? "",
+      epochStart: item.epochStart ?? "",
+      durationSec: item.durationSec ?? "",
+      decision,
+      startedAt: state.researchCaseStartedAt || answeredAt,
+      answeredAt,
+      elapsedMs,
+      displayMode: "validation_single",
+      ...researchSpikeSelectionPayload(),
+    };
+    const data = await fetchJson("/api/research/validation/response", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(responsePayload),
+    });
+    state.validationSession = data.session;
+    setValidationResponsesFromSession(data.session);
+    state.researchTestCompletedAt = answeredAt;
+    state.lastValidationResponse = data.response;
+    state.lastValidationResponseCaseIndex = state.researchCaseIndex;
+    renderRightResearchPanels();
+    showResearchToast(`保存しました: ${VALIDATION_DECISION_LABELS[decision] || decision} · やり直す場合は「前の問題をやり直す」`, { undo: true });
+    const nextIndex = firstUnansweredResearchCaseIndex();
+    if (nextIndex >= 0) await showResearchCase(nextIndex);
+    else await completeResearchTest();
+  } catch (err) {
+    setStatus(`Validation save failed: ${err.message}`, { error: true });
+    showResearchToast(`保存できませんでした: ${err.message}`);
+  } finally {
+    state.researchSaving = false;
+  }
+}
+
+async function undoValidationResponse() {
+  if (!state.lastValidationResponse || !state.validationSession) return;
+  try {
+    const data = await fetchJson("/api/research/validation/response/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        datasetPath: state.researchDatasetPath,
+        reviewerId: state.validationSession.reviewerId,
+        validationSet: state.validationSession.validationSet || selectedValidationDatasetKind(),
+        responseId: state.lastValidationResponse.responseId,
+      }),
+    });
+    state.validationSession = data.session;
+    setValidationResponsesFromSession(data.session);
+    const cases = activeResearchCases();
+    const caseId = data.undone?.caseId;
+    const index = cases.findIndex((row) => row.caseId === caseId);
+    state.lastValidationResponse = null;
+    hideResearchToast();
+    await showResearchCase(index >= 0 ? index : Math.max(0, state.lastValidationResponseCaseIndex));
+    setStatus("Validation undo complete");
+  } catch (err) {
+    setStatus(`Validation undo failed: ${err.message}`, { error: true });
+  }
+}
+
+async function submitValidationJson(options = {}) {
+  const datasetPath = state.researchDatasetPath || "";
+  if (!datasetPath) throw new Error("Dataset path is required.");
+  const reviewerId = state.validationSession?.reviewerId || safeResultFilenamePart(researchProfile().readerName || "reviewer", "reviewer");
+  const result = await fetchJson("/api/research/validation/submit-result", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ datasetPath, reviewerId, validationSet: state.validationSession?.validationSet || selectedValidationDatasetKind(), completedAt: state.researchTestCompletedAt || new Date().toISOString() }),
+  });
+  if (els.researchSavedCsvName) {
+    els.researchSavedCsvName.textContent = options.automatic
+      ? "Validation結果はサーバーに保存されました。"
+      : `Validation結果を保存しました: ${result.submissionId || result.filename || reviewerId}`;
+  }
+  setStatus("Validation complete. 結果はサーバーに保存されました。");
+  return result;
+}
+
+
 
 async function startResearchTest() {
   requestMobileFullscreen();
@@ -1909,13 +2224,13 @@ async function showResearchCase(index) {
   if (!cases.length) {
     hideResearchTutorial();
     await completeResearchTest();
-    setStatus("Test complete. JSONファイルをダウンロードしてメールに添付してください");
+    setStatus(isValidationWorkflow() ? "Validation complete. 結果はサーバーに保存されました。" : "Test complete. JSONファイルをダウンロードしてメールに添付してください");
     return;
   }
   state.researchCaseIndex = Math.max(0, Math.min(cases.length - 1, index));
   const item = cases[state.researchCaseIndex];
   refreshResearchDisplay();
-  setStatus(`${isResearchPracticeCase(item) ? "Loading explanation practice epoch" : (item.sampleEpoch ? `Loading ${"Phase 1"} sample` : `Loading test epoch ${state.researchCaseIndex + 1}/${cases.length}`)}...`, { busy: true });
+  setStatus(`${isValidationWorkflow() ? `Loading validation epoch ${state.researchCaseIndex + 1}/${cases.length}` : (isResearchPracticeCase(item) ? "Loading explanation practice epoch" : (item.sampleEpoch ? `Loading ${"Phase 1"} sample` : `Loading test epoch ${state.researchCaseIndex + 1}/${cases.length}`))}...`, { busy: true });
   try {
     const opened = await fetchJson("/api/open-file", {
       method: "POST",
@@ -1927,7 +2242,7 @@ async function showResearchCase(index) {
     state.cursorTime = null;
     state.dragSelection = null;
     const profile = researchProfile();
-    const usualMontage = isResearchPracticeCase(item) ? "conventional" : (state.researchUsualMontage || profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional");
+    const usualMontage = isValidationWorkflow() ? (item.phase1Montage || activeMontageValue() || "conventional") : (isResearchPracticeCase(item) ? "conventional" : (state.researchUsualMontage || profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional"));
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
     if (els.tcSelect) els.tcSelect.value = "0.3";
     if (els.hfSelect) els.hfSelect.value = "120";
@@ -1944,11 +2259,12 @@ async function showResearchCase(index) {
     state.windowData = null;
     await loadWindow();
     scheduleLayoutRefresh();
-    updateResearchTutorial(item);
+    if (isValidationWorkflow()) hideResearchTutorial();
+    else updateResearchTutorial(item);
     state.researchCaseStartedAt = new Date().toISOString();
     startResearchMontageTiming();
     renderResearchInlineProgress();
-    setStatus(isResearchPracticeCase(item) ? `${researchPracticeLabel(item)}: 波形を左クリックして三択から回答してください` : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`));
+    setStatus(isValidationWorkflow() ? `Validation: ${state.researchCaseIndex + 1}/${cases.length} · 波形を左クリックして採用/除外を選択してください` : (isResearchPracticeCase(item) ? `${researchPracticeLabel(item)}: 波形を左クリックして三択から回答してください` : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`)));
     renderRightResearchPanels();
     scheduleResearchPrefetch(state.researchCaseIndex);
   } catch (err) {
@@ -1958,6 +2274,7 @@ async function showResearchCase(index) {
 }
 
 function renderResearchRatingContextMenu() {
+  if (isValidationWorkflow()) return renderValidationContextMenu();
   const context = state.context || {};
   const channel = context.channel || context.montageChannel || "";
   const onset = Number(context.onset);
@@ -2173,6 +2490,7 @@ async function undoResearchResponse() {
 }
 
 function undoLastResearchAction() {
+  if (isValidationWorkflow()) return undoValidationResponse();
   undoResearchResponse();
 }
 
@@ -2634,6 +2952,16 @@ function onKeyDown(ev) {
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement
   ) {
+    return;
+  }
+  if (isValidationWorkflow() && state.validationSession && (ev.key === "Enter" || ev.key === "a" || ev.key === "A")) {
+    ev.preventDefault();
+    saveValidationDecision(VALIDATION_DECISION_ADOPT);
+    return;
+  }
+  if (isValidationWorkflow() && state.validationSession && (ev.key === "Backspace" || ev.key === "Delete" || ev.key === "x" || ev.key === "X")) {
+    ev.preventDefault();
+    saveValidationDecision(VALIDATION_DECISION_EXCLUDE);
     return;
   }
   if (ev.key === "ArrowLeft") {
@@ -3576,7 +3904,7 @@ function openContextMenu(ev) {
   const point = canvasToData(ev);
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.context = { ...point };
-  if (state.researchMode === "test" && state.researchSession) renderResearchRatingContextMenu();
+  if ((state.researchMode === "test" && state.researchSession) || (isValidationWorkflow() && state.validationSession)) renderResearchRatingContextMenu();
   else renderWaveContextMenu();
   els.contextMenu.style.left = `${ev.clientX}px`;
   els.contextMenu.style.top = `${ev.clientY}px`;
@@ -3604,7 +3932,7 @@ function onWaveClick(ev) {
     state.suppressNextClick = false;
     return;
   }
-  if (state.researchMode === "test" && state.researchSession) {
+  if ((state.researchMode === "test" && state.researchSession) || (isValidationWorkflow() && state.validationSession)) {
     openResearchRatingMenu(ev);
     return;
   }
@@ -3695,7 +4023,12 @@ function onContextMenuClick(ev) {
   const action = button.dataset.action;
   const label = button.dataset.label;
   const rating = button.dataset.rating;
+  const decision = button.dataset.decision;
   hideContextMenu();
+  if (action === "validation-decision") {
+    saveValidationDecision(decision);
+    return;
+  }
   if (action === "research-rating") {
     saveResearchRating(rating);
     return;
