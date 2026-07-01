@@ -4290,11 +4290,16 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
 
     def login_page_html(self, message: str = "") -> str:
         next_path = self.safe_return_path()
+        next_qs = parse_qs(urlparse(next_path).query)
+        is_validation = next_qs.get("mode", [""])[0] == "validation"
+        viewer_title = "Validation Viewer" if is_validation else "EEG Test Viewer"
+        intro_text = "Validationを開始するにはパスワードを入力してください。" if is_validation else "テストを開始するにはパスワードを入力してください。"
+        button_text = "Validationを開始する" if is_validation else "開始する"
         error_html = f"<p class='error'>{message}</p>" if message else ""
         return f"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EEG Test Viewer Login</title>
+<title>{viewer_title} Login</title>
 <style>
   :root {{ color-scheme: light; }}
   body {{ margin:0; min-height:100vh; display:grid; place-items:center; font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f4f6f8; color:#162033; }}
@@ -4308,14 +4313,14 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
   .error {{ color:#b42318; background:#fff1f0; border:1px solid #ffccc7; border-radius:6px; padding:10px 12px; }}
 </style>
 <main>
-  <h1>EEG Test Viewer</h1>
-  <p>テストを開始するにはパスワードを入力してください。</p>
+  <h1>{viewer_title}</h1>
+  <p>{intro_text}</p>
   {error_html}
   <form method="post" action="{LOGIN_PATH}">
     <input type="hidden" name="next" value="{html_escape(next_path)}">
     <label for="password">パスワード</label>
     <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
-    <button type="submit">開始する</button>
+    <button type="submit">{button_text}</button>
   </form>
 </main>
 """
