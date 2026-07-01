@@ -1709,7 +1709,6 @@ class RecordingStore:
         requested = [m for m in (montages or []) if m in montage_labels]
         if not requested:
             requested = ["conventional", "conventional_average", "longitudinal"]
-        requested = requested[:4]
         view_defs = [(montage, montage_labels[montage]) for montage in requested]
         active = active_montage if active_montage in requested else requested[0]
         montage_views: list[dict[str, Any]] = []
