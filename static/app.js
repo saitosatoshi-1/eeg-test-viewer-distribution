@@ -699,6 +699,7 @@ function bindControls() {
     setStatus("オフラインです。回答は可能な範囲で一時保存します", { error: true });
   });
   els.contextMenu?.addEventListener("click", onContextMenuClick);
+  els.rightTestPanel?.addEventListener("click", onRightTestPanelClick);
 
   bindResearchControls();
 }
@@ -1680,7 +1681,7 @@ function renderResearchWaveProgress(snapshot = researchProgressSnapshot()) {
   const currentCase = currentResearchCase();
   const title = isValidationWorkflow() ? `Validation ${currentQuestion}/${total || 0}` : (isPractice ? researchPracticeLabel(currentCase) : `本番 ${currentQuestion}/${total || 0}`);
   const detail = isValidationWorkflow() ? `現在: ${validationDatasetKindLabel(currentCase)} · 選択: ${selectedValidationDatasetKindLabel()} · 確認済み ${answered}/${total || 0} · 残り ${remaining} 件` : (isPractice ? `本番は未開始 · 全 ${total || 0} 問` : `回答済み ${answered}/${total || 0} · 残り ${remaining} 問`);
-  const hint = isValidationWorkflow() ? '<div class="research-wave-progress-hint">Enter=採用 / Backspace・Delete=除外</div>' : '';
+  const hint = "";
   els.researchWaveProgress.hidden = false;
   els.researchWaveProgress.setAttribute("aria-hidden", "false");
   els.researchWaveProgress.innerHTML = `
@@ -1952,36 +1953,48 @@ function setValidationResponsesFromSession(session) {
 
 function renderRightValidationPanel() {
   if (!els.rightTestPanel) return;
-  const session = state.validationSession;
   const current = currentResearchCase();
   const responses = activeValidationResponses();
   const currentRows = current ? [
-    ["Workflow", "Validation"],
     ["Current", `${state.researchCaseIndex + 1}/${activeResearchCases().length || 0}`],
-    ["Case", current.caseId || ""],
-    ["Recording", current.recordingId || ""],
-    ["Epoch", `${formatSec(Number(current.epochStart || 0))} + ${Number(current.durationSec || 10)}s`],
-    ["Dataset", validationDatasetKindLabel(current)],
-    ["Selected", selectedValidationDatasetKindLabel()],
     ["Reference", researchCaseLabelGroup(current)],
-    ["操作", "Enter=採用 / Backspace・Delete=除外"],
-    ["名前", session?.reviewerId || ""],
   ] : [];
   const resultCards = responses.map((response, index) => {
-    const rows = [
-      ["Case", response.caseId || ""],
-      ["Decision", response.decisionLabel || VALIDATION_DECISION_LABELS[response.decision] || response.decision || ""],
-      ["Recording", response.recordingId || ""],
-      ["Reference", researchCaseLabelGroup(response)],
-      ["Answered", response.answeredAt || ""],
-    ];
-    return `<div class="research-result-card"><div class="research-result-head"><strong>${Number(response.answerOrder || index + 1)}件目</strong><span>${escapeHtml(response.decisionLabel || VALIDATION_DECISION_LABELS[response.decision] || "-")}</span></div>${researchDetailRows(rows)}</div>`;
+    const decision = String(response.decision || "");
+    const label = response.decisionLabel || VALIDATION_DECISION_LABELS[decision] || decision || "";
+    const className = decision === VALIDATION_DECISION_ADOPT ? "validation-adopted" : (decision === VALIDATION_DECISION_EXCLUDE ? "validation-excluded" : "");
+    return `<button type="button" class="research-result-card validation-decision-card ${escapeHtml(className)}" data-action="validation-revisit" data-case-id="${escapeHtml(response.caseId || "")}"><div class="research-result-head"><strong>${Number(response.answerOrder || index + 1)}件目</strong><span>${escapeHtml(label || "-")}</span></div><div class="validation-revisit-label">再評価</div></button>`;
   }).join("");
   els.rightTestPanel.innerHTML = `
+    <div class="research-result-card validation-help-card">
+      <div class="validation-help-title">操作</div>
+      <div class="validation-current-dataset">現在: ${escapeHtml(validationDatasetKindLabel(current))}</div>
+      <div class="validation-key-row"><kbd>Enter</kbd><strong>採用</strong></div>
+      <div class="validation-key-row"><kbd>Backspace</kbd><strong>除外</strong></div>
+      <div class="validation-key-row"><kbd>Delete</kbd><strong>除外</strong></div>
+    </div>
     ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No validation epoch loaded.</div>'}
     <div class="research-result-title">Validation記録 (${responses.length})</div>
     <div class="research-result-list">${resultCards || '<div class="research-empty">No saved decision yet.</div>'}</div>
   `;
+}
+
+async function revisitValidationCase(caseId) {
+  if (!isValidationWorkflow() || !state.validationSession) return;
+  const targetCaseId = String(caseId || "").trim();
+  if (!targetCaseId) return;
+  const cases = activeResearchCases();
+  const index = cases.findIndex((row) => String(row.caseId || "") === targetCaseId);
+  if (index < 0) {
+    setStatus("再評価対象のepochが現在のvalidation datasetにありません。", { error: true });
+    return;
+  }
+  hideResearchCompletion();
+  hideResearchDebriefing();
+  hideResearchToast();
+  state.researchResultAutoSubmitted = false;
+  await showResearchCase(index);
+  setStatus("再評価するepochを表示しました。Enter=採用 / Backspace・Delete=除外");
 }
 
 async function startValidationWorkflow() {
@@ -3910,7 +3923,7 @@ function openContextMenu(ev) {
   const point = canvasToData(ev);
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.context = { ...point };
-  if ((state.researchMode === "test" && state.researchSession) || (isValidationWorkflow() && state.validationSession)) renderResearchRatingContextMenu();
+  if (state.researchMode === "test" && state.researchSession) renderResearchRatingContextMenu();
   else renderWaveContextMenu();
   els.contextMenu.style.left = `${ev.clientX}px`;
   els.contextMenu.style.top = `${ev.clientY}px`;
@@ -3938,7 +3951,7 @@ function onWaveClick(ev) {
     state.suppressNextClick = false;
     return;
   }
-  if ((state.researchMode === "test" && state.researchSession) || (isValidationWorkflow() && state.validationSession)) {
+  if (state.researchMode === "test" && state.researchSession) {
     openResearchRatingMenu(ev);
     return;
   }
@@ -4042,6 +4055,13 @@ function onContextMenuClick(ev) {
   if (action === "point") {
     setStatus(`${label || "point"}: ${formatSec(state.context.onset)}`);
   }
+}
+
+function onRightTestPanelClick(ev) {
+  const button = ev.target.closest("button[data-action='validation-revisit']");
+  if (!button || !els.rightTestPanel?.contains(button)) return;
+  ev.preventDefault();
+  revisitValidationCase(button.dataset.caseId || "");
 }
 
 function labelForMontage() {

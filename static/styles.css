@@ -2457,3 +2457,102 @@ body.validation-workflow .research-wave-progress-meter {
 body.validation-workflow .research-wave-progress-meter span {
   background: #78c3ff;
 }
+
+body.validation-workflow [data-right-tab="metadata"] {
+  display: none !important;
+}
+
+body.validation-workflow .right-tabs {
+  grid-template-columns: 1fr;
+}
+
+body.validation-workflow .validation-help-card {
+  border-color: #1f5f91;
+  background: #e8f4ff;
+}
+
+body.validation-workflow .validation-help-title {
+  color: #123a5a;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-current-dataset {
+  margin: 8px 0 12px;
+  color: #123a5a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+body.validation-workflow .validation-key-row {
+  display: grid;
+  grid-template-columns: minmax(104px, auto) 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 17px;
+}
+
+body.validation-workflow .validation-key-row kbd {
+  display: inline-flex;
+  justify-content: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #48657a;
+  border-radius: 4px;
+  background: #102a43;
+  color: #ffffff;
+  font-family: inherit;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-key-row strong {
+  color: #102a43;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-decision-card.validation-adopted {
+  border-color: #16803d;
+  background: #e8f8ee;
+}
+
+body.validation-workflow .validation-decision-card {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+body.validation-workflow button.validation-decision-card {
+  appearance: none;
+  font: inherit;
+}
+
+body.validation-workflow .validation-decision-card:hover {
+  box-shadow: 0 0 0 2px rgba(31, 95, 145, 0.18);
+}
+
+body.validation-workflow .validation-decision-card:focus-visible {
+  outline: 3px solid #2f6f9f;
+  outline-offset: 2px;
+}
+
+body.validation-workflow .validation-revisit-label {
+  margin-top: 6px;
+  color: #1f3b57;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+body.validation-workflow .validation-decision-card.validation-adopted .research-result-head span {
+  color: #0b6b31;
+}
+
+body.validation-workflow .validation-decision-card.validation-excluded {
+  border-color: #b42318;
+  background: #fff0ee;
+}
+
+body.validation-workflow .validation-decision-card.validation-excluded .research-result-head span {
+  color: #b42318;
+}
