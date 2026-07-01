@@ -1388,6 +1388,7 @@ function updateResearchTutorial(item = currentResearchCase()) {
   if (show && isMobileViewport() && !state.researchTutorialDrag && !state.researchTutorialMoved) resetResearchTutorialPosition();
   if (els.researchTutorialTitle) els.researchTutorialTitle.textContent = researchPracticeLabel(item);
   if (els.researchTutorialLead) {
+    els.researchTutorialLead.classList.toggle("research-tutorial-lead-emphasis", isMontageSetup);
     els.researchTutorialLead.textContent = isMontageSetup
       ? "普段最も使用するモンタージュに切り替えてから判定してください。回答は記録されません。"
       : "これは操作説明用の練習問題です。回答は記録されません。";

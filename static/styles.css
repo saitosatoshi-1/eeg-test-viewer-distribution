@@ -1277,6 +1277,14 @@ dd {
   margin: 0 0 8px;
 }
 
+.research-tutorial-lead-emphasis {
+  border-left: 4px solid #1d4ed8;
+  padding: 8px 10px;
+  background: #dbeafe;
+  color: #172554;
+  font-weight: 800;
+}
+
 .research-tutorial-next-test {
   border-left: 4px solid #2563eb;
   padding: 7px 10px;
