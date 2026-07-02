@@ -134,6 +134,7 @@ MUTATING_PATHS = {
     "/api/research/test/submit-result",
     "/api/research/validation/response",
     "/api/research/validation/response/undo",
+    "/api/research/validation/reset",
     "/api/research/validation/submit-result",
     "/api/admin/private-dataset/upload",
 }
@@ -3898,6 +3899,42 @@ def validation_session(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def reset_validation_responses(payload: dict[str, Any]) -> dict[str, Any]:
+    with RESEARCH_RESPONSE_LOCK:
+        dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+        dataset = load_research_dataset(str(dataset_dir))
+        dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+        reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+        selected = validation_set(payload.get("validationSet"))
+        case_ids = {str(row.get("caseId") or "") for row in validation_case_rows_for_set(dataset, selected)}
+        result = validation_result_payload(dataset_id, reviewer_id)
+        responses = list(result.get("responses") or [])
+        retained: list[dict[str, Any]] = []
+        removed_count = 0
+        for row in responses:
+            row_case_id = str(row.get("caseId") or "")
+            row_set = str(row.get("validationSet") or "").strip()
+            matches_selected_set = bool(row_set) and validation_set(row_set) == selected
+            if row_case_id in case_ids or matches_selected_set:
+                removed_count += 1
+                continue
+            retained.append(row)
+        now = utc_now_iso()
+        result["responses"] = retained
+        result["datasetId"] = dataset_id
+        result["reviewerId"] = reviewer_id
+        result["lastResetAt"] = now
+        result["lastResetValidationSet"] = selected
+        result["updatedAt"] = now
+        json_write(validation_result_path(dataset_id, reviewer_id), result)
+    session = validation_session({
+        "datasetPath": str(dataset_dir),
+        "reviewerId": reviewer_id,
+        "validationSet": selected,
+    })
+    return {"ok": True, "removedCount": removed_count, "session": session}
+
+
 def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
     with RESEARCH_RESPONSE_LOCK:
         dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
@@ -4715,6 +4752,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(save_validation_response(payload))
             if parsed.path == "/api/research/validation/response/undo":
                 return self.send_json(undo_validation_response(payload))
+            if parsed.path == "/api/research/validation/reset":
+                return self.send_json(reset_validation_responses(payload))
             if parsed.path == "/api/research/validation/submit-result":
                 return self.send_json(save_validation_result_submission(payload))
             if parsed.path == "/api/admin/private-dataset/upload":

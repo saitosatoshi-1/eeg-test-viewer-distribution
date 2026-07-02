@@ -2059,7 +2059,12 @@ async function startValidationWorkflow() {
     const dataset = await loadResearchDatasetFromPath(datasetPath);
     datasetPath = dataset.datasetPath || datasetPath;
     const validationSet = selectedValidationDatasetKind();
-    const session = await fetchJson(`/api/research/validation/session?${qs({ dataset: datasetPath, reviewerId, validationSet })}`);
+    const resetResult = await fetchJson("/api/research/validation/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ datasetPath, reviewerId, validationSet }),
+    });
+    const session = resetResult.session || await fetchJson(`/api/research/validation/session?${qs({ dataset: datasetPath, reviewerId, validationSet })}`);
     if (!Array.isArray(session.cases) || !session.cases.length) {
       throw new Error("No validation cases are available for this dataset.");
     }
