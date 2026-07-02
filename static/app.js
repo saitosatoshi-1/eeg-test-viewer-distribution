@@ -1999,9 +1999,9 @@ function renderRightValidationPanel() {
     <div class="research-result-card validation-help-card">
       <div class="validation-help-title">操作</div>
       <div class="validation-current-dataset">現在: ${escapeHtml(validationDatasetKindLabel(current))}</div>
-      <div class="validation-key-row"><kbd>Enter</kbd><strong>採用</strong></div>
-      <div class="validation-key-row"><kbd>Backspace</kbd><strong>除外</strong></div>
-      <div class="validation-key-row"><kbd>Delete</kbd><strong>除外</strong></div>
+      <div class="validation-key-row validation-key-adopt"><kbd>Enter</kbd><strong>採用</strong></div>
+      <div class="validation-key-row validation-key-exclude"><kbd>Backspace</kbd><strong>除外</strong></div>
+      <div class="validation-key-row validation-key-exclude"><kbd>Delete</kbd><strong>除外</strong></div>
       <div class="validation-help-text">このepochを${escapeHtml(targetName)}として採用できる場合は採用、波形や切り出しに問題があり${escapeHtml(targetName)}として使わない場合は除外を選んでください。</div>
       <div class="validation-help-text">下のValidation記録の再評価ボタンを押すと、過去に判定したepochをもう一度表示して再評価できます。</div>
     </div>

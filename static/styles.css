@@ -2528,6 +2528,14 @@ body.validation-workflow .validation-key-row strong {
   font-weight: 900;
 }
 
+body.validation-workflow .validation-key-adopt strong {
+  color: #0b6b31;
+}
+
+body.validation-workflow .validation-key-exclude strong {
+  color: #b42318;
+}
+
 body.validation-workflow .validation-help-text {
   margin-top: 7px;
   color: #263241;
