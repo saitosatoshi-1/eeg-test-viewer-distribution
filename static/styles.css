@@ -2560,6 +2560,11 @@ body.validation-workflow .validation-decision-card {
   padding: 4px 5px;
   text-align: left;
   min-width: 0;
+  cursor: pointer;
+}
+
+body.validation-workflow .validation-decision-card:hover {
+  filter: brightness(0.985);
 }
 
 body.validation-workflow .validation-decision-card .research-result-head {

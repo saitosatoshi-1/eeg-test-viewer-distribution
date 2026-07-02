@@ -99,7 +99,6 @@ const state = {
   validationResponses: [],
   lastValidationResponse: null,
   lastValidationResponseCaseIndex: -1,
-  validationRevisitResumeIndex: -1,
 };
 
 const els = {
@@ -2011,7 +2010,7 @@ function renderRightValidationPanel() {
       ? (decision === VALIDATION_DECISION_ADOPT ? "validation-adopted" : (decision === VALIDATION_DECISION_EXCLUDE ? "validation-excluded" : "validation-pending"))
       : "validation-pending";
     const actionLabel = response ? "再評価" : "評価";
-    return `<div class="research-result-card validation-decision-card ${escapeHtml(className)}"><div class="research-result-head"><strong>${index + 1}件目</strong><span>${escapeHtml(label || "-")}</span></div><button type="button" class="validation-revisit-button" data-action="validation-revisit" data-case-id="${escapeHtml(item.caseId || "")}">${actionLabel}</button></div>`;
+    return `<div class="research-result-card validation-decision-card ${escapeHtml(className)}" data-action="validation-revisit" data-case-id="${escapeHtml(item.caseId || "")}"><div class="research-result-head"><strong>${index + 1}件目</strong><span>${escapeHtml(label || "-")}</span></div><button type="button" class="validation-revisit-button" data-action="validation-revisit" data-case-id="${escapeHtml(item.caseId || "")}">${actionLabel}</button></div>`;
   }).join("");
   els.rightTestPanel.innerHTML = `
     <div class="research-result-card validation-help-card">
@@ -2021,7 +2020,7 @@ function renderRightValidationPanel() {
       <div class="validation-key-row validation-key-exclude"><kbd>Backspace</kbd><strong>除外</strong></div>
       <div class="validation-key-row validation-key-exclude"><kbd>Delete</kbd><strong>除外</strong></div>
       <div class="validation-help-text">このepochを${escapeHtml(targetName)}として採用できる場合は採用、波形や切り出しに問題があり${escapeHtml(targetName)}として使わない場合は除外を選んでください。</div>
-      <div class="validation-help-text">下のValidation記録の再評価ボタンを押すと、過去に判定したepochをもう一度表示して再評価できます。</div>
+      <div class="validation-help-text">下のValidation記録カードを押すと、そのepochを表示できます。保存後は残りの未評価カードの若い番号へ進みます。</div>
     </div>
     ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No validation epoch loaded.</div>'}
     <div class="research-result-title">Validation記録 (${responses.length}/${cases.length || 0})</div>
@@ -2039,11 +2038,9 @@ async function revisitValidationCase(caseId) {
     setStatus("再評価対象のepochが現在のvalidation datasetにありません。", { error: true });
     return;
   }
-  const completionVisible = els.researchCompleteScreen?.hidden === false;
   hideResearchCompletion();
   hideResearchDebriefing();
   hideResearchToast();
-  state.validationRevisitResumeIndex = completionVisible ? -1 : state.researchCaseIndex;
   state.researchResultAutoSubmitted = false;
   await showResearchCase(index);
   setStatus("再評価するepochを表示しました。Enter=採用 / Backspace・Delete=除外");
@@ -2161,28 +2158,13 @@ async function saveValidationDecision(decision) {
     state.lastValidationResponseCaseIndex = state.researchCaseIndex;
     renderRightResearchPanels();
     showResearchToast(`保存しました: ${VALIDATION_DECISION_LABELS[decision] || decision} · やり直す場合は「前の問題をやり直す」`, { undo: true });
-    if (revisitingAnsweredCase) {
-      const resumeIndex = Number(state.validationRevisitResumeIndex);
-      state.validationRevisitResumeIndex = -1;
-      const cases = activeResearchCases();
-      if (Number.isInteger(resumeIndex) && resumeIndex >= 0 && resumeIndex < cases.length) {
-        await showResearchCase(resumeIndex);
-        setStatus("再評価を保存しました。途中のepochから再開します。");
-      } else {
-        const nextIndex = firstUnansweredResearchCaseIndex();
-        if (nextIndex >= 0) {
-          await showResearchCase(nextIndex);
-          setStatus("再評価を保存しました。未評価のepochから再開します。");
-        } else {
-          setStatus("再評価を保存しました。Validation記録を更新しました。");
-        }
-      }
-      return;
-    }
-    state.validationRevisitResumeIndex = -1;
     const nextIndex = firstUnansweredResearchCaseIndex();
-    if (nextIndex >= 0) await showResearchCase(nextIndex);
-    else await completeResearchTest();
+    if (nextIndex >= 0) {
+      await showResearchCase(nextIndex);
+      setStatus(revisitingAnsweredCase ? "再評価を保存しました。残りの未評価epochへ進みます。" : "保存しました。次の未評価epochへ進みます。");
+    } else {
+      await completeResearchTest();
+    }
   } catch (err) {
     setStatus(`Validation save failed: ${err.message}`, { error: true });
     showResearchToast(`保存できませんでした: ${err.message}`);
@@ -4201,10 +4183,10 @@ function onContextMenuClick(ev) {
 }
 
 function onRightTestPanelClick(ev) {
-  const button = ev.target.closest("button[data-action='validation-revisit']");
-  if (!button || !els.rightTestPanel?.contains(button)) return;
+  const target = ev.target.closest("[data-action='validation-revisit']");
+  if (!target || !els.rightTestPanel?.contains(target)) return;
   ev.preventDefault();
-  revisitValidationCase(button.dataset.caseId || "");
+  revisitValidationCase(target.dataset.caseId || "");
 }
 
 function labelForMontage() {
