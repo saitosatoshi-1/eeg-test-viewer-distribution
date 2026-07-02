@@ -1972,6 +1972,10 @@ function selectedValidationDatasetKindLabel() {
   return selectedValidationDatasetKind() === "artifact" ? "アーチファクトデータセット" : "IEDデータセット";
 }
 
+function validationTargetName(row = currentResearchCase()) {
+  return validationDatasetKindLabel(row).includes("アーチファクト") ? "アーチファクト" : "IED";
+}
+
 function setValidationResponsesFromSession(session) {
   state.validationResponses = Array.isArray(session?.responses) ? session.responses : [];
 }
@@ -1980,6 +1984,7 @@ function renderRightValidationPanel() {
   if (!els.rightTestPanel) return;
   const current = currentResearchCase();
   const responses = activeValidationResponses();
+  const targetName = validationTargetName(current);
   const currentRows = current ? [
     ["Current", `${state.researchCaseIndex + 1}/${activeResearchCases().length || 0}`],
     ["Reference", researchCaseLabelGroup(current)],
@@ -1997,7 +2002,7 @@ function renderRightValidationPanel() {
       <div class="validation-key-row"><kbd>Enter</kbd><strong>採用</strong></div>
       <div class="validation-key-row"><kbd>Backspace</kbd><strong>除外</strong></div>
       <div class="validation-key-row"><kbd>Delete</kbd><strong>除外</strong></div>
-      <div class="validation-help-text">このepochをテスト問題として使える場合は採用、波形や切り出しに問題があり使わない場合は除外を選んでください。</div>
+      <div class="validation-help-text">このepochを${escapeHtml(targetName)}として採用できる場合は採用、波形や切り出しに問題があり${escapeHtml(targetName)}として使わない場合は除外を選んでください。</div>
       <div class="validation-help-text">下のValidation記録の再評価ボタンを押すと、過去に判定したepochをもう一度表示して再評価できます。</div>
     </div>
     ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No validation epoch loaded.</div>'}
