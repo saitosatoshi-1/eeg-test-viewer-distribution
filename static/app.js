@@ -996,8 +996,9 @@ function validationReviewerId(profile = researchProfile()) {
 function validationJsonFilename(profile = researchProfile()) {
   const reviewer = safeResultFilenamePart(validationReviewerId(profile), "reviewer");
   const datasetId = researchDatasetIdForFilename();
+  const validationKind = safeResultFilenamePart(activeValidationDatasetKind(), "validation");
   const stamp = researchResultTimestampPart();
-  return `${datasetId}_${stamp}_${reviewer}_validation.json`;
+  return `${datasetId}_${validationKind}_${stamp}_${reviewer}_validation.json`;
 }
 
 function saveResearchProfile() {
@@ -1197,6 +1198,7 @@ function updateResearchSetupScreen() {
 function researchEmailBodyText(profile = researchProfile()) {
   if (isValidationWorkflow()) {
     const name = profile.readerName || validationReviewerId(profile);
+    const validationKindLabel = activeValidationDatasetKindLabel();
     return [
       "斉藤先生",
       "",
@@ -1207,6 +1209,7 @@ function researchEmailBodyText(profile = researchProfile()) {
       "",
       `氏名: ${name}`,
       `データセット: ${researchDatasetIdForFilename()}`,
+      `評価対象: ${validationKindLabel}`,
     ].join("\n");
   }
   const name = profile.readerName || "";
@@ -1973,6 +1976,14 @@ function selectedValidationDatasetKindLabel() {
   return selectedValidationDatasetKind() === "artifact" ? "アーチファクトデータセット" : "IEDデータセット";
 }
 
+function activeValidationDatasetKind() {
+  return state.validationSession?.validationSet || selectedValidationDatasetKind();
+}
+
+function activeValidationDatasetKindLabel() {
+  return activeValidationDatasetKind() === "artifact" ? "アーチファクトデータセット" : "IEDデータセット";
+}
+
 function validationTargetName(row = currentResearchCase()) {
   return validationDatasetKindLabel(row).includes("アーチファクト") ? "アーチファクト" : "IED";
 }
@@ -2205,14 +2216,15 @@ async function submitValidationJson(options = {}) {
   const datasetPath = state.researchDatasetPath || "";
   if (!datasetPath) throw new Error("Dataset path is required.");
   const reviewerId = state.validationSession?.reviewerId || safeResultFilenamePart(researchProfile().readerName || "reviewer", "reviewer");
+  const validationSet = activeValidationDatasetKind();
   const result = await fetchJson("/api/research/validation/submit-result", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ datasetPath, reviewerId, validationSet: state.validationSession?.validationSet || selectedValidationDatasetKind(), completedAt: state.researchTestCompletedAt || new Date().toISOString() }),
+    body: JSON.stringify({ datasetPath, reviewerId, validationSet, completedAt: state.researchTestCompletedAt || new Date().toISOString() }),
   });
   if (els.researchSavedCsvName) {
     els.researchSavedCsvName.textContent = options.automatic
-      ? "Validation結果はサーバーに保存されました。JSONファイルをダウンロードしてメールに添付してください。"
+      ? `Validation結果（${activeValidationDatasetKindLabel()}）はサーバーに保存されました。JSONファイルをダウンロードしてメールに添付してください。`
       : `Validation結果を保存しました: ${result.submissionId || result.filename || reviewerId}`;
   }
   setStatus("Validation complete. JSONファイルをダウンロードしてメールに添付してください。");
@@ -2583,7 +2595,7 @@ async function exportResearchJson() {
     try {
       setStatus("Validation結果JSONファイルをダウンロード中...", { busy: true });
       const jsonFilename = validationJsonFilename(profile);
-      const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId })}`);
+      const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId, validationSet: activeValidationDatasetKind() })}`);
       saveResearchResultBackup(jsonFilename, jsonText);
       downloadTextFile(jsonFilename, jsonText);
       if (els.researchSavedCsvName) {
@@ -2630,13 +2642,14 @@ async function shareResearchJsonByEmail() {
   if (isValidationWorkflow()) {
     const reviewerId = validationReviewerId(profile);
     const jsonFilename = validationJsonFilename(profile);
+    const validationKindLabel = activeValidationDatasetKindLabel();
     try {
       setStatus("Validation結果JSONファイルを共有準備中...", { busy: true });
-      const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId })}`);
+      const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId, validationSet: activeValidationDatasetKind() })}`);
       saveResearchResultBackup(jsonFilename, jsonText);
       const file = new File([jsonText], jsonFilename, { type: "application/json" });
       const shareData = {
-        title: "脳波Validation結果",
+        title: `脳波Validation結果（${validationKindLabel}）`,
         text: researchEmailBodyText(profile),
         files: [file],
       };
@@ -2647,7 +2660,7 @@ async function shareResearchJsonByEmail() {
         return;
       }
       downloadTextFile(jsonFilename, jsonText);
-      window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent("脳波Validation結果")}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
+      window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent(`脳波Validation結果（${validationKindLabel}）`)}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
       if (els.researchSavedCsvName) {
         els.researchSavedCsvName.textContent = `${jsonFilename}をダウンロードしました。メールに添付してください。`;
       }

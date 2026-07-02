@@ -3813,6 +3813,10 @@ def validation_set(value: Any) -> str:
     return "ied"
 
 
+def validation_set_label(value: Any) -> str:
+    return "アーチファクトデータセット" if validation_set(value) == "artifact" else "IEDデータセット"
+
+
 def validation_case_in_set(row: dict[str, Any], selected: str) -> bool:
     source = str(row.get("sourceGroup") or "").lower()
     group = str(row.get("labelGroup") or "").lower()
@@ -4046,10 +4050,12 @@ def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         return {"undone": target, "session": validation_session({"datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
 
 
-def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None) -> dict[str, Any]:
+def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None, validation_set_filter: str | None = None) -> dict[str, Any]:
     dataset = load_research_dataset(str(dataset_dir))
     dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
-    case_by_id = {str(row.get("caseId") or ""): row for row in validation_case_rows(dataset)}
+    selected = validation_set(validation_set_filter) if validation_set_filter else ""
+    case_rows = validation_case_rows_for_set(dataset, selected) if selected else validation_case_rows(dataset)
+    case_by_id = {str(row.get("caseId") or ""): row for row in case_rows}
     result_dir = VALIDATION_RESULTS_DIR / safe_filename_part(dataset_id, "dataset")
     reviewer_ids = [validation_reviewer_id(reviewer_id)] if reviewer_id else []
     if not reviewer_ids and result_dir.exists():
@@ -4058,7 +4064,11 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None)
     case_decisions: dict[str, list[dict[str, Any]]] = {case_id: [] for case_id in case_by_id}
     for rid in reviewer_ids:
         payload = validation_result_payload(dataset_id, rid)
-        active = active_validation_response_map(list(payload.get("responses") or []))
+        active = {
+            case_id: row
+            for case_id, row in active_validation_response_map(list(payload.get("responses") or [])).items()
+            if not selected or case_id in case_by_id or validation_set(row.get("validationSet")) == selected
+        }
         rows = []
         for response in sorted(active.values(), key=lambda row: (int(row.get("answerOrder") or 0), str(row.get("answeredAt") or ""))):
             case = case_by_id.get(str(response.get("caseId") or ""), {})
@@ -4093,6 +4103,8 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None)
         "exportVersion": "validation-1",
         "exportedAt": utc_now_iso(),
         "workflow": "validation",
+        "validationSet": selected or "all",
+        "validationSetLabel": validation_set_label(selected) if selected else "全Validationデータセット",
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "aggregate": aggregate,
         "reviewers": reviewers,
@@ -4100,8 +4112,8 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None)
     }
 
 
-def export_validation_results_json(dataset_dir: Path, reviewer_id: str | None = None) -> str:
-    return json.dumps(validation_export_payload(dataset_dir, reviewer_id), ensure_ascii=False, indent=2, default=json_safe) + "\n"
+def export_validation_results_json(dataset_dir: Path, reviewer_id: str | None = None, validation_set_filter: str | None = None) -> str:
+    return json.dumps(validation_export_payload(dataset_dir, reviewer_id, validation_set_filter), ensure_ascii=False, indent=2, default=json_safe) + "\n"
 
 
 def save_validation_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
@@ -4113,6 +4125,7 @@ def save_validation_result_submission(payload: dict[str, Any]) -> dict[str, Any]
     current = validation_result_payload(dataset_id, reviewer_id)
     current["submittedAt"] = utc_now_iso()
     current["lastSubmittedValidationSet"] = selected
+    current["lastSubmittedValidationSetLabel"] = validation_set_label(selected)
     save_validation_payload(dataset, dataset_dir, reviewer_id, current)
     target = validation_result_path(dataset_id, reviewer_id)
     return {
@@ -4124,6 +4137,8 @@ def save_validation_result_submission(payload: dict[str, Any]) -> dict[str, Any]
         "sizeBytes": target.stat().st_size if target.exists() else 0,
         "datasetId": dataset_id,
         "reviewerId": reviewer_id,
+        "validationSet": selected,
+        "validationSetLabel": validation_set_label(selected),
     }
 
 
@@ -4702,7 +4717,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/research/validation/export.json":
                 dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
                 reviewer = qs.get("reviewerId", [""])[0] or None
-                return self.send_text(export_validation_results_json(dataset_dir, reviewer), "application/json; charset=utf-8")
+                selected = qs.get("validationSet", [""])[0] or None
+                return self.send_text(export_validation_results_json(dataset_dir, reviewer, selected), "application/json; charset=utf-8")
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
         except FileNotFoundError as exc:
             self.send_json({"error": str(exc)}, status=404)
