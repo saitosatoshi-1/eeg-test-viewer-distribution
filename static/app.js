@@ -1993,7 +1993,7 @@ function renderRightValidationPanel() {
     const decision = String(response.decision || "");
     const label = response.decisionLabel || VALIDATION_DECISION_LABELS[decision] || decision || "";
     const className = decision === VALIDATION_DECISION_ADOPT ? "validation-adopted" : (decision === VALIDATION_DECISION_EXCLUDE ? "validation-excluded" : "");
-    return `<div class="research-result-card validation-decision-card ${escapeHtml(className)}"><div class="research-result-head"><strong>${Number(response.answerOrder || index + 1)}件目</strong><span>${escapeHtml(label || "-")}</span></div><button type="button" class="validation-revisit-button" data-action="validation-revisit" data-case-id="${escapeHtml(response.caseId || "")}">再評価</button></div>`;
+    return `<div class="research-result-card validation-decision-card ${escapeHtml(className)}"><div class="research-result-head"><strong>${index + 1}件目</strong><span>${escapeHtml(label || "-")}</span></div><button type="button" class="validation-revisit-button" data-action="validation-revisit" data-case-id="${escapeHtml(response.caseId || "")}">再評価</button></div>`;
   }).join("");
   els.rightTestPanel.innerHTML = `
     <div class="research-result-card validation-help-card">
