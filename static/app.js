@@ -1996,16 +1996,22 @@ function renderRightValidationPanel() {
   if (!els.rightTestPanel) return;
   const current = currentResearchCase();
   const responses = activeValidationResponses();
+  const responseByCaseId = new Map(responses.map((response) => [String(response.caseId || ""), response]));
+  const cases = activeResearchCases();
   const targetName = validationTargetName(current);
   const currentRows = current ? [
-    ["Current", `${state.researchCaseIndex + 1}/${activeResearchCases().length || 0}`],
+    ["Current", `${state.researchCaseIndex + 1}/${cases.length || 0}`],
     ["Reference", researchCaseLabelGroup(current)],
   ] : [];
-  const resultCards = responses.map((response, index) => {
-    const decision = String(response.decision || "");
-    const label = response.decisionLabel || VALIDATION_DECISION_LABELS[decision] || decision || "";
-    const className = decision === VALIDATION_DECISION_ADOPT ? "validation-adopted" : (decision === VALIDATION_DECISION_EXCLUDE ? "validation-excluded" : "");
-    return `<div class="research-result-card validation-decision-card ${escapeHtml(className)}"><div class="research-result-head"><strong>${index + 1}件目</strong><span>${escapeHtml(label || "-")}</span></div><button type="button" class="validation-revisit-button" data-action="validation-revisit" data-case-id="${escapeHtml(response.caseId || "")}">再評価</button></div>`;
+  const resultCards = cases.map((item, index) => {
+    const response = responseByCaseId.get(String(item.caseId || ""));
+    const decision = String(response?.decision || "");
+    const label = response ? (response.decisionLabel || VALIDATION_DECISION_LABELS[decision] || decision || "") : "未評価";
+    const className = response
+      ? (decision === VALIDATION_DECISION_ADOPT ? "validation-adopted" : (decision === VALIDATION_DECISION_EXCLUDE ? "validation-excluded" : "validation-pending"))
+      : "validation-pending";
+    const actionLabel = response ? "再評価" : "評価";
+    return `<div class="research-result-card validation-decision-card ${escapeHtml(className)}"><div class="research-result-head"><strong>${index + 1}件目</strong><span>${escapeHtml(label || "-")}</span></div><button type="button" class="validation-revisit-button" data-action="validation-revisit" data-case-id="${escapeHtml(item.caseId || "")}">${actionLabel}</button></div>`;
   }).join("");
   els.rightTestPanel.innerHTML = `
     <div class="research-result-card validation-help-card">
@@ -2018,8 +2024,8 @@ function renderRightValidationPanel() {
       <div class="validation-help-text">下のValidation記録の再評価ボタンを押すと、過去に判定したepochをもう一度表示して再評価できます。</div>
     </div>
     ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No validation epoch loaded.</div>'}
-    <div class="research-result-title">Validation記録 (${responses.length})</div>
-    <div class="research-result-list">${resultCards || '<div class="research-empty">No saved decision yet.</div>'}</div>
+    <div class="research-result-title">Validation記録 (${responses.length}/${cases.length || 0})</div>
+    <div class="research-result-list">${resultCards || '<div class="research-empty">No validation cases.</div>'}</div>
   `;
 }
 

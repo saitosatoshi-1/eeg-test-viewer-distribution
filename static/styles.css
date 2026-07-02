@@ -2471,6 +2471,11 @@ body.validation-workflow .research-result-list {
   gap: 6px;
 }
 
+body.validation-workflow .research-result-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+}
+
 body.validation-workflow .research-result-card {
   gap: 5px;
   border-radius: 5px;
@@ -2554,10 +2559,12 @@ body.validation-workflow .validation-decision-card {
   gap: 3px;
   padding: 4px 5px;
   text-align: left;
+  min-width: 0;
 }
 
 body.validation-workflow .validation-decision-card .research-result-head {
   font-size: 12px;
+  gap: 4px;
 }
 
 body.validation-workflow .validation-decision-card .research-result-head span {
@@ -2589,6 +2596,16 @@ body.validation-workflow .validation-revisit-button:focus-visible {
 
 body.validation-workflow .validation-decision-card.validation-adopted .research-result-head span {
   color: #0b6b31;
+}
+
+body.validation-workflow .validation-decision-card.validation-pending {
+  border-color: #c9d0d6;
+  background: #eef0f2;
+}
+
+body.validation-workflow .validation-decision-card.validation-pending .research-result-head,
+body.validation-workflow .validation-decision-card.validation-pending .research-result-head span {
+  color: #6b7280;
 }
 
 body.validation-workflow .validation-decision-card.validation-excluded {
