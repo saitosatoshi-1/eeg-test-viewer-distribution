@@ -2466,6 +2466,22 @@ body.validation-workflow .right-tabs {
   grid-template-columns: 1fr;
 }
 
+body.validation-workflow .research-right-panel,
+body.validation-workflow .research-result-list {
+  gap: 6px;
+}
+
+body.validation-workflow .research-result-card {
+  gap: 5px;
+  border-radius: 5px;
+  padding: 6px;
+}
+
+body.validation-workflow .research-result-title,
+body.validation-workflow .research-result-head {
+  font-size: 13px;
+}
+
 body.validation-workflow .validation-help-card {
   border-color: #1f5f91;
   background: #e8f4ff;
@@ -2473,31 +2489,31 @@ body.validation-workflow .validation-help-card {
 
 body.validation-workflow .validation-help-title {
   color: #123a5a;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 900;
 }
 
 body.validation-workflow .validation-current-dataset {
-  margin: 8px 0 12px;
+  margin: 5px 0 8px;
   color: #123a5a;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
 }
 
 body.validation-workflow .validation-key-row {
   display: grid;
-  grid-template-columns: 86px 1fr;
+  grid-template-columns: 78px 1fr;
   align-items: center;
-  gap: 8px;
-  margin-top: 5px;
-  font-size: 14px;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 12px;
 }
 
 body.validation-workflow .validation-key-row kbd {
   display: inline-flex;
   justify-content: center;
-  min-height: 24px;
-  padding: 3px 7px;
+  min-height: 20px;
+  padding: 2px 6px;
   border: 1px solid #48657a;
   border-radius: 4px;
   background: #102a43;
@@ -2508,16 +2524,16 @@ body.validation-workflow .validation-key-row kbd {
 
 body.validation-workflow .validation-key-row strong {
   color: #102a43;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 900;
 }
 
 body.validation-workflow .validation-help-text {
-  margin-top: 10px;
+  margin-top: 7px;
   color: #263241;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  line-height: 1.45;
+  line-height: 1.35;
 }
 
 body.validation-workflow .validation-decision-card.validation-adopted {
@@ -2531,16 +2547,16 @@ body.validation-workflow .validation-decision-card {
 }
 
 body.validation-workflow .validation-revisit-button {
-  margin-top: 8px;
+  margin-top: 5px;
   width: 100%;
-  min-height: 32px;
+  min-height: 26px;
   border: 1px solid #1f5f91;
   border-radius: 4px;
   background: #ffffff;
   color: #1f3b57;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 900;
 }
 
