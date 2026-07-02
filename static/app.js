@@ -1958,8 +1958,8 @@ function activeValidationResponses() {
 function validationDatasetKindLabel(row = currentResearchCase()) {
   const source = String(row?.sourceGroup || "").toLowerCase();
   const group = String(row?.labelGroup || "").toLowerCase();
-  if (source.includes("epilepsy") && !source.includes("no_")) return "IEDありデータセット";
-  if (group === "epileptiform") return "IEDありデータセット";
+  if (source.includes("epilepsy") && !source.includes("no_")) return "IEDデータセット";
+  if (group === "epileptiform") return "IEDデータセット";
   if (source.includes("artifact") || source.includes("no_epilepsy") || group === "non_epileptiform") return "アーチファクト/IEDなしデータセット";
   return row?.sourceGroup || row?.labelGroup || "データセット種別未設定";
 }
@@ -1969,7 +1969,7 @@ function selectedValidationDatasetKind() {
 }
 
 function selectedValidationDatasetKindLabel() {
-  return selectedValidationDatasetKind() === "artifact" ? "アーチファクトデータセット" : "IEDありデータセット";
+  return selectedValidationDatasetKind() === "artifact" ? "アーチファクトデータセット" : "IEDデータセット";
 }
 
 function setValidationResponsesFromSession(session) {
