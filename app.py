@@ -4050,6 +4050,15 @@ def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         return {"undone": target, "session": validation_session({"datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
 
 
+def validation_file_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if is_http_url(text):
+        return Path(unquote(urlparse(text).path or "")).name
+    return Path(text).name
+
+
 def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None, validation_set_filter: str | None = None) -> dict[str, Any]:
     dataset = load_research_dataset(str(dataset_dir))
     dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
@@ -4060,7 +4069,8 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
     reviewer_ids = [validation_reviewer_id(reviewer_id)] if reviewer_id else []
     if not reviewer_ids and result_dir.exists():
         reviewer_ids = sorted(path.stem for path in result_dir.glob("*.json") if path.is_file())
-    reviewers = []
+    reviewer_summaries = []
+    case_decisions = []
     for rid in reviewer_ids:
         payload = validation_result_payload(dataset_id, rid)
         active = {
@@ -4068,32 +4078,35 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
             for case_id, row in active_validation_response_map(list(payload.get("responses") or [])).items()
             if not selected or case_id in case_by_id or validation_set(row.get("validationSet")) == selected
         }
-        rows = []
         for response in sorted(active.values(), key=lambda row: (int(row.get("answerOrder") or 0), str(row.get("answeredAt") or ""))):
             case = case_by_id.get(str(response.get("caseId") or ""), {})
+            edf_path = response.get("edfPath") or case.get("edfPath", "")
             row = {
+                "reviewerId": rid,
                 "caseId": response.get("caseId", ""),
+                "fileName": validation_file_name(edf_path or response.get("recordingId") or case.get("recordingId", "")),
+                "edfPath": edf_path,
+                "recordingId": response.get("recordingId") or case.get("recordingId", ""),
                 "decision": response.get("decision", ""),
                 "decisionLabel": response.get("decisionLabel", ""),
                 "acceptedForTest": bool(response.get("acceptedForTest")),
                 "excludedFromTest": bool(response.get("excludedFromTest")),
                 "answeredAt": response.get("answeredAt", ""),
-                "recordingId": response.get("recordingId") or case.get("recordingId", ""),
-                "labelGroup": response.get("labelGroup") or case.get("labelGroup", ""),
-                "sourceGroup": response.get("sourceGroup") or case.get("sourceGroup", ""),
             }
-            rows.append(row)
-        reviewers.append({
+            case_decisions.append(row)
+        summary = validation_summary(list(case_by_id.values()), active)
+        reviewer_summaries.append({
             "reviewerId": rid,
-            "summary": validation_summary(list(case_by_id.values()), active),
-            "responses": rows,
+            "reviewedCount": summary["reviewedCount"],
+            "adoptedCount": summary["adoptedCount"],
+            "excludedCount": summary["excludedCount"],
         })
     aggregate = {
-        "reviewerCount": len(reviewers),
+        "reviewerCount": len(reviewer_summaries),
         "caseCount": len(case_by_id),
-        "reviewedCount": sum(row["summary"]["reviewedCount"] for row in reviewers),
-        "adoptedCount": sum(row["summary"]["adoptedCount"] for row in reviewers),
-        "excludedCount": sum(row["summary"]["excludedCount"] for row in reviewers),
+        "reviewedCount": len(case_decisions),
+        "adoptedCount": sum(1 for row in case_decisions if row["acceptedForTest"]),
+        "excludedCount": sum(1 for row in case_decisions if row["excludedFromTest"]),
     }
     return {
         "exportVersion": "validation-1",
@@ -4103,8 +4116,8 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
         "validationSetLabel": validation_set_label(selected) if selected else "全Validationデータセット",
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "aggregate": aggregate,
-        "reviewers": reviewers,
-        "cases": research_export_case_payload(dataset),
+        "reviewers": reviewer_summaries,
+        "caseDecisions": case_decisions,
     }
 
 
