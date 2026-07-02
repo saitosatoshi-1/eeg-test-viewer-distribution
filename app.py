@@ -3918,12 +3918,17 @@ def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         responses = list(result.get("responses") or [])
         now = utc_now_iso()
         response_id = str(uuid.uuid4())
+        replaced_answer_order = 0
         for row in responses:
             if str(row.get("caseId") or "") == case_id and not row.get("superseded") and not row.get("undoneAt"):
+                try:
+                    replaced_answer_order = int(row.get("answerOrder") or 0)
+                except (TypeError, ValueError):
+                    replaced_answer_order = 0
                 row["superseded"] = True
                 row["supersededAt"] = now
                 row["replacedByResponseId"] = response_id
-        answer_order = 1 + sum(1 for row in responses if not row.get("superseded") and not row.get("undoneAt"))
+        answer_order = replaced_answer_order or (1 + sum(1 for row in responses if not row.get("superseded") and not row.get("undoneAt")))
         response = {
             "responseId": response_id,
             "reviewerId": reviewer_id,

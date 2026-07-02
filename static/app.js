@@ -2101,6 +2101,7 @@ async function saveValidationDecision(decision) {
   const answeredAt = new Date().toISOString();
   const elapsedMs = state.researchCaseStartedAt ? Date.now() - Date.parse(state.researchCaseStartedAt) : 0;
   const reviewerId = state.validationSession.reviewerId || safeResultFilenamePart(researchProfile().readerName || "reviewer", "reviewer");
+  const revisitingAnsweredCase = activeValidationResponses().some((response) => String(response.caseId || "") === String(item.caseId || ""));
   try {
     const responsePayload = {
       datasetPath: state.researchDatasetPath,
@@ -2130,6 +2131,10 @@ async function saveValidationDecision(decision) {
     state.lastValidationResponseCaseIndex = state.researchCaseIndex;
     renderRightResearchPanels();
     showResearchToast(`保存しました: ${VALIDATION_DECISION_LABELS[decision] || decision} · やり直す場合は「前の問題をやり直す」`, { undo: true });
+    if (revisitingAnsweredCase) {
+      setStatus("再評価を保存しました。Validation記録を更新しました。");
+      return;
+    }
     const nextIndex = firstUnansweredResearchCaseIndex();
     if (nextIndex >= 0) await showResearchCase(nextIndex);
     else await completeResearchTest();
