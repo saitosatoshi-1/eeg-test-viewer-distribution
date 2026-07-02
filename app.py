@@ -4061,7 +4061,6 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
     if not reviewer_ids and result_dir.exists():
         reviewer_ids = sorted(path.stem for path in result_dir.glob("*.json") if path.is_file())
     reviewers = []
-    case_decisions: dict[str, list[dict[str, Any]]] = {case_id: [] for case_id in case_by_id}
     for rid in reviewer_ids:
         payload = validation_result_payload(dataset_id, rid)
         active = {
@@ -4084,8 +4083,6 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
                 "sourceGroup": response.get("sourceGroup") or case.get("sourceGroup", ""),
             }
             rows.append(row)
-            if row["caseId"] in case_decisions:
-                case_decisions[row["caseId"]].append({"reviewerId": rid, **row})
         reviewers.append({
             "reviewerId": rid,
             "summary": validation_summary(list(case_by_id.values()), active),
@@ -4097,7 +4094,6 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
         "reviewedCount": sum(row["summary"]["reviewedCount"] for row in reviewers),
         "adoptedCount": sum(row["summary"]["adoptedCount"] for row in reviewers),
         "excludedCount": sum(row["summary"]["excludedCount"] for row in reviewers),
-        "caseDecisions": case_decisions,
     }
     return {
         "exportVersion": "validation-1",
