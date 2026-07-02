@@ -1997,6 +1997,8 @@ function renderRightValidationPanel() {
       <div class="validation-key-row"><kbd>Enter</kbd><strong>採用</strong></div>
       <div class="validation-key-row"><kbd>Backspace</kbd><strong>除外</strong></div>
       <div class="validation-key-row"><kbd>Delete</kbd><strong>除外</strong></div>
+      <div class="validation-help-text">このepochをテスト問題として使える場合は採用、波形や切り出しに問題があり使わない場合は除外を選んでください。</div>
+      <div class="validation-help-text">下のValidation記録をクリックすると、過去に判定したepochをもう一度表示して再評価できます。</div>
     </div>
     ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No validation epoch loaded.</div>'}
     <div class="research-result-title">Validation記録 (${responses.length})</div>

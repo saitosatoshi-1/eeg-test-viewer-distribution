@@ -2512,6 +2512,14 @@ body.validation-workflow .validation-key-row strong {
   font-weight: 900;
 }
 
+body.validation-workflow .validation-help-text {
+  margin-top: 10px;
+  color: #263241;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 body.validation-workflow .validation-decision-card.validation-adopted {
   border-color: #16803d;
   background: #e8f8ee;
