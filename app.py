@@ -4082,15 +4082,9 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
             case = case_by_id.get(str(response.get("caseId") or ""), {})
             edf_path = response.get("edfPath") or case.get("edfPath", "")
             row = {
-                "reviewerId": rid,
-                "caseId": response.get("caseId", ""),
                 "fileName": validation_file_name(edf_path or response.get("recordingId") or case.get("recordingId", "")),
                 "edfPath": edf_path,
-                "recordingId": response.get("recordingId") or case.get("recordingId", ""),
-                "decision": response.get("decision", ""),
-                "decisionLabel": response.get("decisionLabel", ""),
-                "acceptedForTest": bool(response.get("acceptedForTest")),
-                "excludedFromTest": bool(response.get("excludedFromTest")),
+                "decision": response.get("decisionLabel", "") or response.get("decision", ""),
                 "answeredAt": response.get("answeredAt", ""),
             }
             case_decisions.append(row)
@@ -4105,8 +4099,8 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
         "reviewerCount": len(reviewer_summaries),
         "caseCount": len(case_by_id),
         "reviewedCount": len(case_decisions),
-        "adoptedCount": sum(1 for row in case_decisions if row["acceptedForTest"]),
-        "excludedCount": sum(1 for row in case_decisions if row["excludedFromTest"]),
+        "adoptedCount": sum(1 for row in case_decisions if row["decision"] == VALIDATION_DECISION_LABELS[VALIDATION_DECISION_ADOPT]),
+        "excludedCount": sum(1 for row in case_decisions if row["decision"] == VALIDATION_DECISION_LABELS[VALIDATION_DECISION_EXCLUDE]),
     }
     return {
         "exportVersion": "validation-1",
