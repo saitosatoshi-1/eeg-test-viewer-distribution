@@ -2527,29 +2527,30 @@ body.validation-workflow .validation-decision-card.validation-adopted {
 
 body.validation-workflow .validation-decision-card {
   width: 100%;
-  cursor: pointer;
   text-align: left;
 }
 
-body.validation-workflow button.validation-decision-card {
-  appearance: none;
+body.validation-workflow .validation-revisit-button {
+  margin-top: 8px;
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #1f5f91;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #1f3b57;
+  cursor: pointer;
   font: inherit;
+  font-size: 13px;
+  font-weight: 900;
 }
 
-body.validation-workflow .validation-decision-card:hover {
-  box-shadow: 0 0 0 2px rgba(31, 95, 145, 0.18);
+body.validation-workflow .validation-revisit-button:hover {
+  background: #edf7ff;
 }
 
-body.validation-workflow .validation-decision-card:focus-visible {
+body.validation-workflow .validation-revisit-button:focus-visible {
   outline: 3px solid #2f6f9f;
   outline-offset: 2px;
-}
-
-body.validation-workflow .validation-revisit-label {
-  margin-top: 6px;
-  color: #1f3b57;
-  font-size: 12px;
-  font-weight: 800;
 }
 
 body.validation-workflow .validation-decision-card.validation-adopted .research-result-head span {

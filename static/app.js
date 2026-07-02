@@ -1988,7 +1988,7 @@ function renderRightValidationPanel() {
     const decision = String(response.decision || "");
     const label = response.decisionLabel || VALIDATION_DECISION_LABELS[decision] || decision || "";
     const className = decision === VALIDATION_DECISION_ADOPT ? "validation-adopted" : (decision === VALIDATION_DECISION_EXCLUDE ? "validation-excluded" : "");
-    return `<button type="button" class="research-result-card validation-decision-card ${escapeHtml(className)}" data-action="validation-revisit" data-case-id="${escapeHtml(response.caseId || "")}"><div class="research-result-head"><strong>${Number(response.answerOrder || index + 1)}件目</strong><span>${escapeHtml(label || "-")}</span></div><div class="validation-revisit-label">再評価</div></button>`;
+    return `<div class="research-result-card validation-decision-card ${escapeHtml(className)}"><div class="research-result-head"><strong>${Number(response.answerOrder || index + 1)}件目</strong><span>${escapeHtml(label || "-")}</span></div><button type="button" class="validation-revisit-button" data-action="validation-revisit" data-case-id="${escapeHtml(response.caseId || "")}">再評価</button></div>`;
   }).join("");
   els.rightTestPanel.innerHTML = `
     <div class="research-result-card validation-help-card">
@@ -1998,7 +1998,7 @@ function renderRightValidationPanel() {
       <div class="validation-key-row"><kbd>Backspace</kbd><strong>除外</strong></div>
       <div class="validation-key-row"><kbd>Delete</kbd><strong>除外</strong></div>
       <div class="validation-help-text">このepochをテスト問題として使える場合は採用、波形や切り出しに問題があり使わない場合は除外を選んでください。</div>
-      <div class="validation-help-text">下のValidation記録をクリックすると、過去に判定したepochをもう一度表示して再評価できます。</div>
+      <div class="validation-help-text">下のValidation記録の再評価ボタンを押すと、過去に判定したepochをもう一度表示して再評価できます。</div>
     </div>
     ${current ? `<div class="research-result-card"><div class="research-result-title">Current epoch</div>${researchDetailRows(currentRows)}</div>` : '<div class="research-empty">No validation epoch loaded.</div>'}
     <div class="research-result-title">Validation記録 (${responses.length})</div>
