@@ -99,6 +99,7 @@ const state = {
   validationResponses: [],
   lastValidationResponse: null,
   lastValidationResponseCaseIndex: -1,
+  validationRevisitResumeIndex: -1,
 };
 
 const els = {
@@ -2021,9 +2022,11 @@ async function revisitValidationCase(caseId) {
     setStatus("再評価対象のepochが現在のvalidation datasetにありません。", { error: true });
     return;
   }
+  const completionVisible = els.researchCompleteScreen?.hidden === false;
   hideResearchCompletion();
   hideResearchDebriefing();
   hideResearchToast();
+  state.validationRevisitResumeIndex = completionVisible ? -1 : state.researchCaseIndex;
   state.researchResultAutoSubmitted = false;
   await showResearchCase(index);
   setStatus("再評価するepochを表示しました。Enter=採用 / Backspace・Delete=除外");
@@ -2142,9 +2145,24 @@ async function saveValidationDecision(decision) {
     renderRightResearchPanels();
     showResearchToast(`保存しました: ${VALIDATION_DECISION_LABELS[decision] || decision} · やり直す場合は「前の問題をやり直す」`, { undo: true });
     if (revisitingAnsweredCase) {
-      setStatus("再評価を保存しました。Validation記録を更新しました。");
+      const resumeIndex = Number(state.validationRevisitResumeIndex);
+      state.validationRevisitResumeIndex = -1;
+      const cases = activeResearchCases();
+      if (Number.isInteger(resumeIndex) && resumeIndex >= 0 && resumeIndex < cases.length) {
+        await showResearchCase(resumeIndex);
+        setStatus("再評価を保存しました。途中のepochから再開します。");
+      } else {
+        const nextIndex = firstUnansweredResearchCaseIndex();
+        if (nextIndex >= 0) {
+          await showResearchCase(nextIndex);
+          setStatus("再評価を保存しました。未評価のepochから再開します。");
+        } else {
+          setStatus("再評価を保存しました。Validation記録を更新しました。");
+        }
+      }
       return;
     }
+    state.validationRevisitResumeIndex = -1;
     const nextIndex = firstUnansweredResearchCaseIndex();
     if (nextIndex >= 0) await showResearchCase(nextIndex);
     else await completeResearchTest();
