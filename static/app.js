@@ -2675,30 +2675,16 @@ async function shareResearchJsonByEmail() {
   const readerId = activeResearchReaderId(profile);
   const jsonFilename = researchJsonFilename(readerId, profile);
   try {
-    setStatus("結果JSONファイルを共有準備中...", { busy: true });
+    setStatus("結果JSONファイルをメール送信準備中...", { busy: true });
     await retryPendingResearchResponses();
     const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
     saveResearchResultBackup(jsonFilename, jsonText);
-    const file = new File([jsonText], jsonFilename, { type: "application/json" });
-    const shareData = {
-      title: "脳波読影テスト結果",
-      text: researchEmailBodyText(profile),
-      files: [file],
-    };
-    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
-      await navigator.share(shareData);
-      if (els.researchSavedCsvName) {
-        els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
-      }
-      setStatus(`結果JSONファイルを共有しました: ${jsonFilename}`);
-      return;
-    }
     downloadTextFile(jsonFilename, jsonText);
     window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent("脳波読影テスト結果")}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `この端末では直接添付共有できません。${jsonFilename}をダウンロードした後、メールに添付してください。`;
+      els.researchSavedCsvName.textContent = `${jsonFilename}をダウンロードしました。開いたメールに添付してください。`;
     }
-    setStatus("JSONファイルをダウンロードしました。メールに添付してください");
+    setStatus("宛先入力済みのメール画面を開きました。JSONファイルを添付してください");
   } catch (err) {
     if (err?.name === "AbortError") {
       setStatus("JSONファイル共有をキャンセルしました");
