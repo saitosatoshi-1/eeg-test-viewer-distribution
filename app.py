@@ -3415,7 +3415,7 @@ def research_json_dataset_payload(dataset: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    compact = {
+    return {
         key: profile.get(key, "")
         for key in (
             "readerName", "email", "affiliation", "specialty", "position",
@@ -3426,43 +3426,19 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
             "dataProviderSharingAcknowledged",
         )
     }
-    qualification_labels = {
-        "specialist_instructor": "専門医有り・指導医有り",
-        "specialist_no_instructor": "専門医有り・指導医なし",
-        "no_specialist_no_instructor": "専門医なし・指導医なし",
-        "yes_instructor": "専門医有り・指導医有り",
-        "yes_no_instructor": "専門医有り・指導医なし",
-        "no": "専門医なし・指導医なし",
-    }
-    compact["positionLabel"] = qualification_labels.get(str(compact.get("position") or ""), "")
-    compact["epilepsySpecialistLabel"] = qualification_labels.get(str(compact.get("epilepsySpecialist") or ""), "")
-    compact["clinicalNeurophysEegSpecialistLabel"] = qualification_labels.get(str(compact.get("clinicalNeurophysEegSpecialist") or ""), "")
-    return compact
 
 
 def research_compact_dataset_payload(dataset: dict[str, Any], dataset_dir: Path) -> dict[str, Any]:
     cases = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
     settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
-    extraction_sources: dict[str, int] = {}
-    for row in cases:
-        source_annotation = str(row.get("sourceAnnotation") or "")
-        extraction_sources[source_annotation or "unknown"] = extraction_sources.get(source_annotation or "unknown", 0) + 1
     return {
         "datasetId": dataset.get("datasetId", ""),
         "name": dataset.get("name", ""),
-        "createdAt": dataset.get("createdAt", ""),
-        "version": dataset.get("version", ""),
-        "datasetPath": str(dataset.get("datasetPath") or dataset_dir),
         "questionCount": research_phase1_total_count(settings),
         "includedCaseCount": len(cases),
         "groupCounts": {
             group: sum(1 for row in cases if row.get("labelGroup") == group)
             for group in ("epileptiform", "non_epileptiform")
-        },
-        "montageMap": RESEARCH_MONTAGE_LABELS,
-        "extractionLog": {
-            "sourceRoots": dataset.get("sourceRoots", []),
-            "sourceAnnotationCounts": extraction_sources,
         },
         "settings": {
             "epochDurationSec": settings.get("epochDurationSec", 10),
@@ -3716,6 +3692,23 @@ def research_export_response_payload(response: dict[str, Any]) -> dict[str, Any]
     return payload
 
 
+def research_export_debriefing_payload(debriefing: Any) -> dict[str, Any]:
+    if not isinstance(debriefing, dict):
+        return {}
+    keys = (
+        "completedAt",
+        "montageSwitchIncreaseLikert",
+        "behaviorChangeFreeText",
+        "continuedDataUseConsent",
+        "individualFeedbackRequested",
+    )
+    return {
+        key: debriefing.get(key)
+        for key in keys
+        if debriefing.get(key) not in ("", None, [], {})
+    }
+
+
 def export_research_responses_json(dataset_dir: Path, reader_id: str | None = None, auth_payload: dict[str, Any] | None = None) -> str:
     if PUBLIC_MODE and not str(reader_id or "").strip():
         raise ValueError("readerId is required for public result export.")
@@ -3749,13 +3742,12 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
             "readerId": rid,
             "readerProfile": research_compact_reader_profile(profile),
             "summary": research_reader_summary(compact_responses),
-            "postTestDebriefing": response_payload.get("postTestDebriefing") if isinstance(response_payload.get("postTestDebriefing"), dict) else {},
+            "postTestDebriefing": research_export_debriefing_payload(response_payload.get("postTestDebriefing")),
             "responses": [research_export_response_payload(response) for response in compact_responses],
         })
     payload = {
-        "exportVersion": "compact-1",
+        "exportVersion": "compact-2",
         "exportedAt": utc_now_iso(),
-        "montageMap": RESEARCH_MONTAGE_LABELS,
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "readers": readers,
         "cases": research_export_case_payload(dataset),
