@@ -2402,6 +2402,10 @@ body.test-only-distribution.mobile-viewport .context-menu button {
   display: none;
 }
 
+.validation-only[hidden] {
+  display: none !important;
+}
+
 body.validation-workflow .validation-only {
   display: block;
 }

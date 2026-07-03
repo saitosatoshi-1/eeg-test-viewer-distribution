@@ -397,7 +397,9 @@ function applyWorkflowChrome() {
     els.researchSetupReaderNameInput.autocomplete = validation ? "off" : "name";
   }
   if (els.researchSetupStartBtn) els.researchSetupStartBtn.textContent = validation ? "Validation開始" : "開始";
-  if (els.validationDatasetKindSelect) els.validationDatasetKindSelect.closest("label").hidden = !validation;
+  for (const el of document.querySelectorAll(".validation-only")) {
+    el.hidden = !validation;
+  }
   const tab = document.querySelector('[data-right-tab="test"]');
   if (tab) tab.textContent = validation ? "Validation" : "Test";
   const panelTitle = document.querySelector('[data-right-tab-panel="test"] .panel-title');
