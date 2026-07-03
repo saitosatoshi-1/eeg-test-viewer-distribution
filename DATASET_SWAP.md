@@ -15,12 +15,12 @@ This repository does not store EDF data in GitHub. Private EDF datasets are uplo
   - Counts: epilepsy 36, no_epilepsy 30, total 66.
   - Previous validation dataset. Keep it for reproducibility.
 - `private:validation_tuea_v2`
-  - Uploaded on 2026-06-29; IED/epilepsy set replaced on 2026-07-03.
+  - Uploaded on 2026-06-29; IED/epilepsy set replaced on 2026-07-03, then refreshed again on 2026-07-03.
   - Current shared/default dataset.
   - Source folders on Saito's Mac:
     - epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/epilepsy`
     - no_epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/no_epilepsy`
-  - Counts: epilepsy 38, no_epilepsy 30, total 68.
+  - Counts: epilepsy 30, no_epilepsy 30, total 60.
   - Test URL:
 
 ```text
