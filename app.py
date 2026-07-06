@@ -104,6 +104,7 @@ ALLOW_UNPROTECTED_PUBLIC = os.environ.get("EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC",
 ACCESS_COOKIE_NAME = "eeg_viewer_access"
 ACCESS_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14
 MAX_WINDOW_DURATION_SEC = 120.0
+DISPLAY_FILTER_PADDING_SEC = 5.0
 MAX_POST_BODY_BYTES = 20 * 1024 * 1024
 MAX_EXPORT_POST_BODY_BYTES = 150 * 1024 * 1024
 MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
@@ -1583,11 +1584,19 @@ class RecordingStore:
         warnings = list(metadata["warnings"])
         direct = self.direct_info(record_id)
         if direct.available:
+            sfreq = float(direct.sfreq)
+            start = max(0, int(round(start_sec * sfreq)))
+            stop = min(direct.n_samples, int(round((start_sec + duration_sec) * sfreq)))
+            if stop <= start:
+                start = 0
+                stop = min(direct.n_samples, int(round(duration_sec * sfreq)))
+            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
+            padded_start = max(0, start - pad)
+            padded_stop = min(direct.n_samples, stop + pad)
             data, ch_names, sfreq, actual_start, actual_duration = self.direct_window(
-                record_id, start_sec, duration_sec
+                record_id, padded_start / sfreq, (padded_stop - padded_start) / sfreq
             )
-            start = int(round(actual_start * sfreq))
-            stop = start + data.shape[1]
+            actual_start_sample = int(round(actual_start * sfreq))
             warnings.append("Using direct EEG-1200 37-channel frame reader; MNE preview is bypassed.")
         else:
             raw = self.raw(record_id)
@@ -1610,21 +1619,28 @@ class RecordingStore:
             if stop <= start:
                 start = 0
                 stop = min(raw.n_times, int(round(duration_sec * sfreq)))
+            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
+            padded_start = max(0, start - pad)
+            padded_stop = min(raw.n_times, stop + pad)
             picks = list(range(len(raw.ch_names)))
-            data = raw.get_data(picks=picks, start=start, stop=stop) * 1e6
+            data = raw.get_data(picks=picks, start=padded_start, stop=padded_stop) * 1e6
             ch_names = [normalize_label(ch) for ch in raw.ch_names]
+            actual_start_sample = padded_start
         data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
         if ecg_filter:
             data = apply_ecg_artifact_filter(data, ch_names, sfreq, warnings)
+        crop_start = max(0, start - actual_start_sample)
+        crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
+        data = data[:, crop_start:crop_stop]
+        stop = start + data.shape[1]
 
         traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
         max_points = 1800
         n_samples = data.shape[1]
-        stride = max(1, math.ceil(n_samples / max_points))
         topomap = {"channels": []}
-        rel_times = (np.arange(start, stop, stride) / sfreq).astype(float)
+        rel_times = (np.arange(start, stop) / sfreq).astype(float)
         for trace in traces:
-            trace["values"] = trace["values"][::stride].astype(float).round(3).tolist()
+            decimate_trace_for_display(trace, start, sfreq, max_points)
         annotations = self.display_annotations(record_id) if include_annotations else []
         return {
             "id": record_id,
@@ -1660,11 +1676,19 @@ class RecordingStore:
         warnings = list(metadata["warnings"])
         direct = self.direct_info(record_id)
         if direct.available:
+            sfreq = float(direct.sfreq)
+            start = max(0, int(round(start_sec * sfreq)))
+            stop = min(direct.n_samples, int(round((start_sec + duration_sec) * sfreq)))
+            if stop <= start:
+                start = 0
+                stop = min(direct.n_samples, int(round(duration_sec * sfreq)))
+            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
+            padded_start = max(0, start - pad)
+            padded_stop = min(direct.n_samples, stop + pad)
             data, ch_names, sfreq, actual_start, actual_duration = self.direct_window(
-                record_id, start_sec, duration_sec
+                record_id, padded_start / sfreq, (padded_stop - padded_start) / sfreq
             )
-            start = int(round(actual_start * sfreq))
-            stop = start + data.shape[1]
+            actual_start_sample = int(round(actual_start * sfreq))
             warnings.append("Using direct EEG-1200 37-channel frame reader; MNE preview is bypassed.")
         else:
             raw = self.raw(record_id)
@@ -1689,18 +1713,25 @@ class RecordingStore:
             if stop <= start:
                 start = 0
                 stop = min(raw.n_times, int(round(duration_sec * sfreq)))
+            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
+            padded_start = max(0, start - pad)
+            padded_stop = min(raw.n_times, stop + pad)
             picks = list(range(len(raw.ch_names)))
-            data = raw.get_data(picks=picks, start=start, stop=stop) * 1e6
+            data = raw.get_data(picks=picks, start=padded_start, stop=padded_stop) * 1e6
             ch_names = [normalize_label(ch) for ch in raw.ch_names]
+            actual_start_sample = padded_start
         data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
         if ecg_filter:
             data = apply_ecg_artifact_filter(data, ch_names, sfreq, warnings)
+        crop_start = max(0, start - actual_start_sample)
+        crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
+        data = data[:, crop_start:crop_stop]
+        stop = start + data.shape[1]
 
         max_points = 1800
         n_samples = data.shape[1]
-        stride = max(1, math.ceil(n_samples / max_points))
         topomap = {"channels": []}
-        rel_times = (np.arange(start, stop, stride) / sfreq).astype(float)
+        rel_times = (np.arange(start, stop) / sfreq).astype(float)
         montage_labels = {
             "longitudinal": "縦双極誘導",
             "a1a2": "耳朶参照基準2",
@@ -1721,7 +1752,7 @@ class RecordingStore:
         for montage, label in view_defs:
             traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
             for trace in traces:
-                trace["values"] = trace["values"][::stride].astype(float).round(3).tolist()
+                decimate_trace_for_display(trace, start, sfreq, max_points)
             view = {"montage": montage, "label": label, "traces": traces}
             montage_views.append(view)
             if montage == active:
@@ -1790,6 +1821,42 @@ def is_fallback_eeg_channel_name(name: str) -> bool:
             return True
     aux_prefixes = ("DC", "TRIG", "MARK", "EVENT", "STATUS", "PHOTIC", "RESP", "PULSE", "SPO2", "ETCO2")
     return not any(key.startswith(prefix) for prefix in aux_prefixes)
+
+
+def peak_preserving_indices(values: np.ndarray, max_points: int) -> np.ndarray:
+    n_samples = int(values.shape[0])
+    if n_samples <= 0:
+        return np.asarray([], dtype=int)
+    if n_samples <= max_points:
+        return np.arange(n_samples, dtype=int)
+    bucket_count = max(1, max_points // 2)
+    edges = np.linspace(0, n_samples, bucket_count + 1, dtype=int)
+    selected: list[int] = []
+    for start, stop in zip(edges[:-1], edges[1:]):
+        if stop <= start:
+            continue
+        segment = np.asarray(values[start:stop], dtype=float)
+        finite = np.where(np.isfinite(segment))[0]
+        if finite.size == 0:
+            selected.append(start)
+            continue
+        finite_values = segment[finite]
+        min_idx = start + int(finite[int(np.argmin(finite_values))])
+        max_idx = start + int(finite[int(np.argmax(finite_values))])
+        selected.extend(sorted({min_idx, max_idx}))
+    if selected[0] != 0:
+        selected.insert(0, 0)
+    if selected[-1] != n_samples - 1:
+        selected.append(n_samples - 1)
+    return np.asarray(sorted(set(selected)), dtype=int)
+
+
+def decimate_trace_for_display(trace: dict[str, Any], sample_start: int, sfreq: float, max_points: int) -> None:
+    raw_values = trace.get("values")
+    values = np.asarray(raw_values if raw_values is not None else [], dtype=float)
+    indices = peak_preserving_indices(values, max_points)
+    trace["times"] = ((sample_start + indices) / sfreq).astype(float).round(4).tolist()
+    trace["values"] = values[indices].astype(float).round(3).tolist()
 
 
 def channel_group(ch_name: str) -> str:
@@ -1944,14 +2011,11 @@ def build_montage_traces(
             return True
         return False
 
-    def ear_reference_or_source_ref(a: str, b: str, group: str = "") -> bool:
+    def ear_reference(a: str, b: str, group: str = "") -> bool:
         if diff(a, b, group):
             return True
-        if b in {"A1", "A2"} and a in index:
-            if not any("source REF" in warning for warning in warnings):
-                warnings.append("A1/A2 reference channels were not found; source REF channels are shown in the requested ear-reference order.")
-            add(f"{a}-REF", data[index[a]], group=group or channel_group(a))
-            return True
+        if b in {"A1", "A2"} and not any("A1/A2 reference channels" in warning for warning in warnings):
+            warnings.append("A1/A2 reference channels were not found; ear-reference montage could not be derived.")
         return False
 
     if montage == "longitudinal":
@@ -2029,7 +2093,7 @@ def build_montage_traces(
             ("Cz", "A2", "midline"),
         ]
         for a, b, group in pairs:
-            ear_reference_or_source_ref(a, b, group)
+            ear_reference(a, b, group)
     elif montage in {"conventional", "conventional_average"}:
         trace_channels = [
             ("Fp1", "A1", "left_temporal"),
@@ -2060,7 +2124,7 @@ def build_montage_traces(
                         add(f"{ch}-AVG", data[index[ch]] - avg, group=group)
         else:
             for a, b, group in trace_channels:
-                ear_reference_or_source_ref(a, b, group)
+                ear_reference(a, b, group)
     elif montage == "cz":
         for ch in [c for c in SCALP_ORDER if c in index and c != "Cz"]:
             diff(ch, "Cz", channel_group(ch))

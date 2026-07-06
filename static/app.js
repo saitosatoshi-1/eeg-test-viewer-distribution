@@ -3802,7 +3802,7 @@ function drawWaveColumn(ctx, layout, traces, times, options) {
   traces.forEach((trace, rowIndex) => {
     const centerY = top + rowH * (rowIndex + 0.5);
     const yScale = pxPerMm / Math.max(1e-6, traceUvPerMm(trace, sensitivity));
-    drawViewerWaveformPath(ctx, trace.values, times, {
+    drawViewerWaveformPath(ctx, trace.values, trace.times || times, {
       left,
       plotW,
       centerY,
