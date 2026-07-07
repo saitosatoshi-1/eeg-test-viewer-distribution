@@ -385,6 +385,10 @@ function isValidationWorkflow() {
   return state.researchMode === "validation";
 }
 
+function hasActiveResearchPrefetchSession() {
+  return (state.researchMode === "test" && !!state.researchSession) || (state.researchMode === "validation" && !!state.validationSession);
+}
+
 function applyWorkflowChrome() {
   const validation = WORKFLOW_MODE === "validation" || isValidationWorkflow();
   document.body.classList.toggle("validation-workflow", validation);
@@ -3279,7 +3283,7 @@ function stepSensitivity(direction) {
 }
 
 function applyOpenedRecording(opened) {
-  if (!(TEST_ONLY_DISTRIBUTION && state.researchMode === "test")) {
+  if (!(TEST_ONLY_DISTRIBUTION && hasActiveResearchPrefetchSession())) {
     state.windowCache.clear();
   }
   const rows = Array.isArray(opened?.recordings) ? opened.recordings : [];
@@ -3482,7 +3486,7 @@ function researchPrefetchCaseKey(item) {
 }
 
 function enqueueResearchPrefetchCases(items, options = {}) {
-  if (!TEST_ONLY_DISTRIBUTION || state.researchMode !== "test" || !state.researchSession) return;
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
   const nextItems = [];
   for (const item of items || []) {
     if (!item?.edfPath) continue;
@@ -3505,8 +3509,7 @@ async function drainResearchPrefetchQueue(runId) {
     while (
       state.researchPrefetchQueue.length &&
       runId === state.researchPrefetchRunId &&
-      state.researchMode === "test" &&
-      state.researchSession
+      hasActiveResearchPrefetchSession()
     ) {
       const item = state.researchPrefetchQueue.shift();
       state.researchPrefetchQueuedCases.delete(researchPrefetchCaseKey(item));
@@ -3518,8 +3521,7 @@ async function drainResearchPrefetchQueue(runId) {
     if (
       state.researchPrefetchQueue.length &&
       runId === state.researchPrefetchRunId &&
-      state.researchMode === "test" &&
-      state.researchSession
+      hasActiveResearchPrefetchSession()
     ) {
       drainResearchPrefetchQueue(runId);
     }
@@ -3527,15 +3529,18 @@ async function drainResearchPrefetchQueue(runId) {
 }
 
 function scheduleResearchPrefetch(aroundIndex = state.researchCaseIndex) {
-  if (!TEST_ONLY_DISTRIBUTION || state.researchMode !== "test" || !state.researchSession) return;
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
   const cases = activeResearchCases();
   if (!cases.length) return;
   const index = Math.max(0, Math.min(cases.length - 1, Number(aroundIndex || 0)));
-  const ahead = cases.slice(index + 1, index + 1 + RESEARCH_PREFETCH_LOOKAHEAD);
-  const rest = [
-    ...cases.slice(index + 1 + RESEARCH_PREFETCH_LOOKAHEAD),
+  const responseSource = isValidationWorkflow() ? state.validationSession?.responses : state.researchSession?.responses;
+  const answeredIds = new Set((responseSource || []).map((row) => String(row.caseId || "")));
+  const ordered = [
+    ...cases.slice(index + 1),
     ...cases.slice(0, index),
-  ];
+  ].filter((item) => item?.sampleEpoch || !answeredIds.has(String(item?.caseId || "")));
+  const ahead = ordered.slice(0, RESEARCH_PREFETCH_LOOKAHEAD);
+  const rest = ordered.slice(RESEARCH_PREFETCH_LOOKAHEAD);
   enqueueResearchPrefetchCases(ahead, { priority: true });
   enqueueResearchPrefetchCases(rest);
 }
