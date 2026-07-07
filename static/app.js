@@ -25,9 +25,10 @@ const MONTAGE_LABELS = {
   average: "平均参照基準2",
   cz: "Cz参照基準",
   transverse: "横双極誘導",
+  circular: "環状双極誘導",
 };
 const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitudinal", "transverse"];
-const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
+const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse", "circular"];
 const RIGHT_PANEL_TABS = ["metadata", "test"];
 const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
 const LAUNCH_PARAMS = new URLSearchParams(window.location.search || "");
@@ -392,6 +393,7 @@ function hasActiveResearchPrefetchSession() {
 
 function applyWorkflowChrome() {
   const validation = isValidationWorkflow();
+  document.body.classList.toggle("validation-workflow", validation);
   const title = document.querySelector(".research-setup-title");
   if (title) title.textContent = validation ? "Validation設定" : "テスト設定";
   const readerLabel = els.researchSetupReaderNameInput?.closest("label");
@@ -1148,7 +1150,7 @@ function researchMontageTimingPayload() {
     analysisTotals[row.montage] = Number(Number((analysisTotals[row.montage] || 0) + Number(row.durationSec || 0)).toFixed(3));
   }
   const analysisDisplayedMontages = Object.keys(analysisTotals);
-  const analysisHasBipolar = analysisDisplayedMontages.some((montage) => ["longitudinal", "transverse"].includes(montage));
+  const analysisHasBipolar = analysisDisplayedMontages.some((montage) => ["longitudinal", "transverse", "circular"].includes(montage));
   const analysisHasReference = analysisDisplayedMontages.some((montage) => ["conventional", "conventional_average", "a1a2", "average", "cz"].includes(montage));
   const montageSequence = switches
     .map((row, index) => ({
@@ -3135,6 +3137,7 @@ function onKeyDown(ev) {
       5: "a1a2",
       6: "average",
       7: "cz",
+      8: "circular",
     };
     setMontage(montageByKey[ev.key]);
   }
@@ -3425,6 +3428,7 @@ function researchCasePrefetchStart(item, duration) {
 
 function researchCasePrefetchMontage(item) {
   const profile = researchProfile();
+  if (isValidationWorkflow()) return "longitudinal";
   if (isResearchPracticeCase(item)) return "conventional";
   return profile.usualMontage || item?.phase1Montage || activeMontageValue() || "conventional";
 }
@@ -4296,6 +4300,11 @@ function nkLabel(label) {
 
 function traceColor(trace, rowIndex, montage = activeMontageValue()) {
   if (trace.role === "ecg") return "#5f6762";
+  if (montage === "circular") {
+    if (trace.group === "midline") return "#303030";
+    if (trace.group === "left_temporal" || trace.group === "left_parasagittal") return "#1b3298";
+    if (trace.group === "right_temporal" || trace.group === "right_parasagittal") return "#b4232d";
+  }
   if (montage === "conventional" || montage === "conventional_average") {
     const label = String(trace.label || "");
     if (/(^|-)Fz($|-)|(^|-)Cz($|-)/.test(label)) return "#23734f";

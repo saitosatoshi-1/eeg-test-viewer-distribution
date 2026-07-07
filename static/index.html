@@ -55,6 +55,7 @@
             <option value="average">平均参照基準2</option>
             <option value="cz">Cz参照基準</option>
             <option value="transverse">横双極誘導</option>
+            <option value="circular">環状双極誘導</option>
           </select>
         </label>
         <label class="nk-select ac-control">
@@ -219,12 +220,25 @@
             <span id="calReadout">10 uV/mm · TC 0.3s · AC 60 Hz · 30 mm/s</span>
           </div>
         </section>
+        <div class="right-panel-resize column-resize-handle" data-resize-panel="right" role="separator" aria-orientation="vertical" aria-label="右パネル幅を調整"></div>
+        <aside class="side-panel right" aria-label="Validation panel">
+          <section class="right-panel" data-right-tab-panel="metadata" hidden>
+            <div class="panel-title">Metadata</div>
+            <dl id="metadataPanel"></dl>
+            <div class="panel-title">Warnings</div>
+            <div class="warning-panel" id="warningPanel"></div>
+          </section>
+          <section class="right-panel research-right-panel" data-right-tab-panel="test" hidden>
+            <div class="panel-title">Validation</div>
+            <div id="rightTestPanel"></div>
+          </section>
+        </aside>
 
       </main>
     </div>
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260707-validation-select"></script>
+    <script src="/static/app.js?v=20260707-validation-panel"></script>
   </body>
 </html>
