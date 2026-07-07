@@ -32,6 +32,8 @@ Required production environment variables:
 
 ```text
 EEG_VIEWER_PUBLIC_MODE=1
+EEG_VIEWER_VALIDATION_WORKFLOW=1
+EEG_VIEWER_PRIVATE_DATASET_ADMIN=1
 EEG_VIEWER_ACCESS_CODE=ncnp
 EEG_VIEWER_ADMIN_CODE=<separate admin-only secret>
 EEG_VIEWER_ALLOWED_REMOTE_HOSTS=raw.githubusercontent.com,github.com
