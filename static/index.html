@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260706-peak1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260707-clean1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -102,10 +102,6 @@
         <label class="check-label compact-check">
           <input type="checkbox" id="ecgToggle" checked />
           ECG
-        </label>
-        <label class="filter-check" title="Regress ECG channel from EEG traces">
-          <input type="checkbox" id="ecgFilterToggle" />
-          ECG filter
         </label>
         <div class="readout" id="statusReadout">Loading...</div>
         </div>
@@ -223,33 +219,11 @@
           </div>
         </section>
 
-        <div class="column-resize-handle right-panel-resize" data-resize-panel="right" title="Resize details column"></div>
-
-        <aside class="side-panel right">
-          <div class="right-tabs" role="tablist" aria-label="Right panel">
-            <button type="button" class="active" data-right-tab="metadata" role="tab">Metadata</button>
-            <button type="button" data-right-tab="test" role="tab">Test</button>
-          </div>
-
-          <section class="right-tab-panel" data-right-tab-panel="metadata" role="tabpanel">
-            <div class="panel-title">Metadata</div>
-            <dl id="metadataPanel"></dl>
-            <div class="panel-title">Warnings</div>
-            <div id="warningPanel" class="warning-panel"></div>
-          </section>
-
-          <section class="right-tab-panel" data-right-tab-panel="test" role="tabpanel" hidden>
-            <div class="panel-title">Test</div>
-            <div id="rightTestPanel" class="research-right-panel"></div>
-          </section>
-
-        </aside>
-
       </main>
     </div>
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260706-peak1"></script>
+    <script src="/static/app.js?v=20260707-clean1"></script>
   </body>
 </html>

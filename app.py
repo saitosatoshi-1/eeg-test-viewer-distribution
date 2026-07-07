@@ -90,6 +90,7 @@ REMOTE_DATASET_CACHE_DIR = RESEARCH_DIR / "remote_cache"
 SUBMITTED_RESULTS_DIR = RESEARCH_DIR / "submitted_results"
 VALIDATION_RESULTS_DIR = RESEARCH_DIR / "validation_results"
 PRIVATE_DATASET_DIR = RESEARCH_DIR / "private_datasets"
+VALIDATION_WORKFLOW_ENABLED = False
 USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
@@ -133,10 +134,6 @@ MUTATING_PATHS = {
     "/api/research/test/debriefing",
     "/api/research/test/export-file",
     "/api/research/test/submit-result",
-    "/api/research/validation/response",
-    "/api/research/validation/response/undo",
-    "/api/research/validation/reset",
-    "/api/research/validation/submit-result",
     "/api/admin/private-dataset/upload",
 }
 LOGIN_PATH = "/login"
@@ -4696,6 +4693,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_text(submitted_result_text(required(qs, "id")), "application/json; charset=utf-8")
+            if path.startswith("/api/admin/validation-results/") and not VALIDATION_WORKFLOW_ENABLED:
+                return self.send_json({"error": "Validation workflow is disabled in the research test viewer."}, status=404)
             if path == "/api/admin/validation-results/list":
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
@@ -4767,6 +4766,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     "sessionToken": qs.get("sessionToken", [""])[0],
                     "accessCookieHash": self.access_cookie_hash(),
                 }), "application/json; charset=utf-8")
+            if path.startswith("/api/research/validation/") and not VALIDATION_WORKFLOW_ENABLED:
+                return self.send_json({"error": "Validation workflow is disabled in the research test viewer."}, status=404)
             if path == "/api/research/validation/session":
                 return self.send_json(validation_session({
                     "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
@@ -4798,6 +4799,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_auth_required(reason)
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
+            if parsed.path.startswith("/api/research/validation/") and not VALIDATION_WORKFLOW_ENABLED:
+                return self.send_json({"error": "Validation workflow is disabled in the research test viewer."}, status=404)
             if parsed.path.startswith("/api/"):
                 allowed, reason = self.mutation_allowed(parsed.path)
                 if not allowed:

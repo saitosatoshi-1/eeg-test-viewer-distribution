@@ -30,7 +30,7 @@ const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitu
 const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
 const RIGHT_PANEL_TABS = ["metadata", "test"];
 const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
-const WORKFLOW_MODE = new URLSearchParams(window.location.search || "").get("mode") === "validation" ? "validation" : "test";
+const WORKFLOW_MODE = "test";
 const VALIDATION_DECISION_ADOPT = "adopt";
 const VALIDATION_DECISION_EXCLUDE = "exclude";
 const VALIDATION_DECISION_LABELS = {
@@ -3619,6 +3619,7 @@ async function loadWindow() {
 
 function renderMetadata() {
   const md = state.metadata;
+  if (!md || !els.metadataPanel) return;
   const rows = [
     ["ID", md.id],
     ["Device", md.deviceName || "-"],
@@ -4038,11 +4039,15 @@ function draggedSelection(anchor, pointer) {
 
 function openContextMenu(ev) {
   ev.preventDefault();
+  if (TEST_ONLY_DISTRIBUTION && !(state.researchMode === "test" && state.researchSession)) {
+    hideContextMenu();
+    return;
+  }
   const point = canvasToData(ev);
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.context = { ...point };
   if (state.researchMode === "test" && state.researchSession) renderResearchRatingContextMenu();
-  else renderWaveContextMenu();
+  else return hideContextMenu();
   els.contextMenu.style.left = `${ev.clientX}px`;
   els.contextMenu.style.top = `${ev.clientY}px`;
   els.contextMenu.classList.remove("hidden");
@@ -4096,17 +4101,8 @@ function hideContextMenu() {
 }
 
 function renderWaveContextMenu() {
-  els.contextMenu.innerHTML = `
-    <button data-action="point" data-label="spike">spike</button>
-    <button data-action="point" data-label="focal">focal</button>
-    <button data-action="point" data-label="generalized">generalized</button>
-    <button data-action="point" data-label="seizure onset">seizure onset</button>
-    <button data-action="point" data-label="seizure end">seizure end</button>
-    <button data-action="point" data-label="artifact">artifact</button>
-    <button data-action="point" data-label="sleep stage">sleep stage</button>
-    <button data-action="point" data-label="ECG artifact">ECG artifact</button>
-    <button data-action="point" data-label="comment">comment</button>
-  `;
+  els.contextMenu.innerHTML = "";
+  hideContextMenu();
 }
 
 function canvasToData(ev) {
