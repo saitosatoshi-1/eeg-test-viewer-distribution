@@ -1896,11 +1896,12 @@ def upload_private_dataset(payload: dict[str, Any]) -> dict[str, Any]:
     temp_dir.mkdir(parents=True, exist_ok=False)
     try:
         extract_private_dataset_zip(zip_bytes, temp_dir)
-        dataset = private_dataset_payload(temp_dir, dataset_id, str(payload.get("name") or dataset_id))
-        json_write(temp_dir / "dataset.json", dataset)
+        private_dataset_payload(temp_dir, dataset_id, str(payload.get("name") or dataset_id))
         if target_dir.exists():
             shutil.rmtree(target_dir)
         temp_dir.rename(target_dir)
+        dataset = private_dataset_payload(target_dir, dataset_id, str(payload.get("name") or dataset_id))
+        json_write(target_dir / "dataset.json", dataset)
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
