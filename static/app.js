@@ -7,7 +7,8 @@ const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
 const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
 const TEST_ONLY_DISTRIBUTION = document.body.classList.contains("test-only-distribution");
 const PUBLIC_TEST_QUESTION_COUNT = 20;
-const DEFAULT_PUBLIC_DATASET_PATH = "private:test_tuea_v2";
+const DEFAULT_PUBLIC_TEST_DATASET_PATH = "private:test_tuea_v2";
+const DEFAULT_PUBLIC_VALIDATION_DATASET_PATH = "private:validation_tuea_v2";
 const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
@@ -29,7 +30,9 @@ const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitu
 const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
 const RIGHT_PANEL_TABS = ["metadata", "test"];
 const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
-const WORKFLOW_MODE = "test";
+const LAUNCH_PARAMS = new URLSearchParams(window.location.search || "");
+const WORKFLOW_MODE = String(LAUNCH_PARAMS.get("mode") || "").trim().toLowerCase() === "validation" ? "validation" : "test";
+const DEFAULT_PUBLIC_DATASET_PATH = WORKFLOW_MODE === "validation" ? DEFAULT_PUBLIC_VALIDATION_DATASET_PATH : DEFAULT_PUBLIC_TEST_DATASET_PATH;
 const VALIDATION_DECISION_ADOPT = "adopt";
 const VALIDATION_DECISION_EXCLUDE = "exclude";
 const VALIDATION_DECISION_LABELS = {
@@ -368,7 +371,7 @@ function applyFixedResearchQuestionCount() {
 }
 
 function applyLaunchParams() {
-  const params = new URLSearchParams(window.location.search || "");
+  const params = LAUNCH_PARAMS;
   const dataset = params.get("dataset") || params.get("datasetUrl") || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
   if (dataset && els.researchSetupDatasetPathInput) {
     els.researchSetupDatasetPathInput.value = dataset;
@@ -387,18 +390,18 @@ function hasActiveResearchPrefetchSession() {
 
 function applyWorkflowChrome() {
   const title = document.querySelector(".research-setup-title");
-  if (title) title.textContent = "テスト設定";
+  if (title) title.textContent = isValidationWorkflow() ? "Validation設定" : "テスト設定";
   const readerLabel = els.researchSetupReaderNameInput?.closest("label");
   if (readerLabel?.firstChild) readerLabel.firstChild.textContent = "回答者名 (English)";
   if (els.researchSetupReaderNameInput) {
     els.researchSetupReaderNameInput.placeholder = "例: Taro Yamada";
     els.researchSetupReaderNameInput.autocomplete = "name";
   }
-  if (els.researchSetupStartBtn) els.researchSetupStartBtn.textContent = "開始";
+  if (els.researchSetupStartBtn) els.researchSetupStartBtn.textContent = isValidationWorkflow() ? "Validationを開始" : "開始";
   const tab = document.querySelector('[data-right-tab="test"]');
-  if (tab) tab.textContent = "Test";
+  if (tab) tab.textContent = isValidationWorkflow() ? "Validation" : "Test";
   const panelTitle = document.querySelector('[data-right-tab-panel="test"] .panel-title');
-  if (panelTitle) panelTitle.textContent = "Test";
+  if (panelTitle) panelTitle.textContent = isValidationWorkflow() ? "Validation" : "Test";
   if (els.researchUndoBtn) els.researchUndoBtn.title = "前の回答を取り消して、その問題に戻ります";
 }
 

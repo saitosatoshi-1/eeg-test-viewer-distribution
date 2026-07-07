@@ -3804,7 +3804,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
 
     def login_page_html(self, message: str = "") -> str:
         next_path = self.safe_return_path()
-        is_validation = False
+        parsed_next = urlparse(next_path)
+        is_validation = parse_qs(parsed_next.query).get("mode", [""])[0].strip().lower() == "validation"
         viewer_title = "Validation Viewer" if is_validation else "EEG Test Viewer"
         intro_text = "Validationを開始するにはパスワードを入力してください。" if is_validation else "テストを開始するにはパスワードを入力してください。"
         button_text = "Validationを開始する" if is_validation else "開始する"
