@@ -7,17 +7,20 @@ import hashlib
 import hmac
 import ipaddress
 import importlib.util
+import io
 import json
 import math
 import mimetypes
 import os
 import re
 import random
+import shutil
 import sys
 import secrets
 import shlex
 import socket
 import threading
+from zipfile import ZipFile
 
 sys.dont_write_bytecode = True
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
@@ -1862,6 +1865,52 @@ def private_dataset_payload(dataset_dir: Path, dataset_id: str, name: str = "") 
             "epochDurationSec": 10,
         },
         "cases": cases,
+    }
+
+
+def extract_private_dataset_zip(zip_bytes: bytes, target_dir: Path) -> None:
+    with ZipFile(io.BytesIO(zip_bytes)) as archive:
+        for member in archive.infolist():
+            member_path = Path(member.filename)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ValueError("Private dataset zip contains an unsafe path.")
+            destination = (target_dir / member.filename).resolve()
+            if not path_is_relative_to(destination, target_dir.resolve()):
+                raise ValueError("Private dataset zip contains an unsafe path.")
+        archive.extractall(target_dir)
+
+
+def upload_private_dataset(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_id = safe_research_id(payload.get("datasetId") or "")
+    if not dataset_id:
+        raise ValueError("datasetId is required.")
+    content = str(payload.get("contentBase64") or "").strip()
+    if not content:
+        raise ValueError("contentBase64 is required.")
+    try:
+        zip_bytes = base64.b64decode(content, validate=True)
+    except Exception as exc:
+        raise ValueError("contentBase64 is not valid base64.") from exc
+    target_dir = ensure_allowed_research_write_path(PRIVATE_DATASET_DIR / dataset_id)
+    temp_dir = ensure_allowed_research_write_path(PRIVATE_DATASET_DIR / f".upload-{dataset_id}-{uuid.uuid4().hex}")
+    temp_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        extract_private_dataset_zip(zip_bytes, temp_dir)
+        dataset = private_dataset_payload(temp_dir, dataset_id, str(payload.get("name") or dataset_id))
+        json_write(temp_dir / "dataset.json", dataset)
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        temp_dir.rename(target_dir)
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+    return {
+        "ok": True,
+        "datasetPath": f"private:{dataset_id}",
+        "datasetDir": str(target_dir),
+        "caseCount": len(dataset.get("cases") or []),
+        "epilepsyCount": sum(1 for row in dataset.get("cases", []) if row.get("sourceGroup") == "epilepsy"),
+        "noEpilepsyCount": sum(1 for row in dataset.get("cases", []) if row.get("sourceGroup") == "no_epilepsy"),
     }
 
 
@@ -4254,6 +4303,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(save_research_responses_json_to_desktop(payload))
             if parsed.path == "/api/research/test/submit-result":
                 return self.send_json(save_research_result_submission(payload))
+            if parsed.path == "/api/admin/private-dataset/upload":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
+                return self.send_json(upload_private_dataset(payload))
             if parsed.path == "/api/research/validation/response":
                 return self.send_json(save_validation_response(payload))
             if parsed.path == "/api/research/validation/response/undo":
