@@ -81,6 +81,15 @@ def ensure_signal():
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
 USER_DATA_DIR = Path(os.environ.get("EEG_VIEWER_DATA_DIR") or (Path.home() / "Library" / "Application Support" / "EEG Viewer")).expanduser()
 RESEARCH_DIR = USER_DATA_DIR / "research"
 RESEARCH_DATASET_DIR = RESEARCH_DIR / "datasets"
@@ -88,8 +97,8 @@ REMOTE_DATASET_CACHE_DIR = RESEARCH_DIR / "remote_cache"
 SUBMITTED_RESULTS_DIR = RESEARCH_DIR / "submitted_results"
 VALIDATION_RESULTS_DIR = RESEARCH_DIR / "validation_results"
 PRIVATE_DATASET_DIR = RESEARCH_DIR / "private_datasets"
-VALIDATION_WORKFLOW_ENABLED = False
-PRIVATE_DATASET_ADMIN_ENABLED = False
+VALIDATION_WORKFLOW_ENABLED = env_flag("EEG_VIEWER_VALIDATION_WORKFLOW")
+PRIVATE_DATASET_ADMIN_ENABLED = env_flag("EEG_VIEWER_PRIVATE_DATASET_ADMIN")
 PRIVATE_DATASET_ALIASES = {
     "test_tuea_v2": "validation_tuea_v2",
 }
@@ -98,12 +107,12 @@ DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
 SERVER_TOKEN = secrets.token_urlsafe(32)
 LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
-PUBLIC_MODE = os.environ.get("EEG_VIEWER_PUBLIC_MODE", "").lower() in {"1", "true", "yes", "on"}
+PUBLIC_MODE = env_flag("EEG_VIEWER_PUBLIC_MODE")
 ACCESS_USER = os.environ.get("EEG_VIEWER_ACCESS_USER", "viewer")
 ACCESS_PASSWORD = os.environ.get("EEG_VIEWER_ACCESS_PASSWORD", "")
 ACCESS_CODE = os.environ.get("EEG_VIEWER_ACCESS_CODE", ACCESS_PASSWORD)
 ADMIN_CODE = os.environ.get("EEG_VIEWER_ADMIN_CODE", "")
-ALLOW_UNPROTECTED_PUBLIC = os.environ.get("EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC", "").lower() in {"1", "true", "yes", "on"}
+ALLOW_UNPROTECTED_PUBLIC = env_flag("EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC")
 ACCESS_COOKIE_NAME = "eeg_viewer_access"
 ACCESS_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14
 MAX_WINDOW_DURATION_SEC = 120.0

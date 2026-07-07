@@ -11,6 +11,8 @@ services:
     envVars:
       - key: EEG_VIEWER_PUBLIC_MODE
         value: "1"
+      - key: EEG_VIEWER_VALIDATION_WORKFLOW
+        value: "1"
       - key: EEG_VIEWER_DATA_DIR
         value: /data
       - key: EEG_VIEWER_ACCESS_CODE
