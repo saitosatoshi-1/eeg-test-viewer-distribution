@@ -7,7 +7,7 @@ const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
 const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
 const TEST_ONLY_DISTRIBUTION = document.body.classList.contains("test-only-distribution");
 const PUBLIC_TEST_QUESTION_COUNT = 20;
-const DEFAULT_PUBLIC_DATASET_PATH = "private:validation_tuea_v2";
+const DEFAULT_PUBLIC_DATASET_PATH = "private:test_tuea_v2";
 const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
@@ -24,7 +24,6 @@ const MONTAGE_LABELS = {
   average: "平均参照基準2",
   cz: "Cz参照基準",
   transverse: "横双極誘導",
-  c3c4: "C3/C4参照基準",
 };
 const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitudinal", "transverse"];
 const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
@@ -115,7 +114,6 @@ const els = {
   durationSelect: document.getElementById("durationSelect"),
   paperSelect: document.getElementById("paperSelect"),
   ecgToggle: document.getElementById("ecgToggle"),
-  ecgFilterToggle: document.getElementById("ecgFilterToggle"),
   statusReadout: document.getElementById("statusReadout"),
   metadataPanel: document.getElementById("metadataPanel"),
   warningPanel: document.getElementById("warningPanel"),
@@ -517,7 +515,6 @@ function filterControlKey() {
     els.hfSelect?.value || "",
     normalizeAcValue(els.acSelect?.value),
     els.ecgToggle?.checked ? "1" : "0",
-    els.ecgFilterToggle?.checked ? "1" : "0",
   ].join("|");
 }
 
@@ -610,7 +607,6 @@ function bindControls() {
     els.durationSelect,
     els.paperSelect,
     els.ecgToggle,
-    els.ecgFilterToggle,
   ].filter(Boolean).forEach((el) => el.addEventListener("change", onControlChange));
   [
     els.montageSelect,
@@ -620,7 +616,6 @@ function bindControls() {
     els.hfSelect,
     els.acSelect,
     els.ecgToggle,
-    els.ecgFilterToggle,
   ].filter(Boolean).forEach((el) => {
     const check = () => window.setTimeout(() => checkDeferredControlValues("deferred"), 0);
     el.addEventListener("blur", check);
@@ -666,7 +661,7 @@ function bindControls() {
       btn.addEventListener("click", () => setWorkspaceMode(btn.dataset.workspaceMode || "review"));
     }
     for (const btn of els.rightTabButtons || []) {
-      btn.addEventListener("click", () => setRightPanelTab(btn.dataset.rightTab || "topomap"));
+      btn.addEventListener("click", () => setRightPanelTab(btn.dataset.rightTab || "test"));
     }
   }
   els.waveCanvas?.addEventListener("contextmenu", openContextMenu);
@@ -2840,9 +2835,6 @@ function restoreSettings() {
     syncTimebaseButtons();
     setSelectValue(els.paperSelect, settings.paper);
     if (typeof settings.ecg === "boolean") els.ecgToggle.checked = settings.ecg;
-    if (typeof settings.ecgFilter === "boolean" && els.ecgFilterToggle) {
-      els.ecgFilterToggle.checked = settings.ecgFilter;
-    }
     if (typeof settings.rightPanelVisible === "boolean") {
       state.rightPanelVisible = settings.rightPanelVisible;
     }
@@ -2864,7 +2856,6 @@ function saveSettings() {
     duration: els.durationSelect.value,
     paper: els.paperSelect.value,
     ecg: els.ecgToggle.checked,
-    ecgFilter: els.ecgFilterToggle?.checked || false,
     rightPanelVisible: state.rightPanelVisible,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -3347,7 +3338,7 @@ async function onControlChange(ev) {
     state.cursorTime = null;
     state.dragSelection = null;
     await loadMetadata();
-  } else if ([els.tcSelect, els.hfSelect, els.acSelect, els.ecgToggle, els.ecgFilterToggle].includes(ev.target)) {
+  } else if ([els.tcSelect, els.hfSelect, els.acSelect, els.ecgToggle].includes(ev.target)) {
     await handleFilterControlChange("change");
     return;
   }
@@ -3373,7 +3364,6 @@ function windowCacheKey(params) {
     params.hf,
     params.ac,
     params.ecg,
-    params.ecgFilter,
   ].join("|");
 }
 
@@ -3420,9 +3410,6 @@ function researchWindowPrefetchParams(recordId, item, options = {}) {
     hf: options.hf || "120",
     ac: normalizeAcValue(options.ac || "60"),
     ecg: "1",
-    ecgFilter: "0",
-    topomap: "0",
-    annotations: "0",
   };
 }
 
@@ -3575,9 +3562,6 @@ async function loadWindow() {
           hf: els.hfSelect.value,
           ac: normalizeAcSelect(),
           ecg: els.ecgToggle.checked ? "1" : "0",
-          ecgFilter: els.ecgFilterToggle?.checked ? "1" : "0",
-          topomap: "0",
-          annotations: TEST_ONLY_DISTRIBUTION ? "0" : "1",
         };
         const cacheKey = windowCacheKey(params);
         const cached = state.windowCache.get(cacheKey);
@@ -3633,7 +3617,6 @@ function renderStatus() {
   const end = state.start + duration;
   const tc = tcText();
   const sensitivity = sensitivityValue();
-  const ecgFilterText = els.ecgFilterToggle?.checked ? " · ECG filter" : "";
   const traceCount = isMultiWindowData()
     ? (state.windowData.montageViews || []).map((view) => (view.traces || []).length).join("/")
     : String((state.windowData?.traces || []).length);
@@ -3642,9 +3625,9 @@ function renderStatus() {
   const loadedDuration = Number(state.windowData?.duration || 0);
   const durationText = loadedDuration ? ` · loaded ${loadedDuration.toFixed(2)}s` : "";
   const acText = acFilterLabel();
-  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText}${ecgFilterText}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
+  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
   els.timeReadout.textContent = `${formatSec(state.start)} - ${formatSec(end)}`;
-  els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText}${ecgFilterText} · ${els.paperSelect.value} mm/s`;
+  els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText} · ${els.paperSelect.value} mm/s`;
 }
 
 function isMultiWindowData() {

@@ -90,6 +90,9 @@ VALIDATION_RESULTS_DIR = RESEARCH_DIR / "validation_results"
 PRIVATE_DATASET_DIR = RESEARCH_DIR / "private_datasets"
 VALIDATION_WORKFLOW_ENABLED = False
 PRIVATE_DATASET_ADMIN_ENABLED = False
+PRIVATE_DATASET_ALIASES = {
+    "test_tuea_v2": "validation_tuea_v2",
+}
 USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
@@ -193,14 +196,6 @@ ECG_EXACT_KEYS = {"X5", "E", "ECG", "EKG", "ECG1", "ECG2", "ECG3", "EKG1", "EKG2
 ECG_PREFIX_KEYS = ("ECG", "EKG")
 ECG_LOWPASS_HZ = 20.0
 ECG_TC_SECONDS = 0.1
-TUEV_EVENT_LABELS = {
-    "1": "SPSW",
-    "2": "GPED",
-    "3": "PLED",
-    "4": "EYEM",
-    "5": "ARTF",
-    "6": "BCKG",
-}
 ATTENUATION_EVENT_MAX_SEC = 3.0
 ATTENUATION_BASELINE_SEC = 3.0
 ATTENUATION_BAND_LOW_HZ = 0.0
@@ -546,325 +541,6 @@ def read_ini_sections(path: Path) -> dict[str, dict[str, str]]:
     return sections
 
 
-NKT_LOG_TIME_RE = re.compile(r"^(\d{6})\((\d{12})\)$")
-NKT_ABSOLUTE_TIME_RE = re.compile(r"(20\d{12})")
-EDF_ONSET_MARKER_RE = re.compile(r"^[+-]\d+(?:\.\d+)?$")
-
-
-def nkt_clock_to_seconds(value: str) -> float:
-    if len(value) != 6 or not value.isdigit():
-        raise ValueError(f"Invalid NKT clock value: {value}")
-    return float(int(value[:2]) * 3600 + int(value[2:4]) * 60 + int(value[4:6]))
-
-
-def parse_nkt_absolute_timestamp(value: str) -> datetime | None:
-    match = NKT_ABSOLUTE_TIME_RE.search(value or "")
-    if not match:
-        return None
-    try:
-        return datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
-    except ValueError:
-        return None
-
-
-def decode_nkt_string_runs(path: Path) -> list[str]:
-    if not path.exists() or not path.is_file():
-        return []
-    try:
-        data = path.read_bytes()
-    except OSError:
-        return []
-    runs = re.findall(rb"[\x09\x0a\x0d\x20-\x7e\x80-\xfc]{3,}", data)
-    decoded: list[str] = []
-    for run in runs:
-        text = run.decode("cp932", errors="ignore").replace("\x00", "\n")
-        for line in text.splitlines():
-            clean = " ".join(line.strip().split())
-            if clean:
-                decoded.append(clean)
-    return decoded
-
-
-def is_nkt_system_string(value: str) -> bool:
-    upper = value.upper()
-    if not value:
-        return True
-    if upper.startswith("EEG-1200") or upper.startswith("JE-"):
-        return True
-    if upper in {"-REC START T", "C EEG"}:
-        return True
-    if re.fullmatch(r"\d{14,}", value):
-        return True
-    if re.fullmatch(r"\d{6}\(\d{12}\)", value):
-        return True
-    return False
-
-
-def normalize_annotation_label(value: Any) -> str:
-    text = str(value or "").replace("\x00", " ").strip()
-    text = " ".join(text.split())
-    if not text:
-        return "file annotation"
-    shorthand_pairs = {
-        r"T3\s*[・,/]\s*5": "T7/P7",
-        r"T4\s*[・,/]\s*6": "T8/P8",
-    }
-    for pattern, replacement in shorthand_pairs.items():
-        text = re.sub(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", replacement, text)
-    for old, new in LEGACY_LABELS.items():
-        text = re.sub(rf"(?<![A-Za-z0-9]){re.escape(old)}(?![A-Za-z0-9])", new, text)
-    return text
-
-
-def edf_onset_marker_seconds(label: str) -> float | None:
-    text = str(label or "").strip()
-    if not EDF_ONSET_MARKER_RE.fullmatch(text):
-        return None
-    try:
-        return max(0.0, float(text))
-    except ValueError:
-        return None
-
-
-def nkt_source_annotation(
-    record_id: str,
-    source: str,
-    idx: int,
-    onset_sec: float,
-    label: str,
-    note: str = "",
-) -> dict[str, Any]:
-    source_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"eeg-viewer-source:{record_id}:{source}:{idx}:{onset_sec}:{label}:{note}"))
-    return {
-        "id": source_id,
-        "recordingId": record_id,
-        "label": label,
-        "onset": round(max(0.0, onset_sec), 6),
-        "duration": 0.0,
-        "channel": "file",
-        "note": note,
-        "source": source,
-        "readOnly": True,
-    }
-
-
-def parse_nkt_log_annotations(record_id: str, path: Path) -> tuple[list[dict[str, Any]], dict[str, float]]:
-    strings = decode_nkt_string_runs(path)
-    rows: list[dict[str, Any]] = []
-    absolute_to_onset: dict[str, float] = {}
-    pending_onset: float | None = None
-    pending_clock = ""
-    for item in strings:
-        time_match = NKT_LOG_TIME_RE.match(item)
-        if time_match:
-            pending_clock = time_match.group(1)
-            try:
-                pending_onset = nkt_clock_to_seconds(pending_clock)
-            except ValueError:
-                pending_onset = None
-            absolute_to_onset[time_match.group(2)] = pending_onset or 0.0
-            continue
-        if pending_onset is None or is_nkt_system_string(item):
-            continue
-        rows.append(nkt_source_annotation(record_id, "nkt-log", len(rows), pending_onset, item))
-        pending_onset = None
-        pending_clock = ""
-    return rows, absolute_to_onset
-
-
-def parse_nkt_cmt_annotations(record_id: str, path: Path, absolute_to_onset: dict[str, float]) -> list[dict[str, Any]]:
-    strings = decode_nkt_string_runs(path)
-    rows: list[dict[str, Any]] = []
-    current_time: datetime | None = None
-    current_onset: float | None = None
-    note_lines: list[str] = []
-
-    def flush() -> None:
-        nonlocal current_time, current_onset, note_lines
-        if current_onset is None or not note_lines:
-            current_time = None
-            current_onset = None
-            note_lines = []
-            return
-        note = "\n".join(note_lines).strip()
-        if note:
-            label = note_lines[0].strip() or "Comment"
-            rows.append(nkt_source_annotation(record_id, "nkt-cmt", len(rows), current_onset, label, note))
-        current_time = None
-        current_onset = None
-        note_lines = []
-
-    for item in strings:
-        timestamp = parse_nkt_absolute_timestamp(item)
-        if timestamp is not None:
-            flush()
-            compact = timestamp.strftime("%y%m%d%H%M%S")
-            current_time = timestamp
-            current_onset = absolute_to_onset.get(compact)
-            if current_onset is None and absolute_to_onset:
-                first_abs = min(absolute_to_onset)
-                try:
-                    first_time = datetime.strptime(first_abs, "%y%m%d%H%M%S")
-                    current_onset = max(0.0, (timestamp - first_time).total_seconds())
-                except ValueError:
-                    current_onset = None
-            continue
-        if current_time is None or current_onset is None:
-            continue
-        if is_nkt_system_string(item):
-            continue
-        note_lines.append(item)
-    flush()
-    return rows
-
-
-def tuev_source_annotation(
-    record_id: str,
-    source: str,
-    idx: int,
-    onset_sec: float,
-    duration_sec: float,
-    label: str,
-    channel: str,
-    note: str = "",
-) -> dict[str, Any]:
-    source_id = str(
-        uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"eeg-viewer-source:{record_id}:{source}:{idx}:{onset_sec}:{duration_sec}:{label}:{channel}:{note}",
-        )
-    )
-    return {
-        "id": source_id,
-        "recordingId": record_id,
-        "label": label,
-        "onset": round(max(0.0, onset_sec), 6),
-        "duration": round(max(0.0, duration_sec), 6),
-        "channel": channel or "file",
-        "note": note,
-        "source": source,
-        "readOnly": True,
-    }
-
-
-def parse_tuev_rec_annotations(record_id: str, path: Path, ch_names: list[str]) -> list[dict[str, Any]]:
-    groups: dict[tuple[float, float, str], dict[str, Any]] = {}
-    try:
-        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    except OSError:
-        return []
-    for line_no, line in enumerate(lines, start=1):
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) < 4:
-            continue
-        try:
-            channel_index = int(float(parts[0]))
-            start = float(parts[1])
-            stop = float(parts[2])
-        except ValueError:
-            continue
-        label = TUEV_EVENT_LABELS.get(parts[3], parts[3].upper() or "TUEV")
-        if stop < start:
-            stop = start
-        if 0 <= channel_index < len(ch_names):
-            channel = normalize_label(ch_names[channel_index])
-        else:
-            channel = f"ch{channel_index}"
-        duration = stop - start
-        key = (round(start, 6), round(duration, 6), label)
-        if key not in groups:
-            groups[key] = {"start": start, "duration": duration, "label": label, "channels": [], "firstLine": line_no}
-        groups[key]["channels"].append(channel)
-
-    rows: list[dict[str, Any]] = []
-    for group in sorted(groups.values(), key=lambda item: (item["start"], item["label"])):
-        channels = sorted(set(group["channels"]), key=lambda name: (SCALP_ORDER.index(name) if name in SCALP_ORDER else 999, name))
-        channel_list = ", ".join(channels)
-        channel_text = channel_list if len(channels) <= 6 else f"{len(channels)} channels"
-        rows.append(
-            tuev_source_annotation(
-                record_id,
-                "tuev-rec",
-                int(group["firstLine"]),
-                float(group["start"]),
-                float(group["duration"]),
-                str(group["label"]),
-                channel_text,
-                note=f"Imported from {path.name}; channels: {channel_list}.",
-            )
-        )
-    return rows
-
-
-def parse_tuev_lab_annotations(record_id: str, path: Path, channel: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    try:
-        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    except OSError:
-        return rows
-    for line_no, line in enumerate(lines, start=1):
-        parts = line.split()
-        if len(parts) < 3:
-            continue
-        try:
-            # TUEV .lab files use 100 ns ticks.
-            start = float(parts[0]) / 10_000_000.0
-            stop = float(parts[1]) / 10_000_000.0
-        except ValueError:
-            continue
-        label = parts[2].upper()
-        if stop < start:
-            stop = start
-        rows.append(
-            tuev_source_annotation(
-                record_id,
-                "tuev-lab",
-                line_no,
-                start,
-                stop - start,
-                label,
-                channel,
-                note=f"Imported from {path.name}.",
-            )
-        )
-    return rows
-
-
-def parse_tuev_sidecar_annotations(record_id: str, edf_path: Path, ch_names: list[str]) -> list[dict[str, Any]]:
-    rec_path = edf_path.with_suffix(".rec")
-    if rec_path.exists():
-        return parse_tuev_rec_annotations(record_id, rec_path, ch_names)
-
-    rows: list[dict[str, Any]] = []
-    for lab_path in sorted(edf_path.parent.glob(edf_path.stem + "__ch*.lab")):
-        match = re.search(r"__ch(\d+)\.lab$", lab_path.name, flags=re.IGNORECASE)
-        if match:
-            channel_index = int(match.group(1))
-            channel = normalize_label(ch_names[channel_index]) if 0 <= channel_index < len(ch_names) else f"ch{channel_index}"
-        else:
-            channel = "file"
-        rows.extend(parse_tuev_lab_annotations(record_id, lab_path, channel))
-    groups: dict[tuple[float, float, str], dict[str, Any]] = {}
-    for idx, row in enumerate(rows):
-        key = (
-            round(float(row.get("onset", 0) or 0), 6),
-            round(float(row.get("duration", 0) or 0), 6),
-            str(row.get("label", "")),
-        )
-        if key not in groups:
-            groups[key] = {**row, "channels": [], "firstIndex": idx}
-        groups[key]["channels"].append(str(row.get("channel", "")))
-    out: list[dict[str, Any]] = []
-    for group in sorted(groups.values(), key=lambda item: (float(item.get("onset", 0) or 0), str(item.get("label", "")))):
-        channels = sorted(set(ch for ch in group.pop("channels", []) if ch), key=lambda name: (SCALP_ORDER.index(name) if name in SCALP_ORDER else 999, name))
-        group.pop("firstIndex", None)
-        channel_list = ", ".join(channels)
-        group["channel"] = channel_list if len(channels) <= 6 else f"{len(channels)} channels"
-        group["note"] = f"Imported from TUEV .lab sidecars; channels: {channel_list or 'file'}."
-        out.append(group)
-    return out
-
-
 def safe_id(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value.strip())
     return cleaned.strip("_") or "recording"
@@ -1064,7 +740,6 @@ class RecordingStore:
         self.user_files: list[Path] = load_user_files()
         self._raw_cache: dict[str, Any] = {}
         self._direct_cache: dict[str, DirectNktInfo] = {}
-        self._source_annotation_cache: dict[str, list[dict[str, Any]]] = {}
         self._recordings: dict[str, Recording] = {}
         self._last_refresh_at = 0.0
         self._lock = threading.RLock()
@@ -1131,7 +806,6 @@ class RecordingStore:
         with self._lock:
             self._raw_cache.pop(record_id, None)
             self._direct_cache.pop(record_id, None)
-            self._source_annotation_cache.pop(record_id, None)
 
     def format_for_path(self, path: Path) -> str:
         suffix = path.suffix.lower()
@@ -1388,89 +1062,6 @@ class RecordingStore:
             oldest = next(iter(self._raw_cache))
             self._raw_cache.pop(oldest, None)
 
-    def source_annotations(self, record_id: str) -> list[dict[str, Any]]:
-        if record_id in self._source_annotation_cache:
-            return self._source_annotation_cache[record_id]
-        rec = self.get(record_id)
-        raw = self.raw(record_id)
-        rows: list[dict[str, Any]] = []
-        annotations = getattr(raw, "annotations", None) if raw is not None else None
-        if annotations is not None:
-            descriptions = list(getattr(annotations, "description", []))
-            onsets = list(getattr(annotations, "onset", []))
-            durations = list(getattr(annotations, "duration", []))
-            pending_edf_marker_onset: float | None = None
-            for idx, onset in enumerate(onsets):
-                try:
-                    onset_sec = float(onset)
-                except (TypeError, ValueError):
-                    continue
-                try:
-                    duration_sec = float(durations[idx]) if idx < len(durations) else 0.0
-                except (TypeError, ValueError):
-                    duration_sec = 0.0
-                raw_label = str(descriptions[idx]) if idx < len(descriptions) else "file annotation"
-                marker_onset = edf_onset_marker_seconds(raw_label) if rec.file_format == "edf" else None
-                if marker_onset is not None:
-                    pending_edf_marker_onset = marker_onset
-                    continue
-                if pending_edf_marker_onset is not None:
-                    onset_sec = pending_edf_marker_onset
-                    pending_edf_marker_onset = None
-                label = normalize_annotation_label(raw_label)
-                source_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"eeg-viewer-source:{record_id}:{idx}:{onset_sec}:{duration_sec}:{label}"))
-                rows.append(
-                    {
-                        "id": source_id,
-                        "recordingId": record_id,
-                        "label": label,
-                        "onset": round(onset_sec, 6),
-                        "duration": round(max(0.0, duration_sec), 6),
-                        "channel": "file",
-                        "note": "Imported from the EEG file annotations.",
-                        "source": "file",
-                        "readOnly": True,
-                    }
-                )
-        if rec.file_format == "nkt":
-            log_rows: list[dict[str, Any]] = []
-            absolute_to_onset: dict[str, float] = {}
-            log_path = rec.sidecars.get(".log")
-            if log_path:
-                log_rows, absolute_to_onset = parse_nkt_log_annotations(record_id, log_path)
-                rows.extend(log_rows)
-            cmt_path = rec.sidecars.get(".cmt")
-            if cmt_path:
-                rows.extend(parse_nkt_cmt_annotations(record_id, cmt_path, absolute_to_onset))
-        elif rec.file_format == "edf":
-            ch_names = []
-            raw_summary, _raw_warnings = self.raw_summary(record_id)
-            for ch in raw_summary.get("channels", []) if isinstance(raw_summary, dict) else []:
-                ch_names.append(normalize_label(str(ch)))
-            rows.extend(parse_tuev_sidecar_annotations(record_id, rec.eeg_path, ch_names))
-        deduped: list[dict[str, Any]] = []
-        seen: set[tuple[float, float, str, str]] = set()
-        for row in rows:
-            key = (
-                round(float(row.get("onset", 0) or 0), 3),
-                round(float(row.get("duration", 0) or 0), 3),
-                str(row.get("label", "")),
-                str(row.get("channel", "")),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(row)
-        rows = deduped
-        rows.sort(key=lambda row: float(row.get("onset", 0) or 0))
-        self._source_annotation_cache[record_id] = rows
-        return rows
-
-    def display_annotations(self, record_id: str) -> list[dict[str, Any]]:
-        rows = self.source_annotations(record_id)
-        rows.sort(key=lambda row: float(row.get("onset", 0) or 0))
-        return rows
-
     def direct_info(self, record_id: str) -> DirectNktInfo:
         if record_id in self._direct_cache:
             return self._direct_cache[record_id]
@@ -1569,9 +1160,6 @@ class RecordingStore:
         hf: str,
         ac: str,
         include_ecg: bool,
-        ecg_filter: bool = False,
-        include_topomap: bool = True,
-        include_annotations: bool = True,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1595,7 +1183,6 @@ class RecordingStore:
         else:
             raw = self.raw(record_id)
             if raw is None:
-                annotations = self.display_annotations(record_id) if include_annotations else []
                 return {
                     "id": record_id,
                     "sfreq": 0,
@@ -1603,7 +1190,6 @@ class RecordingStore:
                     "duration": duration_sec,
                     "times": [],
                     "traces": [],
-                    "annotations": annotations,
                     "warnings": warnings,
                 }
 
@@ -1621,8 +1207,6 @@ class RecordingStore:
             ch_names = [normalize_label(ch) for ch in raw.ch_names]
             actual_start_sample = padded_start
         data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
-        if ecg_filter:
-            data = apply_ecg_artifact_filter(data, ch_names, sfreq, warnings)
         crop_start = max(0, start - actual_start_sample)
         crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
         data = data[:, crop_start:crop_stop]
@@ -1630,12 +1214,9 @@ class RecordingStore:
 
         traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
         max_points = 1800
-        n_samples = data.shape[1]
-        topomap = {"channels": []}
         rel_times = (np.arange(start, stop) / sfreq).astype(float)
         for trace in traces:
             decimate_trace_for_display(trace, start, sfreq, max_points)
-        annotations = self.display_annotations(record_id) if include_annotations else []
         return {
             "id": record_id,
             "sfreq": sfreq,
@@ -1643,8 +1224,6 @@ class RecordingStore:
             "duration": float((stop - start) / sfreq),
             "times": rel_times.round(4).tolist(),
             "traces": traces,
-            "topomap": topomap,
-            "annotations": annotations,
             "warnings": warnings,
             "metadata": metadata,
         }
@@ -1660,10 +1239,7 @@ class RecordingStore:
         hf: str,
         ac: str,
         include_ecg: bool,
-        ecg_filter: bool = False,
         montages: list[str] | None = None,
-        include_topomap: bool = True,
-        include_annotations: bool = True,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1687,7 +1263,6 @@ class RecordingStore:
         else:
             raw = self.raw(record_id)
             if raw is None:
-                annotations = self.display_annotations(record_id) if include_annotations else []
                 return {
                     "id": record_id,
                     "sfreq": 0,
@@ -1697,7 +1272,6 @@ class RecordingStore:
                     "traces": [],
                     "montage": active_montage,
                     "montageViews": [],
-                    "annotations": annotations,
                     "warnings": warnings,
                 }
 
@@ -1715,16 +1289,12 @@ class RecordingStore:
             ch_names = [normalize_label(ch) for ch in raw.ch_names]
             actual_start_sample = padded_start
         data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
-        if ecg_filter:
-            data = apply_ecg_artifact_filter(data, ch_names, sfreq, warnings)
         crop_start = max(0, start - actual_start_sample)
         crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
         data = data[:, crop_start:crop_stop]
         stop = start + data.shape[1]
 
         max_points = 1800
-        n_samples = data.shape[1]
-        topomap = {"channels": []}
         rel_times = (np.arange(start, stop) / sfreq).astype(float)
         montage_labels = {
             "longitudinal": "縦双極誘導",
@@ -1734,7 +1304,6 @@ class RecordingStore:
             "average": "平均参照基準2",
             "cz": "Cz参照基準",
             "transverse": "横双極誘導",
-            "c3c4": "C3/C4参照基準",
         }
         requested = [m for m in (montages or []) if m in montage_labels]
         if not requested:
@@ -1751,7 +1320,6 @@ class RecordingStore:
             montage_views.append(view)
             if montage == active:
                 active_traces = traces
-        annotations = self.display_annotations(record_id) if include_annotations else []
         return {
             "id": record_id,
             "sfreq": sfreq,
@@ -1761,8 +1329,6 @@ class RecordingStore:
             "traces": active_traces,
             "montage": active,
             "montageViews": montage_views,
-            "topomap": topomap,
-            "annotations": annotations,
             "warnings": warnings,
             "metadata": metadata,
         }
@@ -1904,80 +1470,6 @@ def apply_display_filters(
         warnings.append(f"Display filter skipped: {exc}")
         return data, ch_names
     return filtered, ch_names
-
-
-def apply_ecg_artifact_filter(data: np.ndarray, ch_names: list[str], sfreq: float, warnings: list[str]) -> np.ndarray:
-    ecg_indices = ecg_channel_indices(ch_names)
-    if not ecg_indices:
-        warnings.append("ECG artifact filter skipped: no ECG channel was found.")
-        return data
-    if data.shape[1] < 16:
-        warnings.append("ECG artifact filter skipped: the visible window is too short.")
-        return data
-
-    ecg_index = ecg_indices[0]
-    ecg = np.asarray(data[ecg_index], dtype=float)
-    ecg = ecg - np.nanmean(ecg)
-    ecg_std = float(np.nanstd(ecg))
-    if not np.isfinite(ecg_std) or ecg_std <= 1e-9:
-        warnings.append("ECG artifact filter skipped: ECG channel is flat.")
-        return data
-    ecg = ecg / ecg_std
-
-    lag_ms = [-80, -60, -40, -20, 0, 20, 40, 60, 80, 120]
-    lag_samples = sorted({int(round(ms * sfreq / 1000.0)) for ms in lag_ms})
-    basis_rows: list[np.ndarray] = []
-    for lag in lag_samples:
-        shifted = np.zeros_like(ecg)
-        if lag > 0:
-            shifted[lag:] = ecg[:-lag]
-        elif lag < 0:
-            shifted[:lag] = ecg[-lag:]
-        else:
-            shifted = ecg.copy()
-        shifted = shifted - np.nanmean(shifted)
-        std = float(np.nanstd(shifted))
-        if np.isfinite(std) and std > 1e-9:
-            basis_rows.append(shifted / std)
-    derivative = np.gradient(ecg)
-    derivative = derivative - np.nanmean(derivative)
-    derivative_std = float(np.nanstd(derivative))
-    if np.isfinite(derivative_std) and derivative_std > 1e-9:
-        basis_rows.append(derivative / derivative_std)
-    if not basis_rows:
-        warnings.append("ECG artifact filter skipped: ECG regression basis is empty.")
-        return data
-
-    design = np.vstack(basis_rows).T
-    design = np.column_stack([design, np.ones(design.shape[0])])
-    xtx = design.T @ design
-    ridge = 1e-3 * float(np.trace(xtx) / max(1, xtx.shape[0]))
-    xtx[:-1, :-1] += np.eye(xtx.shape[0] - 1) * ridge
-    try:
-        pinv = np.linalg.solve(xtx, design.T)
-    except np.linalg.LinAlgError:
-        pinv = np.linalg.pinv(design)
-
-    filtered = data.copy()
-    removed = 0
-    for idx, name in enumerate(ch_names):
-        if idx == ecg_index or is_ecg_channel_name(name):
-            continue
-        signal_values = np.asarray(filtered[idx], dtype=float)
-        coeff = pinv @ signal_values
-        if not np.all(np.isfinite(coeff)):
-            continue
-        artifact = design[:, :-1] @ coeff[:-1]
-        filtered[idx] = signal_values - artifact
-        removed += 1
-    if removed:
-        min_lag = min(lag_ms)
-        max_lag = max(lag_ms)
-        warnings.append(
-            f"ECG artifact multi-lag regression filter applied to {removed} EEG channels "
-            f"({min_lag} to +{max_lag} ms)."
-        )
-    return filtered
 
 
 def build_montage_traces(
@@ -2122,12 +1614,6 @@ def build_montage_traces(
     elif montage == "cz":
         for ch in [c for c in SCALP_ORDER if c in index and c != "Cz"]:
             diff(ch, "Cz", channel_group(ch))
-    elif montage == "c3c4":
-        refs = [ch for ch in ("C3", "C4") if ch in index]
-        if refs:
-            ref = data[[index[ch] for ch in refs]].mean(axis=0)
-            for ch in [c for c in SCALP_ORDER if c in index and c not in refs]:
-                add(f"{ch}-C3/C4", data[index[ch]] - ref, group=channel_group(ch))
     if not traces:
         warnings.append(f"Montage '{montage}' could not be derived from decoded channels; showing raw or pre-montaged EEG channels.")
         for ch in ch_names:
@@ -2191,7 +1677,7 @@ RESEARCH_RATING_ALIASES = {
     "てんかん性異常なし": RESEARCH_RATING_NEGATIVE,
     "てんかん性異常あり": RESEARCH_RATING_POSITIVE,
 }
-RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse", "c3c4"]
+RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse"]
 RESEARCH_MONTAGE_LABELS = {
     "longitudinal": "縦双極誘導",
     "a1a2": "耳朶参照基準2",
@@ -2200,7 +1686,6 @@ RESEARCH_MONTAGE_LABELS = {
     "average": "平均参照基準2",
     "cz": "Cz参照基準",
     "transverse": "横双極誘導",
-    "c3c4": "C3/C4参照基準",
 }
 RESEARCH_PHASE1_SAMPLE_TOTAL = 20
 RESEARCH_PHASE1_SAMPLE_PER_GROUP = 20
@@ -2300,6 +1785,7 @@ def private_dataset_path(value: str) -> Path | None:
     text = str(value or "").strip()
     if text.startswith("private:"):
         dataset_id = safe_research_id(text.split(":", 1)[1])
+        dataset_id = PRIVATE_DATASET_ALIASES.get(dataset_id, dataset_id)
         return PRIVATE_DATASET_DIR / dataset_id
     return None
 
@@ -4640,10 +4126,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                             qs.get("hf", ["120"])[0],
                             qs.get("ac", ["60"])[0],
                             qs.get("ecg", ["1"])[0] == "1",
-                            qs.get("ecgFilter", ["0"])[0] == "1",
                             requested_montages,
-                            qs.get("topomap", ["1"])[0] != "0",
-                            qs.get("annotations", ["1"])[0] != "0",
                         )
                     )
                 return self.send_json(
@@ -4656,9 +4139,6 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         qs.get("hf", ["120"])[0],
                         qs.get("ac", ["60"])[0],
                         qs.get("ecg", ["1"])[0] == "1",
-                        qs.get("ecgFilter", ["0"])[0] == "1",
-                        qs.get("topomap", ["1"])[0] != "0",
-                        qs.get("annotations", ["1"])[0] != "0",
                     )
                 )
             if path == "/api/research/dataset":
