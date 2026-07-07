@@ -13,13 +13,11 @@ import mimetypes
 import os
 import re
 import random
-import shutil
 import sys
 import secrets
 import shlex
 import socket
 import threading
-import zipfile
 
 sys.dont_write_bytecode = True
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
@@ -91,6 +89,7 @@ SUBMITTED_RESULTS_DIR = RESEARCH_DIR / "submitted_results"
 VALIDATION_RESULTS_DIR = RESEARCH_DIR / "validation_results"
 PRIVATE_DATASET_DIR = RESEARCH_DIR / "private_datasets"
 VALIDATION_WORKFLOW_ENABLED = False
+PRIVATE_DATASET_ADMIN_ENABLED = False
 USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
@@ -107,7 +106,6 @@ ACCESS_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14
 MAX_WINDOW_DURATION_SEC = 120.0
 DISPLAY_FILTER_PADDING_SEC = 5.0
 MAX_POST_BODY_BYTES = 20 * 1024 * 1024
-MAX_EXPORT_POST_BODY_BYTES = 150 * 1024 * 1024
 MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_EEG_BYTES = int(float(os.environ.get("EEG_VIEWER_MAX_REMOTE_EEG_MB", "512")) * 1024 * 1024)
 MAX_RAW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_RAW_CACHE_RECORDS", "4"))))
@@ -134,7 +132,6 @@ MUTATING_PATHS = {
     "/api/research/test/debriefing",
     "/api/research/test/export-file",
     "/api/research/test/submit-result",
-    "/api/admin/private-dataset/upload",
 }
 LOGIN_PATH = "/login"
 
@@ -2348,88 +2345,6 @@ def private_dataset_payload(dataset_dir: Path, dataset_id: str, name: str = "") 
     }
 
 
-def safe_zip_extract(zip_path: Path, target_dir: Path) -> None:
-    target_root = target_dir.resolve()
-    with zipfile.ZipFile(zip_path) as archive:
-        for member in archive.infolist():
-            if member.is_dir():
-                continue
-            member_path = target_root / member.filename
-            resolved = member_path.resolve()
-            if not path_is_relative_to(resolved, target_root):
-                raise ValueError(f"Unsafe zip path: {member.filename}")
-            resolved.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as src, resolved.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
-
-
-def upload_private_dataset(payload: dict[str, Any]) -> dict[str, Any]:
-    dataset_id = safe_research_id(str(payload.get("datasetId") or "private_dataset"))
-    name = str(payload.get("name") or dataset_id).strip()
-    content_b64 = str(payload.get("contentBase64") or "")
-    if not content_b64:
-        raise ValueError("Upload content is empty.")
-    raw = base64.b64decode(content_b64, validate=True)
-    if len(raw) > MAX_EXPORT_POST_BODY_BYTES:
-        raise ValueError("Private dataset upload is too large.")
-    dataset_dir = PRIVATE_DATASET_DIR / dataset_id
-    tmp_dir = PRIVATE_DATASET_DIR / f".{dataset_id}.upload"
-    if tmp_dir.exists():
-        shutil.rmtree(tmp_dir)
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = tmp_dir / "dataset.zip"
-    zip_path.write_bytes(raw)
-    extract_dir = tmp_dir / "extract"
-    extract_dir.mkdir()
-    safe_zip_extract(zip_path, extract_dir)
-    if dataset_dir.exists():
-        shutil.rmtree(dataset_dir)
-    dataset_dir.parent.mkdir(parents=True, exist_ok=True)
-    dataset_dir.mkdir()
-    for child in extract_dir.iterdir():
-        shutil.move(str(child), str(dataset_dir / child.name))
-    dataset = private_dataset_payload(dataset_dir, dataset_id, name)
-    json_write(dataset_dir / "dataset.json", dataset)
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-    return {
-        "ok": True,
-        "datasetId": dataset_id,
-        "datasetPath": f"private:{dataset_id}",
-        "caseCount": len(dataset.get("cases") or []),
-        "epilepsyCount": sum(1 for row in dataset.get("cases") or [] if row.get("labelGroup") == "epileptiform"),
-        "noEpilepsyCount": sum(1 for row in dataset.get("cases") or [] if row.get("labelGroup") == "non_epileptiform"),
-    }
-
-
-def private_dataset_inventory() -> dict[str, Any]:
-    datasets = []
-    PRIVATE_DATASET_DIR.mkdir(parents=True, exist_ok=True)
-    for dataset_dir in sorted([p for p in PRIVATE_DATASET_DIR.iterdir() if p.is_dir() and not p.name.startswith(".")]):
-        dataset_file = dataset_dir / "dataset.json"
-        dataset = json_read(dataset_file, {}) if dataset_file.exists() else {}
-        cases = dataset.get("cases") if isinstance(dataset.get("cases"), list) else []
-        edf_files = sorted({*dataset_dir.rglob("*.edf"), *dataset_dir.rglob("*.EDF")})
-        datasets.append({
-            "datasetId": dataset.get("datasetId") or dataset_dir.name,
-            "name": dataset.get("name") or dataset_dir.name,
-            "privatePath": f"private:{dataset_dir.name}",
-            "serverPath": str(dataset_dir),
-            "datasetJsonExists": dataset_file.exists(),
-            "caseCount": len(cases),
-            "edfFileCount": len(edf_files),
-            "epilepsyCount": sum(1 for row in cases if row.get("labelGroup") == "epileptiform"),
-            "noEpilepsyCount": sum(1 for row in cases if row.get("labelGroup") == "non_epileptiform"),
-            "totalBytes": sum(path.stat().st_size for path in edf_files if path.exists()),
-            "updatedAt": datetime.fromtimestamp(dataset_dir.stat().st_mtime, timezone.utc).isoformat(),
-        })
-    return {
-        "ok": True,
-        "privateDatasetDir": str(PRIVATE_DATASET_DIR),
-        "datasetCount": len(datasets),
-        "datasets": datasets,
-    }
-
-
 def resolve_remote_case_url(dataset_url: str, value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -4403,8 +4318,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
 
     def login_page_html(self, message: str = "") -> str:
         next_path = self.safe_return_path()
-        next_qs = parse_qs(urlparse(next_path).query)
-        is_validation = next_qs.get("mode", [""])[0] == "validation"
+        is_validation = False
         viewer_title = "Validation Viewer" if is_validation else "EEG Test Viewer"
         intro_text = "Validationを開始するにはパスワードを入力してください。" if is_validation else "テストを開始するにはパスワードを入力してください。"
         button_text = "Validationを開始する" if is_validation else "開始する"
@@ -4681,10 +4595,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         "appFingerprint": app_fingerprint(),
                     }
                 )
-            if path == "/api/admin/private-dataset/list":
-                if not self.admin_allowed():
-                    return self.send_json({"error": "Admin access is required."}, status=403)
-                return self.send_json(private_dataset_inventory())
+            if path.startswith("/api/admin/private-dataset/") and not PRIVATE_DATASET_ADMIN_ENABLED:
+                return self.send_json({"error": "Private dataset administration is disabled in the research test viewer."}, status=404)
             if path == "/api/admin/submitted-results/list":
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
@@ -4801,6 +4713,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             if parsed.path.startswith("/api/research/validation/") and not VALIDATION_WORKFLOW_ENABLED:
                 return self.send_json({"error": "Validation workflow is disabled in the research test viewer."}, status=404)
+            if parsed.path.startswith("/api/admin/private-dataset/") and not PRIVATE_DATASET_ADMIN_ENABLED:
+                return self.send_json({"error": "Private dataset administration is disabled in the research test viewer."}, status=404)
             if parsed.path.startswith("/api/"):
                 allowed, reason = self.mutation_allowed(parsed.path)
                 if not allowed:
@@ -4809,8 +4723,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 return self.send_json({"error": "Invalid Content-Length."}, status=400)
-            max_body = MAX_EXPORT_POST_BODY_BYTES if parsed.path in {"/api/admin/private-dataset/upload"} else MAX_POST_BODY_BYTES
-            if length > max_body:
+            if length > MAX_POST_BODY_BYTES:
                 return self.send_json({"error": "Request body is too large."}, status=413)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
             payload.setdefault("accessCookieHash", self.access_cookie_hash())
@@ -4834,10 +4747,6 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(reset_validation_responses(payload))
             if parsed.path == "/api/research/validation/submit-result":
                 return self.send_json(save_validation_result_submission(payload))
-            if parsed.path == "/api/admin/private-dataset/upload":
-                if not self.admin_allowed():
-                    return self.send_json({"error": "Admin access is required."}, status=403)
-                return self.send_json(upload_private_dataset(payload))
             return self.send_error(HTTPStatus.NOT_FOUND, "Not found")
         except FileNotFoundError as exc:
             self.send_json({"error": str(exc)}, status=404)

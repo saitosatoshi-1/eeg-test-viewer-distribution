@@ -136,12 +136,10 @@ const els = {
   researchSetupScreen: document.getElementById("researchSetupScreen"),
   researchSetupMessage: document.getElementById("researchSetupMessage"),
   researchSetupDatasetPathInput: document.getElementById("researchSetupDatasetPathInput"),
-  validationDatasetKindSelect: document.getElementById("validationDatasetKindSelect"),
   researchDebriefScreen: document.getElementById("researchDebriefScreen"),
   researchDebriefMessage: document.getElementById("researchDebriefMessage"),
   researchDebriefBehaviorChangeInput: document.getElementById("researchDebriefBehaviorChangeInput"),
   researchDebriefContinueConsentInput: document.getElementById("researchDebriefContinueConsentInput"),
-  researchDebriefFeedbackInput: document.getElementById("researchDebriefFeedbackInput"),
   researchDebriefSubmitBtn: document.getElementById("researchDebriefSubmitBtn"),
   researchCompleteScreen: document.getElementById("researchCompleteScreen"),
   researchCompleteTitle: document.getElementById("researchCompleteTitle"),
@@ -390,25 +388,20 @@ function hasActiveResearchPrefetchSession() {
 }
 
 function applyWorkflowChrome() {
-  const validation = WORKFLOW_MODE === "validation" || isValidationWorkflow();
-  document.body.classList.toggle("validation-workflow", validation);
   const title = document.querySelector(".research-setup-title");
-  if (title) title.textContent = validation ? "Validation設定" : "テスト設定";
+  if (title) title.textContent = "テスト設定";
   const readerLabel = els.researchSetupReaderNameInput?.closest("label");
-  if (readerLabel?.firstChild) readerLabel.firstChild.textContent = validation ? "名前" : "回答者名 (English)";
+  if (readerLabel?.firstChild) readerLabel.firstChild.textContent = "回答者名 (English)";
   if (els.researchSetupReaderNameInput) {
-    els.researchSetupReaderNameInput.placeholder = validation ? "例: 斉藤 太郎" : "例: Taro Yamada";
-    els.researchSetupReaderNameInput.autocomplete = validation ? "off" : "name";
+    els.researchSetupReaderNameInput.placeholder = "例: Taro Yamada";
+    els.researchSetupReaderNameInput.autocomplete = "name";
   }
-  if (els.researchSetupStartBtn) els.researchSetupStartBtn.textContent = validation ? "Validation開始" : "開始";
-  for (const el of document.querySelectorAll(".validation-only")) {
-    el.hidden = !validation;
-  }
+  if (els.researchSetupStartBtn) els.researchSetupStartBtn.textContent = "開始";
   const tab = document.querySelector('[data-right-tab="test"]');
-  if (tab) tab.textContent = validation ? "Validation" : "Test";
+  if (tab) tab.textContent = "Test";
   const panelTitle = document.querySelector('[data-right-tab-panel="test"] .panel-title');
-  if (panelTitle) panelTitle.textContent = validation ? "Validation" : "Test";
-  if (els.researchUndoBtn) els.researchUndoBtn.title = validation ? "前のvalidation回答を取り消して、そのepochに戻ります" : "前の回答を取り消して、その問題に戻ります";
+  if (panelTitle) panelTitle.textContent = "Test";
+  if (els.researchUndoBtn) els.researchUndoBtn.title = "前の回答を取り消して、その問題に戻ります";
 }
 
 function scheduleLayoutRefresh() {
@@ -797,13 +790,6 @@ function updateEpilepsyCenterDurationRequirement() {
 function validateResearchProfileForStart() {
   updateEpilepsyCenterDurationRequirement();
   if (isValidationWorkflow()) {
-    if (!String(els.validationDatasetKindSelect?.value || "").trim()) {
-      const message = "評価対象を選択してください。";
-      setResearchSetupMessage(message, true);
-      setStatus(message, { error: true });
-      els.validationDatasetKindSelect?.focus();
-      return false;
-    }
     const reviewerId = String(els.researchSetupReaderNameInput?.value || els.researchSetupReaderIdInput?.value || "").trim();
     if (reviewerId) return true;
     const message = "名前を入力してください。";
@@ -1400,7 +1386,7 @@ function setResearchStartBusy(isBusy) {
   for (const btn of [els.researchStartTestBtn, els.researchSetupStartBtn]) {
     if (!btn) continue;
     btn.disabled = isBusy;
-    btn.textContent = isBusy ? "開始中..." : (btn === els.researchSetupStartBtn ? (isValidationWorkflow() ? "Validation開始" : "開始") : "Start");
+    btn.textContent = isBusy ? "開始中..." : (btn === els.researchSetupStartBtn ? "開始" : "Start");
   }
 }
 
@@ -1640,7 +1626,6 @@ function researchDebriefingPayload() {
     behaviorChangeFreeText: els.researchDebriefBehaviorChangeInput?.value.trim() || "",
     continuedDataUseConsent: Boolean(els.researchDebriefContinueConsentInput?.checked),
     withdrawalOpportunityProvided: true,
-    individualFeedbackRequested: Boolean(els.researchDebriefFeedbackInput?.checked),
     ...researchTestTimingPayload(state.researchTestCompletedAt || new Date().toISOString()),
   };
 }
@@ -1974,7 +1959,7 @@ function validationDatasetKindLabel(row = currentResearchCase()) {
 }
 
 function selectedValidationDatasetKind() {
-  return String(els.validationDatasetKindSelect?.value || "ied").trim() || "ied";
+  return "ied";
 }
 
 function selectedValidationDatasetKindLabel() {
