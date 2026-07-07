@@ -2448,3 +2448,178 @@ body.test-only-distribution.mobile-viewport .context-menu button {
     max-height: min(30svh, 132px);
   }
 }
+
+body.validation-workflow [data-right-tab="metadata"] {
+  display: none !important;
+}
+
+body.validation-workflow .right-tabs {
+  grid-template-columns: 1fr;
+}
+
+body.validation-workflow .research-right-panel,
+body.validation-workflow .research-result-list {
+  gap: 6px;
+}
+
+body.validation-workflow .research-result-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+}
+
+body.validation-workflow .research-result-card {
+  gap: 5px;
+  border-radius: 5px;
+  padding: 6px;
+}
+
+body.validation-workflow .research-result-title,
+body.validation-workflow .research-result-head {
+  font-size: 13px;
+}
+
+body.validation-workflow .validation-help-card {
+  border-color: #1f5f91;
+  background: #e8f4ff;
+}
+
+body.validation-workflow .validation-help-title {
+  color: #123a5a;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-current-dataset {
+  margin: 5px 0 8px;
+  color: #123a5a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+body.validation-workflow .validation-key-row {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-key-adopt {
+  border: 1px solid #16803d;
+  background: #dff5e7;
+}
+
+body.validation-workflow .validation-key-exclude {
+  border: 1px solid #b42318;
+  background: #ffe8e4;
+}
+
+body.validation-workflow .validation-key-row kbd {
+  display: inline-flex;
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid #48657a;
+  border-radius: 4px;
+  background: #102a43;
+  color: #ffffff;
+  font-family: inherit;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-key-row strong {
+  color: #102a43;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-key-adopt strong {
+  color: #0b6b31;
+}
+
+body.validation-workflow .validation-key-exclude strong {
+  color: #b42318;
+}
+
+body.validation-workflow .validation-help-text {
+  margin-top: 7px;
+  color: #263241;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+body.validation-workflow .validation-decision-card {
+  width: 100%;
+  gap: 3px;
+  min-width: 0;
+  padding: 4px 5px;
+  border-color: #c9d0d6;
+  background: #eef0f2;
+  color: #6b7280;
+  cursor: pointer;
+  text-align: left;
+}
+
+body.validation-workflow .validation-decision-card:hover {
+  filter: brightness(0.985);
+}
+
+body.validation-workflow .validation-decision-card .research-result-head {
+  gap: 4px;
+  font-size: 12px;
+}
+
+body.validation-workflow .validation-decision-card .research-result-head span {
+  font-size: 10px;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-decision-card.validation-adopted {
+  border: 2px solid #0b7a36;
+  background: #d9f7e4;
+  color: #075927;
+}
+
+body.validation-workflow .validation-decision-card.validation-adopted .research-result-head,
+body.validation-workflow .validation-decision-card.validation-adopted .research-result-head span {
+  color: #075927;
+}
+
+body.validation-workflow .validation-decision-card.validation-excluded {
+  border: 2px solid #b42318;
+  background: #ffe1dc;
+  color: #8f1d14;
+}
+
+body.validation-workflow .validation-decision-card.validation-excluded .research-result-head,
+body.validation-workflow .validation-decision-card.validation-excluded .research-result-head span {
+  color: #8f1d14;
+}
+
+body.validation-workflow .validation-revisit-button {
+  margin-top: 3px;
+  width: 100%;
+  min-height: 22px;
+  border: 1px solid #1f5f91;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #1f3b57;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+body.validation-workflow .validation-revisit-button:hover {
+  background: #edf7ff;
+}
+
+body.validation-workflow .validation-revisit-button:focus-visible {
+  outline: 3px solid #2f6f9f;
+  outline-offset: 2px;
+}
