@@ -128,11 +128,7 @@
               <div class="research-setup-message" id="researchSetupMessage" role="status" aria-live="polite"></div>
               <input id="researchSetupDatasetPathInput" type="hidden" value="private:test_tuea_v2" />
               <div class="validation-set-control" id="validationSetControl" hidden>
-                <span>検証データセット</span>
-                <div class="validation-set-toggle" role="group" aria-label="Validation dataset">
-                  <button type="button" class="active" data-validation-set="ied">IEDデータセット</button>
-                  <button type="button" data-validation-set="artifact">アーチファクトデータセット</button>
-                </div>
+                <label>検証データセット<select id="validationSetSelect" aria-label="Validation dataset"><option value="ied" selected>IEDデータセット</option><option value="artifact">アーチファクトデータセット</option></select></label>
               </div>
               <label>回答者名 (English)<input id="researchSetupReaderNameInput" placeholder="例: Taro Yamada" autocomplete="name" /></label>
               <label>メール<input id="researchSetupReaderEmailInput" type="email" placeholder="メールアドレス" /></label>
@@ -229,6 +225,6 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260707-validation-ui"></script>
+    <script src="/static/app.js?v=20260707-validation-select"></script>
   </body>
 </html>

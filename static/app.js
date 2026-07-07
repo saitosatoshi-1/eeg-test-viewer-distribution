@@ -138,7 +138,7 @@ const els = {
   researchSetupMessage: document.getElementById("researchSetupMessage"),
   researchSetupDatasetPathInput: document.getElementById("researchSetupDatasetPathInput"),
   validationSetControl: document.getElementById("validationSetControl"),
-  validationSetButtons: Array.from(document.querySelectorAll("[data-validation-set]")),
+  validationSetSelect: document.getElementById("validationSetSelect"),
   researchDebriefScreen: document.getElementById("researchDebriefScreen"),
   researchDebriefMessage: document.getElementById("researchDebriefMessage"),
   researchDebriefBehaviorChangeInput: document.getElementById("researchDebriefBehaviorChangeInput"),
@@ -726,9 +726,7 @@ function bindResearchControls() {
   els.researchStartTestBtn?.addEventListener("click", startWorkflow);
   els.researchSetupStartBtn?.addEventListener("click", startWorkflow);
   els.researchSetupResetProfileBtn?.addEventListener("click", resetResearchProfileForm);
-  for (const btn of els.validationSetButtons || []) {
-    btn.addEventListener("click", () => setValidationDatasetKind(btn.dataset.validationSet || "ied"));
-  }
+  els.validationSetSelect?.addEventListener("change", () => setValidationDatasetKind(els.validationSetSelect.value || "ied"));
   els.researchCompleteSaveDesktopBtn?.addEventListener("click", exportResearchJson);
   els.researchShareJsonBtn?.addEventListener("click", shareResearchJsonByEmail);
   els.researchCopyEmailBtn?.addEventListener("click", copyResearchEmailBody);
@@ -1980,17 +1978,12 @@ function validationDatasetKindLabel(row = currentResearchCase()) {
 }
 
 function selectedValidationDatasetKind() {
-  const active = (els.validationSetButtons || []).find((btn) => btn.classList.contains("active"));
-  return active?.dataset.validationSet === "artifact" ? "artifact" : "ied";
+  return els.validationSetSelect?.value === "artifact" ? "artifact" : "ied";
 }
 
 function setValidationDatasetKind(kind) {
   const next = kind === "artifact" ? "artifact" : "ied";
-  for (const btn of els.validationSetButtons || []) {
-    const active = btn.dataset.validationSet === next;
-    btn.classList.toggle("active", active);
-    btn.setAttribute("aria-pressed", active ? "true" : "false");
-  }
+  if (els.validationSetSelect) els.validationSetSelect.value = next;
   if (isValidationWorkflow()) {
     renderResearchProgress();
     renderRightResearchPanels();

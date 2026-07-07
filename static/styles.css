@@ -1193,38 +1193,8 @@ dd {
   display: none !important;
 }
 
-.validation-set-control span {
-  color: #334155;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.validation-set-toggle {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border: 1px solid #9fb0c5;
-  border-radius: 7px;
-  overflow: hidden;
-  background: #f8fafc;
-}
-
-.validation-set-toggle button {
-  min-height: 42px;
-  border: 0;
-  border-right: 1px solid #9fb0c5;
-  background: transparent;
-  color: #233044;
-  font: inherit;
-  font-weight: 800;
-}
-
-.validation-set-toggle button:last-child {
-  border-right: 0;
-}
-
-.validation-set-toggle button.active {
-  background: #174ea6;
-  color: #fff;
+.research-setup-panel [hidden] {
+  display: none !important;
 }
 
 .research-toast {
