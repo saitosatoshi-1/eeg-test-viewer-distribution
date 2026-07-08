@@ -1226,15 +1226,13 @@ class RecordingStore:
 
         traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
         max_points = 1800
-        rel_times = (np.arange(start, stop) / sfreq).astype(float)
-        for trace in traces:
-            decimate_trace_for_display(trace, start, sfreq, max_points)
+        rel_times = decimate_traces_for_display(traces, start, sfreq, max_points)
         return {
             "id": record_id,
             "sfreq": sfreq,
             "start": float(start / sfreq),
             "duration": float((stop - start) / sfreq),
-            "times": rel_times.round(4).tolist(),
+            "times": rel_times,
             "traces": traces,
             "warnings": warnings,
             "metadata": metadata,
@@ -1307,7 +1305,6 @@ class RecordingStore:
         stop = start + data.shape[1]
 
         max_points = 1800
-        rel_times = (np.arange(start, stop) / sfreq).astype(float)
         montage_labels = {
             "longitudinal": "縦双極誘導",
             "a1a2": "耳朶参照基準2",
@@ -1325,20 +1322,21 @@ class RecordingStore:
         active = active_montage if active_montage in requested else requested[0]
         montage_views: list[dict[str, Any]] = []
         active_traces: list[dict[str, Any]] = []
+        active_times: list[float] = []
         for montage, label in view_defs:
             traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
-            for trace in traces:
-                decimate_trace_for_display(trace, start, sfreq, max_points)
-            view = {"montage": montage, "label": label, "traces": traces}
+            view_times = decimate_traces_for_display(traces, start, sfreq, max_points)
+            view = {"montage": montage, "label": label, "traces": traces, "times": view_times}
             montage_views.append(view)
             if montage == active:
                 active_traces = traces
+                active_times = view_times
         return {
             "id": record_id,
             "sfreq": sfreq,
             "start": float(start / sfreq),
             "duration": float((stop - start) / sfreq),
-            "times": rel_times.round(4).tolist(),
+            "times": active_times,
             "traces": active_traces,
             "montage": active,
             "montageViews": montage_views,
@@ -1424,12 +1422,24 @@ def peak_preserving_indices(values: np.ndarray, max_points: int) -> np.ndarray:
     return np.asarray(sorted(set(selected)), dtype=int)
 
 
-def decimate_trace_for_display(trace: dict[str, Any], sample_start: int, sfreq: float, max_points: int) -> None:
-    raw_values = trace.get("values")
-    values = np.asarray(raw_values if raw_values is not None else [], dtype=float)
-    indices = peak_preserving_indices(values, max_points)
-    trace["times"] = ((sample_start + indices) / sfreq).astype(float).round(4).tolist()
-    trace["values"] = values[indices].astype(float).round(3).tolist()
+def decimate_traces_for_display(traces: list[dict[str, Any]], sample_start: int, sfreq: float, max_points: int) -> list[float]:
+    arrays = [
+        np.asarray(trace.get("values") if trace.get("values") is not None else [], dtype=float)
+        for trace in traces
+    ]
+    if not arrays:
+        return []
+    n_samples = min((values.shape[0] for values in arrays), default=0)
+    if n_samples <= 0:
+        for trace in traces:
+            trace["values"] = []
+        return []
+    arrays = [values[:n_samples] for values in arrays]
+    score = np.nanmax(np.abs(np.vstack(arrays)), axis=0)
+    indices = peak_preserving_indices(score, max_points)
+    for trace, values in zip(traces, arrays):
+        trace["values"] = values[indices].astype(float).round(3).tolist()
+    return ((sample_start + indices) / sfreq).astype(float).round(4).tolist()
 
 
 def channel_group(ch_name: str) -> str:

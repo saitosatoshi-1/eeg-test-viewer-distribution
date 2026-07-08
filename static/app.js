@@ -3706,7 +3706,7 @@ function draw() {
     const layouts = multiMontageColumnLayouts(left, top, plotW, plotH, ratio);
     layouts.forEach((layout) => {
       const view = layout.view || {};
-      drawWaveColumn(ctx, layout, displayTraces(view.traces || []), state.windowData?.times || [], {
+      drawWaveColumn(ctx, layout, displayTraces(view.traces || []), view.times || state.windowData?.times || [], {
         duration,
         start,
         pxPerMm,
