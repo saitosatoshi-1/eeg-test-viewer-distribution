@@ -14,7 +14,10 @@ const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
 const ECG_AUTO_MAX_UV_PER_MM = 250;
 const MOBILE_SWIPE_PX_PER_STEP = 24;
-const MOBILE_SWIPE_STEP_SEC = 0.5;
+const MOBILE_SWIPE_STEP_SEC = 0.2;
+const MOBILE_WINDOW_MAX_POINTS = 900;
+const DESKTOP_WINDOW_MAX_POINTS = 1800;
+const MOBILE_SWIPE_LOAD_DEBOUNCE_MS = 160;
 const MAX_WINDOW_CACHE_ENTRIES = 72;
 const RESEARCH_PREFETCH_LOOKAHEAD = 3;
 const MONTAGE_LABELS = {
@@ -68,6 +71,7 @@ const state = {
   lastFilterControlKey: "",
   controlWatchTimer: null,
   durationRefreshTimer: null,
+  mobileSwipeLoadTimer: null,
   durationSelectFocusedAt: 0,
   panelResizeDrag: null,
   researchTutorialDrag: null,
@@ -123,6 +127,7 @@ const els = {
   warningPanel: document.getElementById("warningPanel"),
   rightTestPanel: document.getElementById("rightTestPanel"),
   waveCanvas: document.getElementById("waveCanvas"),
+  waveLoading: document.getElementById("waveLoading"),
   waveScrollbar: document.getElementById("waveScrollbar"),
   eventStrip: document.getElementById("eventStrip"),
   contextMenu: document.getElementById("contextMenu"),
@@ -271,6 +276,12 @@ function setStatus(message, options = {}) {
   els.statusReadout.classList.toggle("indeterminate", !!options.busy && !hasProgress);
   els.statusReadout.classList.toggle("busy", !!options.busy);
   els.statusReadout.classList.toggle("error", !!options.error);
+}
+
+function setWaveLoading(loading, message = "読み込み中...") {
+  if (!els.waveLoading) return;
+  els.waveLoading.textContent = message;
+  els.waveLoading.hidden = !loading;
 }
 
 function clearSharedBrowserResearchState() {
@@ -567,7 +578,14 @@ function preferredWindowMontages(activeMontage = activeMontageValue()) {
 }
 
 function preferredResearchWindowMontages(activeMontage = activeMontageValue()) {
-  return [...new Set([activeMontage, ...RESEARCH_PREFETCH_MONTAGES].filter(Boolean))];
+  const candidates = isMobileViewport()
+    ? [activeMontage, "conventional", "longitudinal", "a1a2"]
+    : [activeMontage, ...RESEARCH_PREFETCH_MONTAGES];
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+function windowMaxPoints() {
+  return isMobileViewport() ? MOBILE_WINDOW_MAX_POINTS : DESKTOP_WINDOW_MAX_POINTS;
 }
 
 async function handleMontageControlChange(source = "change") {
@@ -3163,6 +3181,21 @@ function shiftWaveformSeconds(deltaSec) {
   loadWindow();
 }
 
+function clearMobileSwipeLoadTimer() {
+  if (!state.mobileSwipeLoadTimer) return;
+  clearTimeout(state.mobileSwipeLoadTimer);
+  state.mobileSwipeLoadTimer = null;
+}
+
+function scheduleMobileSwipeLoad() {
+  clearMobileSwipeLoadTimer();
+  setWaveLoading(true);
+  state.mobileSwipeLoadTimer = setTimeout(() => {
+    state.mobileSwipeLoadTimer = null;
+    loadWindow();
+  }, MOBILE_SWIPE_LOAD_DEBOUNCE_MS);
+}
+
 function onWaveTouchStart(ev) {
   if (!state.windowData?.traces?.length || ev.touches.length !== 1) return;
   const touch = ev.touches[0];
@@ -3199,7 +3232,7 @@ function onWaveTouchMove(ev) {
       state.cursorTime = null;
       updateWaveScrollbar();
       renderStatus();
-      loadWindow();
+      scheduleMobileSwipeLoad();
     }
   }
 }
@@ -3213,13 +3246,18 @@ function onWaveTouchEnd(ev) {
   ev.preventDefault();
   state.suppressNextClick = true;
   hideContextMenu();
+  clearMobileSwipeLoadTimer();
   if (!swipe.appliedSeconds) {
     shiftWaveformSeconds(dx < 0 ? MOBILE_SWIPE_STEP_SEC : -MOBILE_SWIPE_STEP_SEC);
+  } else {
+    loadWindow();
   }
 }
 
 function onWaveTouchCancel() {
   state.touchSwipe = null;
+  clearMobileSwipeLoadTimer();
+  setWaveLoading(false);
 }
 
 function onWaveScrollbarInput(ev) {
@@ -3400,6 +3438,7 @@ function windowCacheKey(params) {
     params.hf,
     params.ac,
     params.ecg,
+    params.maxPoints || "",
   ].join("|");
 }
 
@@ -3447,6 +3486,7 @@ function researchWindowPrefetchParams(recordId, item, options = {}) {
     hf: options.hf || "120",
     ac: normalizeAcValue(options.ac || "60"),
     ecg: "1",
+    maxPoints: options.maxPoints || windowMaxPoints(),
   };
 }
 
@@ -3578,9 +3618,11 @@ async function loadWindow() {
   if (state.windowLoadInFlight) {
     state.windowLoadPending = true;
     setStatus("Loading waveform...", { busy: true, progress: 75 });
+    setWaveLoading(true);
     return state.windowLoadPromise || undefined;
   }
   state.windowLoadInFlight = true;
+  setWaveLoading(true);
   state.windowLoadPromise = (async () => {
     const endpoint = "/api/window";
     try {
@@ -3599,12 +3641,14 @@ async function loadWindow() {
           hf: els.hfSelect.value,
           ac: normalizeAcSelect(),
           ecg: els.ecgToggle.checked ? "1" : "0",
+          maxPoints: windowMaxPoints(),
         };
         const cacheKey = windowCacheKey(params);
         const cached = state.windowCache.get(cacheKey);
         if (cached) {
           applyWindowData(cached, requestedMontage);
           setStatus("Ready");
+          setWaveLoading(false);
           return cached;
         }
         const data = await fetchJson(`${endpoint}?${qs(params)}`);
@@ -3618,6 +3662,7 @@ async function loadWindow() {
       state.windowLoadInFlight = false;
       state.windowLoadPending = false;
       state.windowLoadPromise = null;
+      setWaveLoading(false);
     }
   })();
   return state.windowLoadPromise;

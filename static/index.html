@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260708-mobile-peak2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260708-mobile-fast1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -120,6 +120,7 @@
           <div class="event-strip" id="eventStrip"></div>
           <div class="research-wave-progress" id="researchWaveProgress" hidden aria-hidden="true"></div>
           <canvas id="waveCanvas" width="1400" height="760"></canvas>
+          <div class="wave-loading" id="waveLoading" hidden aria-live="polite">読み込み中...</div>
           <div class="wave-scrollbar-row">
             <input id="waveScrollbar" class="wave-scrollbar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Waveform time position" disabled />
           </div>
@@ -239,6 +240,6 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260708-mobile-peak2"></script>
+    <script src="/static/app.js?v=20260708-mobile-fast1"></script>
   </body>
 </html>

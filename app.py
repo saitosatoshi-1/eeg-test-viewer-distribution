@@ -1172,6 +1172,7 @@ class RecordingStore:
         hf: str,
         ac: str,
         include_ecg: bool,
+        max_points: int = 1800,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1225,7 +1226,7 @@ class RecordingStore:
         stop = start + data.shape[1]
 
         traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
-        max_points = 1800
+        max_points = max(300, min(2400, int(max_points or 1800)))
         rel_times = decimate_traces_for_display(traces, start, sfreq, max_points)
         return {
             "id": record_id,
@@ -1250,6 +1251,7 @@ class RecordingStore:
         ac: str,
         include_ecg: bool,
         montages: list[str] | None = None,
+        max_points: int = 1800,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1304,7 +1306,7 @@ class RecordingStore:
         data = data[:, crop_start:crop_stop]
         stop = start + data.shape[1]
 
-        max_points = 1800
+        max_points = max(300, min(2400, int(max_points or 1800)))
         montage_labels = {
             "longitudinal": "縦双極誘導",
             "a1a2": "耳朶参照基準2",
@@ -4222,6 +4224,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                             qs.get("ac", ["60"])[0],
                             qs.get("ecg", ["1"])[0] == "1",
                             requested_montages,
+                            int(qs.get("maxPoints", ["1800"])[0]),
                         )
                     )
                 return self.send_json(
@@ -4234,6 +4237,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         qs.get("hf", ["120"])[0],
                         qs.get("ac", ["60"])[0],
                         qs.get("ecg", ["1"])[0] == "1",
+                        int(qs.get("maxPoints", ["1800"])[0]),
                     )
                 )
             if path == "/api/research/dataset":
