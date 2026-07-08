@@ -13,7 +13,7 @@ const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
 const ECG_AUTO_MAX_UV_PER_MM = 250;
-const MOBILE_SWIPE_PX_PER_STEP = 24;
+const MOBILE_SWIPE_PX_PER_STEP = 12;
 const MOBILE_SWIPE_STEP_SEC = 0.2;
 const MOBILE_WINDOW_MAX_POINTS = 900;
 const DESKTOP_WINDOW_MAX_POINTS = 1800;
@@ -3224,7 +3224,7 @@ function onWaveTouchMove(ev) {
   if (state.touchSwipe.swiping) {
     ev.preventDefault();
     state.suppressNextClick = true;
-    const steps = Math.trunc((-dx / MOBILE_SWIPE_PX_PER_STEP) || 0);
+    const steps = Math.round((-dx / MOBILE_SWIPE_PX_PER_STEP) || 0);
     const deltaSec = Number((steps * MOBILE_SWIPE_STEP_SEC).toFixed(3));
     if (deltaSec !== state.touchSwipe.appliedSeconds) {
       state.start = clampStart(Number((state.touchSwipe.startTime + deltaSec).toFixed(3)));
@@ -3232,6 +3232,7 @@ function onWaveTouchMove(ev) {
       state.cursorTime = null;
       updateWaveScrollbar();
       renderStatus();
+      draw();
       scheduleMobileSwipeLoad();
     }
   }
