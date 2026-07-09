@@ -187,6 +187,7 @@ const els = {
   researchUndoBtn: document.getElementById("researchUndoBtn"),
   researchMedicalYearsInput: document.getElementById("researchMedicalYearsInput"),
   researchMonthlyEegReadingCountInput: document.getElementById("researchMonthlyEegReadingCountInput"),
+  researchEegReadingCountUnitSelect: document.getElementById("researchEegReadingCountUnitSelect"),
   researchTestProgress: document.getElementById("researchTestProgress"),
   researchWaveProgress: document.getElementById("researchWaveProgress"),
   researchInlineProgress: document.getElementById("researchInlineProgress"),
@@ -773,6 +774,7 @@ function bindResearchControls() {
     els.researchClinicalNeurophysEegSpecialistSelect,
     els.researchEpilepsyCenterTrainingSelect,
     els.researchEpilepsyCenterTrainingDurationInput,
+    els.researchEegReadingCountUnitSelect,
     els.researchSetupEpochCountInput,
   ].filter(Boolean).forEach((el) => el.addEventListener("change", () => {
     updateEpilepsyCenterDurationRequirement();
@@ -806,6 +808,7 @@ function resetResearchProfileForm() {
     els.researchClinicalNeurophysEegSpecialistSelect,
     els.researchEpilepsyCenterTrainingSelect,
   ].filter(Boolean)) select.value = "";
+  if (els.researchEegReadingCountUnitSelect) els.researchEegReadingCountUnitSelect.value = "month";
   try {
     localStorage.removeItem(RESEARCH_PROFILE_KEY);
   } catch {
@@ -844,7 +847,7 @@ function validateResearchProfileForStart() {
     [els.researchPositionSelect, "診療科専門医・指導医資格"],
     [els.researchSetupReaderSpecialtySelect, "診療科"],
     [els.researchMedicalYearsInput, "診療科目年数"],
-    [els.researchMonthlyEegReadingCountInput, "月あたり脳波判読件数"],
+    [els.researchMonthlyEegReadingCountInput, "脳波判読件数"],
     [els.researchEpilepsySpecialistSelect, "てんかん専門医・指導医資格"],
     [els.researchClinicalNeurophysEegSpecialistSelect, "臨床神経生理学会脳波専門医・指導医資格"],
     [els.researchEpilepsyCenterTrainingSelect, "てんかんセンター勤務歴"],
@@ -872,6 +875,8 @@ function validateResearchProfileForStart() {
 
 function researchProfile() {
   const storedProfile = storedResearchProfile();
+  const readingCount = eegReadingCountValue();
+  const readingUnit = eegReadingCountUnit();
   return {
     datasetPath: els.researchSetupDatasetPathInput?.value.trim() || state.researchDatasetPath || "",
     readerId: els.researchSetupReaderIdInput?.value.trim() || "",
@@ -884,7 +889,10 @@ function researchProfile() {
     clinicalNeurophysEegSpecialist: els.researchClinicalNeurophysEegSpecialistSelect?.value || "",
     usualMontage: state.researchUsualMontage || storedProfile.usualMontage || "",
     medicalPracticeYears: els.researchMedicalYearsInput?.value === "" ? "" : Number(els.researchMedicalYearsInput?.value || 0),
-    monthlyEegReadingCount: els.researchMonthlyEegReadingCountInput?.value === "" ? "" : Number(els.researchMonthlyEegReadingCountInput?.value || 0),
+    eegReadingCount: readingCount,
+    eegReadingCountUnit: readingCount === "" ? "" : readingUnit,
+    monthlyEegReadingCount: monthlyEegReadingCountValue(readingCount, readingUnit),
+    annualEegReadingCount: annualEegReadingCountValue(readingCount, readingUnit),
     epilepsyCenterTraining: els.researchEpilepsyCenterTrainingSelect?.value || "",
     epilepsyCenterTrainingDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
     ethicsNoticeConfirmed: Boolean(els.researchConsentConfirmInput?.checked),
@@ -893,6 +901,26 @@ function researchProfile() {
     dataProviderSharedFields: ["readerName", "affiliation", "email"],
     dataProviderSharingPurpose: "prevention of EEG data leakage",
   };
+}
+
+function eegReadingCountValue() {
+  return els.researchMonthlyEegReadingCountInput?.value === "" ? "" : Number(els.researchMonthlyEegReadingCountInput?.value || 0);
+}
+
+function eegReadingCountUnit() {
+  return els.researchEegReadingCountUnitSelect?.value === "year" ? "year" : "month";
+}
+
+function monthlyEegReadingCountValue(value = eegReadingCountValue(), unit = eegReadingCountUnit()) {
+  if (value === "") return "";
+  const count = Number(value || 0);
+  return unit === "year" ? Math.round((count / 12) * 100) / 100 : count;
+}
+
+function annualEegReadingCountValue(value = eegReadingCountValue(), unit = eegReadingCountUnit()) {
+  if (value === "") return "";
+  const count = Number(value || 0);
+  return unit === "year" ? count : Math.round(count * 12 * 100) / 100;
 }
 
 function storedResearchProfile() {
@@ -1071,7 +1099,10 @@ function restoreResearchProfile() {
   if (els.researchEpilepsySpecialistSelect) els.researchEpilepsySpecialistSelect.value = profile.epilepsySpecialist || "";
   if (els.researchClinicalNeurophysEegSpecialistSelect) els.researchClinicalNeurophysEegSpecialistSelect.value = profile.clinicalNeurophysEegSpecialist || "";
   if (els.researchMedicalYearsInput) els.researchMedicalYearsInput.value = profile.medicalPracticeYears ?? "";
-  if (els.researchMonthlyEegReadingCountInput) els.researchMonthlyEegReadingCountInput.value = profile.monthlyEegReadingCount ?? "";
+  if (els.researchEegReadingCountUnitSelect) els.researchEegReadingCountUnitSelect.value = profile.eegReadingCountUnit === "year" ? "year" : "month";
+  if (els.researchMonthlyEegReadingCountInput) {
+    els.researchMonthlyEegReadingCountInput.value = profile.eegReadingCount ?? profile.monthlyEegReadingCount ?? "";
+  }
   if (els.researchEpilepsyCenterTrainingSelect) els.researchEpilepsyCenterTrainingSelect.value = profile.epilepsyCenterTraining || "";
   if (els.researchEpilepsyCenterTrainingDurationInput) els.researchEpilepsyCenterTrainingDurationInput.value = profile.epilepsyCenterTrainingDuration || "";
   if (els.researchConsentConfirmInput) els.researchConsentConfirmInput.checked = Boolean(profile.ethicsNoticeConfirmed);

@@ -935,6 +935,12 @@ dd {
   color: #7b8794;
 }
 
+.research-reading-count-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, 0.42fr);
+  gap: 6px;
+}
+
 .research-privacy-note {
   grid-column: 1 / -1;
   border: 1px solid #d4dbe5;
