@@ -18,6 +18,7 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
 - `Dockerfile` / `render.yaml`: Renderデプロイ設定
 - `DEPLOY_WEB.md`: Web運用手順
 - `DATASET_SWAP.md`: Render上のprivate dataset差し替え手順
+- `REVIEW_NOTES_JA.md`: エンジニア向けレビュー依頼メモ
 
 ## 削除したもの
 
@@ -32,3 +33,7 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
 Temple University由来など再配布禁止の可能性があるEDFはGitHubに置きません。現在のテスト用データは `private:validation_tuea_v2` としてRenderの永続ディスク上に置く運用です。以前のデータ `private:validation_tuea_v1` と仮データ `private:gakkai_v1` は上書きせず残しています。
 
 データセットを差し替える・追加する場合は `DATASET_SWAP.md` を参照します。既存データを上書きせず、`validation_tuea_v2` のように新しいdataset idを作るのを基本方針とします。
+
+## レビュー前の方針
+
+現時点では大規模リファクタリングより、研究実施前の動作安定を優先します。エンジニアにレビューを依頼する場合は `REVIEW_NOTES_JA.md` を入口にしてください。

@@ -137,6 +137,8 @@ For the current viewer settings:
 - Main test epochs: 20
 - Main test balance: 10 epileptiform and 10 non_epileptiform
 - Sampling: balanced random sampling with assignment exposure counts
+- Within each reader's main 20 epochs, avoid assigning multiple epochs from the same patient/source recording when possible.
+- Patient/source recording identity is read from `patientId`/`subjectId` if present; otherwise the viewer uses the EDF/recording name before `_start...`.
 
 Note: Creating a validation session through the session API records assignment exposure counts. This is usually fine because future sampling prioritizes less-exposed cases, but avoid unnecessary repeated test-session API calls before formal testing.
 
