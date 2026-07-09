@@ -3176,7 +3176,7 @@ function onKeyDown(ev) {
   } else if (ev.key === "ArrowDown" || ev.key === "-" || ev.key === "_") {
     ev.preventDefault();
     stepSensitivity(1);
-  } else if (["1", "2", "3", "4", "5", "6", "7"].includes(ev.key)) {
+  } else if (["1", "2", "3", "4", "5", "6", "7", "8"].includes(ev.key)) {
     ev.preventDefault();
     const montageByKey = {
       1: "conventional",
