@@ -7,7 +7,6 @@ import hashlib
 import hmac
 import ipaddress
 import importlib.util
-import io
 import json
 import math
 import mimetypes
@@ -20,7 +19,6 @@ import secrets
 import shlex
 import socket
 import threading
-from zipfile import ZipFile
 
 sys.dont_write_bytecode = True
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
@@ -59,6 +57,7 @@ from research_sampling import (
     research_case_patient_key,
     stable_balanced_research_order,
 )
+from research_private_dataset import extract_private_dataset_zip, private_dataset_payload
 
 os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/mpl")
 os.environ.setdefault("NUMBA_CACHE_DIR", "/private/tmp/numba")
@@ -1458,59 +1457,6 @@ def private_dataset_path(value: str) -> Path | None:
     return None
 
 
-def private_dataset_payload(dataset_dir: Path, dataset_id: str, name: str = "") -> dict[str, Any]:
-    cases: list[dict[str, Any]] = []
-    group_specs = [
-        ("epilepsy", "epileptiform", "IED_PRESENT"),
-        ("no_epilepsy", "non_epileptiform", "IED_ABSENT"),
-    ]
-    for folder_name, label_group, reference_label in group_specs:
-        search_dirs = [dataset_dir / "edf" / folder_name, dataset_dir / folder_name]
-        edf_paths: list[Path] = []
-        for search_dir in search_dirs:
-            if search_dir.exists():
-                edf_paths.extend(sorted(search_dir.glob("*.edf")))
-        for index, edf_path in enumerate(sorted(set(edf_paths)), start=1):
-            case_hash = hashlib.sha1(str(edf_path.relative_to(dataset_dir)).encode("utf-8")).hexdigest()[:8]
-            cases.append({
-                "caseId": f"{dataset_id}_{folder_name}_{index:03d}_{case_hash}",
-                "edfPath": str(edf_path.resolve()),
-                "recordingId": edf_path.stem,
-                "labelGroup": label_group,
-                "referenceLabel": reference_label,
-                "include": True,
-                "phase1Montage": "conventional",
-                "sourceGroup": folder_name,
-                "sourceAnnotation": dataset_id,
-            })
-    if not cases:
-        raise ValueError("Private dataset zip must contain EDF files under epilepsy/ and no_epilepsy/ folders.")
-    return {
-        "datasetId": dataset_id,
-        "name": name or dataset_id,
-        "datasetPath": str(dataset_dir),
-        "createdAt": utc_now_iso(),
-        "settings": {
-            "phase1TotalSampleCount": 20,
-            "phase1Montage": "conventional",
-            "epochDurationSec": 10,
-        },
-        "cases": cases,
-    }
-
-
-def extract_private_dataset_zip(zip_bytes: bytes, target_dir: Path) -> None:
-    with ZipFile(io.BytesIO(zip_bytes)) as archive:
-        for member in archive.infolist():
-            member_path = Path(member.filename)
-            if member_path.is_absolute() or ".." in member_path.parts:
-                raise ValueError("Private dataset zip contains an unsafe path.")
-            destination = (target_dir / member.filename).resolve()
-            if not path_is_relative_to(destination, target_dir.resolve()):
-                raise ValueError("Private dataset zip contains an unsafe path.")
-        archive.extractall(target_dir)
-
-
 def upload_private_dataset(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_id = safe_research_id(payload.get("datasetId") or "")
     if not dataset_id:
@@ -1527,11 +1473,11 @@ def upload_private_dataset(payload: dict[str, Any]) -> dict[str, Any]:
     temp_dir.mkdir(parents=True, exist_ok=False)
     try:
         extract_private_dataset_zip(zip_bytes, temp_dir)
-        private_dataset_payload(temp_dir, dataset_id, str(payload.get("name") or dataset_id))
+        private_dataset_payload(temp_dir, dataset_id, str(payload.get("name") or dataset_id), utc_now_iso())
         if target_dir.exists():
             shutil.rmtree(target_dir)
         temp_dir.rename(target_dir)
-        dataset = private_dataset_payload(target_dir, dataset_id, str(payload.get("name") or dataset_id))
+        dataset = private_dataset_payload(target_dir, dataset_id, str(payload.get("name") or dataset_id), utc_now_iso())
         json_write(target_dir / "dataset.json", dataset)
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
