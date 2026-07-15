@@ -24,16 +24,32 @@ def labels(traces: list[dict]) -> list[str]:
     return [str(trace.get("label")) for trace in traces if trace.get("role") != "ecg"]
 
 
-def test_transverse_uses_only_scalp_pairs_and_includes_pz_pairs() -> None:
-    ch_names = list(SCALP_ORDER)
+def test_transverse_uses_tb_18_2_pairs() -> None:
+    ch_names = list(SCALP_ORDER) + ["A1", "A2"]
     warnings: list[str] = []
     traces = build_montage_traces(sample_data(ch_names), ch_names, "transverse", False, warnings)
     trace_labels = labels(traces)
 
-    assert "Fp1-Fp2" in trace_labels
-    assert "P3-Pz" in trace_labels
-    assert "Pz-P4" in trace_labels
-    assert not any("A1" in label or "A2" in label for label in trace_labels)
+    assert trace_labels == [
+        "Fp1-Fp2",
+        "F7-F3",
+        "F3-Fz",
+        "Fz-F4",
+        "F4-F8",
+        "A1-T7",
+        "T7-C3",
+        "C3-Cz",
+        "Cz-C4",
+        "C4-T8",
+        "T8-A2",
+        "P7-P3",
+        "P3-Pz",
+        "Pz-P4",
+        "P4-P8",
+        "O1-O2",
+        "Fz-Cz",
+        "Cz-Pz",
+    ]
 
 
 def test_bipolar_difference_is_returned_in_backend_display_polarity() -> None:
@@ -61,7 +77,7 @@ def test_pz_is_in_reference_montages() -> None:
 
 
 def test_missing_pz_makes_transverse_incomplete() -> None:
-    ch_names = [ch for ch in SCALP_ORDER if ch != "Pz"]
+    ch_names = [ch for ch in SCALP_ORDER if ch != "Pz"] + ["A1", "A2"]
     warnings: list[str] = []
     traces = build_montage_traces(sample_data(ch_names), ch_names, "transverse", False, warnings, allow_fallback=False)
     status = montage_status_payload("transverse", ch_names, traces)

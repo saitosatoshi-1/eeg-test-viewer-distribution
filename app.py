@@ -1599,8 +1599,9 @@ def montage_trace_requirements(montage: str) -> tuple[list[str], set[str]]:
     if montage == "transverse":
         pairs = [
             ("Fp1", "Fp2"), ("F7", "F3"), ("F3", "Fz"), ("Fz", "F4"), ("F4", "F8"),
-            ("T7", "C3"), ("C3", "Cz"), ("Cz", "C4"), ("C4", "T8"),
+            ("A1", "T7"), ("T7", "C3"), ("C3", "Cz"), ("Cz", "C4"), ("C4", "T8"), ("T8", "A2"),
             ("P7", "P3"), ("P3", "Pz"), ("Pz", "P4"), ("P4", "P8"), ("O1", "O2"),
+            ("Fz", "Cz"), ("Cz", "Pz"),
         ]
         return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
     if montage == "circular":
@@ -1770,15 +1771,19 @@ def build_montage_traces(
             ("F3", "Fz", "left_frontal"),
             ("Fz", "F4", "right_frontal"),
             ("F4", "F8", "right_frontal"),
+            ("A1", "T7", "left_temporal"),
             ("T7", "C3", "left_central"),
             ("C3", "Cz", "left_central"),
             ("Cz", "C4", "right_central"),
             ("C4", "T8", "right_central"),
+            ("T8", "A2", "right_temporal"),
             ("P7", "P3", "left_posterior"),
             ("P3", "Pz", "left_posterior"),
             ("Pz", "P4", "right_posterior"),
             ("P4", "P8", "right_posterior"),
             ("O1", "O2", "midline"),
+            ("Fz", "Cz", "midline"),
+            ("Cz", "Pz", "midline"),
         ]:
             diff(a, b, group)
     elif montage == "circular":
