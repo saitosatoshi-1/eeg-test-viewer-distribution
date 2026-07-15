@@ -210,7 +210,7 @@ def app_build_info() -> dict[str, str]:
 
 def app_fingerprint() -> str:
     digest = hashlib.sha256()
-    for rel in ("app.py", "static/index.html", "static/styles.css", "static/app.js", "build_info.json"):
+    for rel in ("app.py", "static/index.html", "static/styles.css", "static/viewer_utils.js", "static/app.js", "build_info.json"):
         path = APP_ROOT / rel
         try:
             digest.update(rel.encode("utf-8") + b"\0")

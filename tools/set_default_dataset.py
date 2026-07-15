@@ -62,6 +62,7 @@ def update_static_index(dataset_id: str, cache_tag: str) -> bool:
     )
     if cache_tag:
         text = re.sub(r"/static/styles\.css\?v=[^\"']+", f"/static/styles.css?v={cache_tag}", text)
+        text = re.sub(r"/static/viewer_utils\.js\?v=[^\"']+", f"/static/viewer_utils.js?v={cache_tag}", text)
         text = re.sub(r"/static/app\.js\?v=[^\"']+", f"/static/app.js?v={cache_tag}", text)
     return write_text_if_changed(path, text)
 
