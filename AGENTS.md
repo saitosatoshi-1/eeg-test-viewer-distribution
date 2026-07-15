@@ -52,6 +52,12 @@ Do not reintroduce old Windows/macOS distribution bundles, launchers, installer 
 5. Push to `origin/main` unless the user asks for a branch or PR.
 6. If Render Auto Deploy does not start, ask the user to run Manual Deploy from the Render Dashboard.
 
+## Refactoring Notes
+
+- When adding Markdown notes for refactoring or engineering review, include Japanese alongside English when practical.
+- When adding code comments for refactored logic, include concise Japanese wording as well if the comment explains research workflow, dataset handling, montage behavior, or reviewer-facing UI behavior.
+- Keep comments short and useful. Prefer Japanese-only comments when the surrounding context is already Japanese; use English plus Japanese when the comment is likely to help external engineers.
+
 ## Checks
 
 Python syntax:

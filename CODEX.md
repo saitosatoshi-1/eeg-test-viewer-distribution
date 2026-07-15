@@ -12,6 +12,8 @@ Current shared test link:
 
 Before asking an engineer for review, point them to `REVIEW_NOTES_JA.md`. Prefer small, behavior-preserving cleanup over large refactors until the research workflow is stable.
 
+For refactoring notes and engineering-review Markdown, include Japanese alongside English when practical. For new code comments, add concise Japanese wording as well when the comment explains research workflow, dataset handling, montage behavior, or reviewer-facing UI behavior.
+
 This repo should remain web-test focused. Do not add back Windows/macOS launcher bundles, installer scripts, packaged distribution folders, or private EDF data unless explicitly requested.
 
 For changes under `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/配布用_viewer`, update the parent `作業ログ.md`.
