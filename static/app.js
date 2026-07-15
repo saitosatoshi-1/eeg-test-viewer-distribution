@@ -15,15 +15,16 @@ const ECG_AUTO_MIN_UV_PER_MM = 5;
 const ECG_AUTO_MAX_UV_PER_MM = 250;
 const MOBILE_SWIPE_PX_PER_STEP = 12;
 const MOBILE_SWIPE_STEP_SEC = 0.2;
-const MOBILE_WINDOW_MAX_POINTS = 900;
-const DESKTOP_WINDOW_MAX_POINTS = 1800;
+const MOBILE_WINDOW_MAX_POINTS = 1500;
+const MOBILE_MULTI_MONTAGE_MAX_POINTS = 1000;
+const DESKTOP_WINDOW_MAX_POINTS = 5000;
 const MOBILE_SWIPE_LOAD_DEBOUNCE_MS = 160;
 const MAX_WINDOW_CACHE_ENTRIES = 72;
 const RESEARCH_PREFETCH_LOOKAHEAD = 3;
 const MONTAGE_LABELS = {
   longitudinal: "縦双極誘導",
-  a1a2: "耳朶参照基準2",
-  conventional: "耳朶参照基準1",
+  a1a2: "同側耳朶参照基準2",
+  conventional: "同側耳朶参照基準1",
   conventional_average: "平均参照基準1",
   average: "平均参照基準2",
   cz: "Cz参照基準",
@@ -586,7 +587,8 @@ function preferredResearchWindowMontages(activeMontage = activeMontageValue()) {
 }
 
 function windowMaxPoints() {
-  return isMobileViewport() ? MOBILE_WINDOW_MAX_POINTS : DESKTOP_WINDOW_MAX_POINTS;
+  if (!isMobileViewport()) return DESKTOP_WINDOW_MAX_POINTS;
+  return isMultiMontageMode() ? MOBILE_MULTI_MONTAGE_MAX_POINTS : MOBILE_WINDOW_MAX_POINTS;
 }
 
 async function handleMontageControlChange(source = "change") {
@@ -3046,12 +3048,13 @@ function syncActiveMontageData(options = {}) {
   const data = state.windowData;
   if (!data || !Array.isArray(data.montageViews)) return false;
   const active = activeMontageValue();
-  const exact = data.montageViews.find((item) => item.montage === active);
+  const exact = data.montageViews.find((item) => item.montage === active && item.available !== false && (item.traces || []).length);
   if (options.requireExact && !exact) return false;
-  const view = exact || data.montageViews[0];
+  const view = exact || data.montageViews.find((item) => item.available !== false && (item.traces || []).length) || data.montageViews[0];
   if (!view) return false;
   data.montage = view.montage;
   data.traces = view.traces || [];
+  data.times = view.times || data.times || [];
   state.activeMontage = view.montage;
   if (els.montageSelect.value !== view.montage) els.montageSelect.value = view.montage;
   return true;
@@ -3471,6 +3474,7 @@ function windowCacheKey(params) {
     params.ac,
     params.ecg,
     params.maxPoints || "",
+    params.strictMontage || "",
   ].join("|");
 }
 
@@ -3516,9 +3520,10 @@ function researchWindowPrefetchParams(recordId, item, options = {}) {
     montages,
     tc: options.tc || "0.3",
     hf: options.hf || "120",
-    ac: normalizeAcValue(options.ac || "60"),
+    ac: normalizeAcValue(options.ac || normalizeAcSelect()),
     ecg: "1",
     maxPoints: options.maxPoints || windowMaxPoints(),
+    strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
   };
 }
 
@@ -3637,12 +3642,33 @@ function resetResearchPrefetch(options = {}) {
 
 function applyWindowData(data, requestedMontage) {
   state.windowData = data;
+  updateMontageAvailabilityFromWindow(data);
+  if (TEST_ONLY_DISTRIBUTION && Array.isArray(data?.montageViews)) {
+    const requestedView = data.montageViews.find((view) => view.montage === requestedMontage);
+    if (requestedView?.available === false || !(requestedView?.traces || []).length) {
+      const fallbackView = data.montageViews.find((view) => view.available !== false && (view.traces || []).length);
+      if (fallbackView) {
+        data.montage = fallbackView.montage;
+        data.traces = fallbackView.traces || [];
+        data.times = fallbackView.times || data.times || [];
+        requestedMontage = fallbackView.montage;
+      }
+    }
+  }
   state.activeMontage = data.montage || requestedMontage;
   state.start = state.windowData.start || 0;
   renderStatus();
   updateWaveScrollbar();
   renderWarnings();
   draw();
+}
+
+function updateMontageAvailabilityFromWindow(data = state.windowData) {
+  if (!els.montageSelect || !Array.isArray(data?.montageViews)) return;
+  const availability = new Map(data.montageViews.map((view) => [view.montage, view.available !== false && (view.traces || []).length > 0]));
+  for (const option of els.montageSelect.options || []) {
+    option.disabled = TEST_ONLY_DISTRIBUTION && availability.has(option.value) && !availability.get(option.value);
+  }
 }
 
 async function loadWindow() {
@@ -3674,6 +3700,7 @@ async function loadWindow() {
           ac: normalizeAcSelect(),
           ecg: els.ecgToggle.checked ? "1" : "0",
           maxPoints: windowMaxPoints(),
+          strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
         };
         const cacheKey = windowCacheKey(params);
         const cached = state.windowCache.get(cacheKey);
@@ -4390,8 +4417,8 @@ function traceColor(trace, rowIndex, montage = activeMontageValue()) {
     if (trace.group === "right_temporal" || trace.group === "right_parasagittal") return "#b4232d";
   }
   if (montage === "transverse") {
-    if (trace.group === "left_temporal" || trace.group === "left_parasagittal") return "#344bc2";
-    if (trace.group === "right_temporal" || trace.group === "right_parasagittal") return "#bf3f4c";
+    if (trace.group?.startsWith("left_")) return "#344bc2";
+    if (trace.group?.startsWith("right_")) return "#bf3f4c";
     return "#68706e";
   }
   if (trace.group === "left_temporal") return "#344bc2";

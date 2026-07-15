@@ -1155,8 +1155,8 @@ class RecordingStore:
             n_samples = raw.size // info.frame_channels
             raw = raw[: n_samples * info.frame_channels]
         data = raw.reshape(n_samples, info.frame_channels).T.astype(np.float64)
-        # EEG-1200 samples are centered at 0x8000. This scale matches the
-        # MNE Nihon conversion closely enough for display review in microvolts.
+        # EEG-1200 samples are centered at 0x8000. The direct reader returns
+        # display-ready microvolt values and must not be multiplied by 1e6.
         data = (data - 32768.0) * (6400.0 / 65535.0)
         return data, list(info.ch_names or []), sfreq, start / sfreq, n_samples / sfreq
 
@@ -1171,6 +1171,7 @@ class RecordingStore:
         ac: str,
         include_ecg: bool,
         max_points: int = 1800,
+        strict_montage: bool = False,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1189,6 +1190,7 @@ class RecordingStore:
             data, ch_names, sfreq, actual_start, actual_duration = self.direct_window(
                 record_id, padded_start / sfreq, (padded_stop - padded_start) / sfreq
             )
+            original_ch_names = list(ch_names)
             actual_start_sample = int(round(actual_start * sfreq))
             warnings.append("Using direct EEG-1200 37-channel frame reader; MNE preview is bypassed.")
         else:
@@ -1214,17 +1216,26 @@ class RecordingStore:
             padded_start = max(0, start - pad)
             padded_stop = min(raw.n_times, stop + pad)
             picks = list(range(len(raw.ch_names)))
-            data = raw.get_data(picks=picks, start=padded_start, stop=padded_stop) * 1e6
+            data = volts_to_microvolts(raw.get_data(picks=picks, start=padded_start, stop=padded_stop))
+            original_ch_names = list(raw.ch_names)
             ch_names = [normalize_label(ch) for ch in raw.ch_names]
             actual_start_sample = padded_start
+        filter_padding = filter_padding_payload(start, stop, padded_start, padded_stop, sfreq)
+        channel_validation = channel_validation_payload(original_ch_names, ch_names)
+        channel_configuration = channel_configuration_payload(channel_validation)
         data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
         crop_start = max(0, start - actual_start_sample)
         crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
         data = data[:, crop_start:crop_stop]
         stop = start + data.shape[1]
 
-        traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
-        max_points = max(300, min(2400, int(max_points or 1800)))
+        derivation_allowed = bool(channel_configuration.get("montageDerivationAllowed"))
+        traces = [] if strict_montage and not derivation_allowed else build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq, allow_fallback=not strict_montage)
+        montage_status = montage_status_payload(montage, ch_names, traces)
+        if strict_montage and (not montage_status["complete"] or not derivation_allowed):
+            traces = []
+            montage_status["available"] = False
+        max_points = max(300, min(5000, int(max_points or 1800)))
         rel_times = decimate_traces_for_display(traces, start, sfreq, max_points)
         return {
             "id": record_id,
@@ -1233,6 +1244,11 @@ class RecordingStore:
             "duration": float((stop - start) / sfreq),
             "times": rel_times,
             "traces": traces,
+            "montageStatus": montage_status,
+            "channelValidation": channel_validation,
+            "channelConfiguration": channel_configuration,
+            "filterPadding": filter_padding,
+            "signalUnit": "uV",
             "warnings": warnings,
             "metadata": metadata,
         }
@@ -1250,6 +1266,7 @@ class RecordingStore:
         include_ecg: bool,
         montages: list[str] | None = None,
         max_points: int = 1800,
+        strict_montage: bool = False,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
@@ -1268,6 +1285,7 @@ class RecordingStore:
             data, ch_names, sfreq, actual_start, actual_duration = self.direct_window(
                 record_id, padded_start / sfreq, (padded_stop - padded_start) / sfreq
             )
+            original_ch_names = list(ch_names)
             actual_start_sample = int(round(actual_start * sfreq))
             warnings.append("Using direct EEG-1200 37-channel frame reader; MNE preview is bypassed.")
         else:
@@ -1295,20 +1313,24 @@ class RecordingStore:
             padded_start = max(0, start - pad)
             padded_stop = min(raw.n_times, stop + pad)
             picks = list(range(len(raw.ch_names)))
-            data = raw.get_data(picks=picks, start=padded_start, stop=padded_stop) * 1e6
+            data = volts_to_microvolts(raw.get_data(picks=picks, start=padded_start, stop=padded_stop))
+            original_ch_names = list(raw.ch_names)
             ch_names = [normalize_label(ch) for ch in raw.ch_names]
             actual_start_sample = padded_start
+        filter_padding = filter_padding_payload(start, stop, padded_start, padded_stop, sfreq)
+        channel_validation = channel_validation_payload(original_ch_names, ch_names)
+        channel_configuration = channel_configuration_payload(channel_validation)
         data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
         crop_start = max(0, start - actual_start_sample)
         crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
         data = data[:, crop_start:crop_stop]
         stop = start + data.shape[1]
 
-        max_points = max(300, min(2400, int(max_points or 1800)))
+        max_points = max(300, min(5000, int(max_points or 1800)))
         montage_labels = {
             "longitudinal": "縦双極誘導",
-            "a1a2": "耳朶参照基準2",
-            "conventional": "耳朶参照基準1",
+            "a1a2": "同側耳朶参照基準2",
+            "conventional": "同側耳朶参照基準1",
             "conventional_average": "平均参照基準1",
             "average": "平均参照基準2",
             "cz": "Cz参照基準",
@@ -1324,9 +1346,22 @@ class RecordingStore:
         active_traces: list[dict[str, Any]] = []
         active_times: list[float] = []
         for montage, label in view_defs:
-            traces = build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq)
+            derivation_allowed = bool(channel_configuration.get("montageDerivationAllowed"))
+            traces = [] if strict_montage and not derivation_allowed else build_montage_traces(data, ch_names, montage, include_ecg, warnings, sfreq, allow_fallback=not strict_montage)
+            montage_status = montage_status_payload(montage, ch_names, traces)
+            if strict_montage and (not montage_status["complete"] or not derivation_allowed):
+                traces = []
+                montage_status["available"] = False
             view_times = decimate_traces_for_display(traces, start, sfreq, max_points)
-            view = {"montage": montage, "label": label, "traces": traces, "times": view_times}
+            view = {
+                "montage": montage,
+                "label": label,
+                "traces": traces,
+                "times": view_times,
+                "available": bool(montage_status["available"]),
+                "complete": bool(montage_status["complete"]),
+                "montageStatus": montage_status,
+            }
             montage_views.append(view)
             if montage == active:
                 active_traces = traces
@@ -1340,6 +1375,11 @@ class RecordingStore:
             "traces": active_traces,
             "montage": active,
             "montageViews": montage_views,
+            "montageStatus": next((view.get("montageStatus") for view in montage_views if view.get("montage") == active), {}),
+            "channelValidation": channel_validation,
+            "channelConfiguration": channel_configuration,
+            "filterPadding": filter_padding,
+            "signalUnit": "uV",
             "warnings": warnings,
             "metadata": metadata,
         }
@@ -1375,6 +1415,10 @@ def normalize_label(name: str) -> str:
     return canonical_channel_label(clean)
 
 
+def volts_to_microvolts(data: np.ndarray) -> np.ndarray:
+    return np.asarray(data, dtype=float) * 1e6
+
+
 def is_display_eeg_channel_name(name: str) -> bool:
     return normalize_label(name) in DISPLAY_EEG_LABELS
 
@@ -1392,6 +1436,87 @@ def is_fallback_eeg_channel_name(name: str) -> bool:
             return True
     aux_prefixes = ("DC", "TRIG", "MARK", "EVENT", "STATUS", "PHOTIC", "RESP", "PULSE", "SPO2", "ETCO2")
     return not any(key.startswith(prefix) for prefix in aux_prefixes)
+
+
+def classify_eeg_channel(name: str) -> str:
+    clean = normalize_label(name)
+    if is_ecg_channel_name(clean):
+        return "ecg"
+    if clean in DISPLAY_EEG_LABELS:
+        return "referential"
+    if "-" in clean:
+        left, right = [part.strip() for part in clean.split("-", 1)]
+        if left in DISPLAY_EEG_LABELS and right in DISPLAY_EEG_LABELS:
+            return "bipolar"
+    key = channel_key(clean)
+    aux_prefixes = ("DC", "TRIG", "MARK", "EVENT", "STATUS", "PHOTIC", "RESP", "PULSE", "SPO2", "ETCO2")
+    if any(key.startswith(prefix) for prefix in aux_prefixes):
+        return "auxiliary"
+    return "unknown"
+
+
+def duplicate_channel_payload(original_ch_names: list[str], normalized_ch_names: list[str]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for index, normalized_name in enumerate(normalized_ch_names):
+        grouped.setdefault(normalized_name, []).append({
+            "index": index,
+            "originalName": original_ch_names[index] if index < len(original_ch_names) else normalized_name,
+        })
+    return [
+        {
+            "normalizedName": name,
+            "sourceChannels": rows,
+        }
+        for name, rows in sorted(grouped.items())
+        if name and len(rows) > 1
+    ]
+
+
+def channel_validation_payload(original_ch_names: list[str], normalized_ch_names: list[str]) -> dict[str, Any]:
+    available_scalp = sorted(ch for ch in SCALP_ORDER if ch in normalized_ch_names)
+    ear_channels = sorted(ch for ch in ("A1", "A2") if ch in normalized_ch_names)
+    ecg_channels = [name for name in normalized_ch_names if is_ecg_channel_name(name)]
+    bipolar_channels = [name for name in normalized_ch_names if classify_eeg_channel(name) == "bipolar"]
+    unknown_channels = [name for name in normalized_ch_names if classify_eeg_channel(name) == "unknown"]
+    return {
+        "availableScalpChannels": available_scalp,
+        "missingScalpChannels": [ch for ch in SCALP_ORDER if ch not in normalized_ch_names],
+        "earChannels": ear_channels,
+        "ecgChannels": ecg_channels,
+        "bipolarChannels": bipolar_channels,
+        "unknownChannels": unknown_channels,
+        "duplicateChannels": duplicate_channel_payload(original_ch_names, normalized_ch_names),
+    }
+
+
+def channel_configuration_payload(channel_validation: dict[str, Any]) -> dict[str, Any]:
+    referential_count = len(channel_validation.get("availableScalpChannels") or [])
+    bipolar_count = len(channel_validation.get("bipolarChannels") or [])
+    auxiliary_count = len(channel_validation.get("ecgChannels") or [])
+    unknown_count = len(channel_validation.get("unknownChannels") or [])
+    duplicate_count = len(channel_validation.get("duplicateChannels") or [])
+    mixed = referential_count > 0 and bipolar_count > 0
+    derivation_allowed = referential_count > 0 and bipolar_count == 0 and duplicate_count == 0 and not mixed
+    return {
+        "referentialCount": referential_count,
+        "bipolarCount": bipolar_count,
+        "auxiliaryCount": auxiliary_count,
+        "unknownCount": unknown_count,
+        "mixedConfiguration": mixed,
+        "montageDerivationAllowed": derivation_allowed,
+    }
+
+
+def filter_padding_payload(start: int, stop: int, padded_start: int, padded_stop: int, sfreq: float) -> dict[str, Any]:
+    requested = float(DISPLAY_FILTER_PADDING_SEC)
+    before = max(0.0, float((start - padded_start) / sfreq)) if sfreq else 0.0
+    after = max(0.0, float((padded_stop - stop) / sfreq)) if sfreq else 0.0
+    return {
+        "requestedSec": requested,
+        "beforeSec": round(before, 3),
+        "afterSec": round(after, 3),
+        "complete": before >= requested and after >= requested,
+    }
 
 
 def peak_preserving_indices(values: np.ndarray, max_points: int) -> np.ndarray:
@@ -1435,8 +1560,20 @@ def decimate_traces_for_display(traces: list[dict[str, Any]], sample_start: int,
             trace["values"] = []
         return []
     arrays = [values[:n_samples] for values in arrays]
-    score = np.nanmax(np.abs(np.vstack(arrays)), axis=0)
-    indices = peak_preserving_indices(score, max_points)
+    eeg_arrays = [
+        values
+        for trace, values in zip(traces, arrays)
+        if trace.get("role") != "ecg"
+    ]
+    source_arrays = eeg_arrays or arrays
+    selected: set[int] = {0, n_samples - 1}
+    for values in source_arrays:
+        selected.update(int(index) for index in peak_preserving_indices(np.abs(values), max_points))
+    indices = np.asarray(sorted(index for index in selected if 0 <= index < n_samples), dtype=int)
+    if indices.size > max_points:
+        score = np.nanmax(np.abs(np.vstack(source_arrays)), axis=0)
+        reduced = peak_preserving_indices(score[indices], max_points)
+        indices = indices[reduced]
     for trace, values in zip(traces, arrays):
         trace["values"] = values[indices].astype(float).round(3).tolist()
     return ((sample_start + indices) / sfreq).astype(float).round(4).tolist()
@@ -1447,6 +1584,80 @@ def channel_group(ch_name: str) -> str:
         if ch_name in names:
             return group
     return ""
+
+
+def montage_trace_requirements(montage: str) -> tuple[list[str], set[str]]:
+    if montage == "longitudinal":
+        pairs = [
+            ("Fp1", "F7"), ("F7", "T7"), ("T7", "P7"), ("P7", "O1"),
+            ("Fp2", "F8"), ("F8", "T8"), ("T8", "P8"), ("P8", "O2"),
+            ("Fp1", "F3"), ("F3", "C3"), ("C3", "P3"), ("P3", "O1"),
+            ("Fp2", "F4"), ("F4", "C4"), ("C4", "P4"), ("P4", "O2"),
+            ("Fz", "Cz"), ("Cz", "Pz"),
+        ]
+        return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
+    if montage == "transverse":
+        pairs = [
+            ("Fp1", "Fp2"), ("F7", "F3"), ("F3", "Fz"), ("Fz", "F4"), ("F4", "F8"),
+            ("T7", "C3"), ("C3", "Cz"), ("Cz", "C4"), ("C4", "T8"),
+            ("P7", "P3"), ("P3", "Pz"), ("Pz", "P4"), ("P4", "P8"), ("O1", "O2"),
+        ]
+        return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
+    if montage == "circular":
+        pairs = [
+            ("Fp1", "F7"), ("F7", "T7"), ("T7", "P7"), ("P7", "O1"), ("O1", "O2"),
+            ("O2", "P8"), ("P8", "T8"), ("T8", "F8"), ("F8", "Fp2"), ("Fp2", "Fp1"),
+            ("Fz", "F3"), ("F3", "C3"), ("C3", "P3"), ("P3", "Pz"), ("Pz", "P4"),
+            ("P4", "C4"), ("C4", "F4"), ("F4", "Fz"),
+        ]
+        return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
+    if montage == "average":
+        return [f"{ch}-AVG" for ch in SCALP_ORDER], set(SCALP_ORDER)
+    if montage == "conventional_average":
+        channels = ["Fp1", "Fp2", "F3", "F4", "C3", "C4", "P3", "P4", "O1", "O2", "F7", "F8", "T7", "T8", "P7", "P8", "Fz", "Cz", "Pz"]
+        return [f"{ch}-AVG" for ch in channels], set(channels)
+    if montage == "conventional":
+        pairs = [
+            ("Fp1", "A1"), ("Fp2", "A2"), ("F3", "A1"), ("F4", "A2"), ("C3", "A1"), ("C4", "A2"),
+            ("P3", "A1"), ("P4", "A2"), ("O1", "A1"), ("O2", "A2"), ("F7", "A1"), ("F8", "A2"),
+            ("T7", "A1"), ("T8", "A2"), ("P7", "A1"), ("P8", "A2"), ("Fz", "A1"), ("Cz", "A2"), ("Pz", "A2"),
+        ]
+        return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
+    if montage == "a1a2":
+        pairs = [
+            ("Fp1", "A1"), ("F7", "A1"), ("T7", "A1"), ("P7", "A1"),
+            ("Fp2", "A2"), ("F8", "A2"), ("T8", "A2"), ("P8", "A2"),
+            ("F3", "A1"), ("C3", "A1"), ("P3", "A1"), ("O1", "A1"),
+            ("F4", "A2"), ("C4", "A2"), ("P4", "A2"), ("O2", "A2"),
+            ("Fz", "A2"), ("Cz", "A2"), ("Pz", "A2"),
+        ]
+        return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
+    if montage == "cz":
+        labels = [f"{ch}-Cz" for ch in SCALP_ORDER if ch != "Cz"]
+        return labels, set(SCALP_ORDER)
+    return [], set()
+
+
+def montage_status_payload(montage: str, ch_names: list[str], traces: list[dict[str, Any]]) -> dict[str, Any]:
+    expected_labels, required_channels = montage_trace_requirements(montage)
+    available_channels = set(ch_names)
+    actual_labels = [str(trace.get("label") or "") for trace in traces if trace.get("role") != "ecg"]
+    actual_set = set(actual_labels)
+    missing_traces = [label for label in expected_labels if label not in actual_set]
+    missing_channels = sorted(ch for ch in required_channels if ch not in available_channels)
+    expected_count = len(expected_labels)
+    actual_count = sum(1 for label in actual_labels if not expected_labels or label in expected_labels)
+    complete = bool(expected_count and not missing_traces and not missing_channels and actual_count >= expected_count)
+    available = complete if expected_count else bool(actual_labels)
+    return {
+        "montage": montage,
+        "available": available,
+        "complete": complete,
+        "expectedTraceCount": expected_count,
+        "actualTraceCount": actual_count,
+        "missingChannels": missing_channels,
+        "missingTraces": missing_traces,
+    }
 
 
 def apply_display_filters(
@@ -1502,11 +1713,13 @@ def build_montage_traces(
     include_ecg: bool,
     warnings: list[str],
     sfreq: float | None = None,
+    allow_fallback: bool = True,
 ) -> list[dict[str, Any]]:
     index = {name: idx for idx, name in enumerate(ch_names)}
     traces: list[dict[str, Any]] = []
 
     def add(name: str, values: np.ndarray, role: str = "eeg", group: str = "") -> None:
+        # EEG traces are converted to display polarity here: negative voltage is drawn upward by the frontend.
         display_values = -np.asarray(values, dtype=float) if role == "eeg" else np.asarray(values, dtype=float)
         traces.append({"label": name, "role": role, "group": group, "values": display_values})
 
@@ -1552,24 +1765,20 @@ def build_montage_traces(
             diff(a, b, group)
     elif montage == "transverse":
         for a, b, group in [
-            ("F7", "F3", "left_temporal"),
-            ("F3", "Fz", "left_parasagittal"),
-            ("Fz", "F4", "right_parasagittal"),
-            ("F4", "F8", "right_temporal"),
-            ("A1", "T7", "left_temporal"),
-            ("T7", "C3", "left_temporal"),
-            ("C3", "Cz", "left_parasagittal"),
-            ("Cz", "C4", "right_parasagittal"),
-            ("C4", "T8", "right_temporal"),
-            ("T8", "A2", "right_temporal"),
-            ("P7", "P3", "left_temporal"),
-            ("P3", "Pz", "left_parasagittal"),
-            ("Pz", "P4", "right_parasagittal"),
-            ("P4", "P8", "right_temporal"),
-            ("Fp1", "A1", "left_temporal"),
-            ("Fp2", "A2", "right_temporal"),
-            ("O1", "A1", "left_parasagittal"),
-            ("O2", "A2", "right_parasagittal"),
+            ("Fp1", "Fp2", "midline"),
+            ("F7", "F3", "left_frontal"),
+            ("F3", "Fz", "left_frontal"),
+            ("Fz", "F4", "right_frontal"),
+            ("F4", "F8", "right_frontal"),
+            ("T7", "C3", "left_central"),
+            ("C3", "Cz", "left_central"),
+            ("Cz", "C4", "right_central"),
+            ("C4", "T8", "right_central"),
+            ("P7", "P3", "left_posterior"),
+            ("P3", "Pz", "left_posterior"),
+            ("Pz", "P4", "right_posterior"),
+            ("P4", "P8", "right_posterior"),
+            ("O1", "O2", "midline"),
         ]:
             diff(a, b, group)
     elif montage == "circular":
@@ -1600,8 +1809,6 @@ def build_montage_traces(
         if scalp:
             avg = data[[index[ch] for ch in scalp]].mean(axis=0)
             for ch in scalp:
-                if ch == "Pz":
-                    continue
                 add(f"{ch}-AVG", data[index[ch]] - avg, group=channel_group(ch))
     elif montage == "a1a2":
         pairs = [
@@ -1623,6 +1830,7 @@ def build_montage_traces(
             ("O2", "A2", "right_parasagittal"),
             ("Fz", "A2", "midline"),
             ("Cz", "A2", "midline"),
+            ("Pz", "A2", "midline"),
         ]
         for a, b, group in pairs:
             ear_reference(a, b, group)
@@ -1646,6 +1854,7 @@ def build_montage_traces(
             ("P8", "A2", "right_temporal"),
             ("Fz", "A1", "midline"),
             ("Cz", "A2", "midline"),
+            ("Pz", "A2", "midline"),
         ]
         if montage == "conventional_average":
             scalp = [ch for ch in SCALP_ORDER if ch in index]
@@ -1660,13 +1869,15 @@ def build_montage_traces(
     elif montage == "cz":
         for ch in [c for c in SCALP_ORDER if c in index and c != "Cz"]:
             diff(ch, "Cz", channel_group(ch))
-    if not traces:
+    if not traces and allow_fallback:
         warnings.append(f"Montage '{montage}' could not be derived from decoded channels; showing raw or pre-montaged EEG channels.")
         for ch in ch_names:
             if is_fallback_eeg_channel_name(ch):
                 add(ch, data[index[ch]], group=channel_group(ch))
         if not traces:
             warnings.append("No displayable EEG channels were found after excluding non-EEG auxiliary channels.")
+    elif not traces:
+        warnings.append(f"Montage '{montage}' could not be derived from decoded channels.")
 
     if include_ecg:
         ecg_indices = ecg_channel_indices(ch_names)
@@ -1726,8 +1937,8 @@ RESEARCH_RATING_ALIASES = {
 RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse", "circular"]
 RESEARCH_MONTAGE_LABELS = {
     "longitudinal": "縦双極誘導",
-    "a1a2": "耳朶参照基準2",
-    "conventional": "耳朶参照基準1",
+    "a1a2": "同側耳朶参照基準2",
+    "conventional": "同側耳朶参照基準1",
     "conventional_average": "平均参照基準1",
     "average": "平均参照基準2",
     "cz": "Cz参照基準",
@@ -4211,6 +4422,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     for item in qs.get("montages", [""])[0].split(",")
                     if item.strip()
                 ]
+                strict_montage = qs.get("strictMontage", ["0"])[0] == "1"
                 if requested_montages:
                     return self.send_json(
                         self.store.window_multi(
@@ -4220,10 +4432,11 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                             qs.get("montage", ["longitudinal"])[0],
                             qs.get("tc", ["0.3"])[0],
                             qs.get("hf", ["120"])[0],
-                            qs.get("ac", ["60"])[0],
+                            qs.get("ac", ["OFF"])[0],
                             qs.get("ecg", ["1"])[0] == "1",
                             requested_montages,
                             int(qs.get("maxPoints", ["1800"])[0]),
+                            strict_montage,
                         )
                     )
                 return self.send_json(
@@ -4234,9 +4447,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         qs.get("montage", ["longitudinal"])[0],
                         qs.get("tc", ["0.3"])[0],
                         qs.get("hf", ["120"])[0],
-                        qs.get("ac", ["60"])[0],
+                        qs.get("ac", ["OFF"])[0],
                         qs.get("ecg", ["1"])[0] == "1",
                         int(qs.get("maxPoints", ["1800"])[0]),
+                        strict_montage,
                     )
                 )
             if path == "/api/research/dataset":
