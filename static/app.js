@@ -20,7 +20,7 @@ const MOBILE_MULTI_MONTAGE_MAX_POINTS = 1000;
 const DESKTOP_WINDOW_MAX_POINTS = 5000;
 const MOBILE_SWIPE_LOAD_DEBOUNCE_MS = 160;
 const MAX_WINDOW_CACHE_ENTRIES = 72;
-const RESEARCH_PREFETCH_LOOKAHEAD = 3;
+const RESEARCH_PREFETCH_LOOKAHEAD = 5;
 const MONTAGE_LABELS = {
   longitudinal: "縦双極誘導",
   a1a2: "同側耳朶参照基準2",
@@ -29,10 +29,9 @@ const MONTAGE_LABELS = {
   average: "平均参照基準2",
   cz: "Cz参照基準",
   transverse: "横双極誘導",
-  circular: "環状双極誘導",
 };
 const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitudinal", "transverse"];
-const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse", "circular"];
+const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
 const RIGHT_PANEL_TABS = ["metadata", "test"];
 const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
 const LAUNCH_PARAMS = new URLSearchParams(window.location.search || "");
@@ -72,6 +71,7 @@ const state = {
   lastFilterControlKey: "",
   controlWatchTimer: null,
   durationRefreshTimer: null,
+  filterRefreshTimer: null,
   mobileSwipeLoadTimer: null,
   durationSelectFocusedAt: 0,
   panelResizeDrag: null,
@@ -632,6 +632,18 @@ async function handleDurationControlChange(source = "change") {
   forceViewerRepaint();
 }
 
+function scheduleFilterRefresh(source = "filter", options = {}) {
+  if (state.filterRefreshTimer) window.clearTimeout(state.filterRefreshTimer);
+  state.filterRefreshTimer = window.setTimeout(() => {
+    state.filterRefreshTimer = null;
+    const filterKey = filterControlKey();
+    const changed = filterKey !== state.lastFilterControlKey;
+    if (changed || options.force) {
+      handleFilterControlChange(source);
+    }
+  }, options.delayMs ?? 60);
+}
+
 async function handleFilterControlChange(source = "change") {
   state.lastFilterControlKey = filterControlKey();
   clearWindowCacheForCurrentRecording();
@@ -640,6 +652,7 @@ async function handleFilterControlChange(source = "change") {
   forceViewerRepaint();
   setStatus(`Loading filters TC ${tcText()} / HF ${hfText()} / AC ${acFilterLabel()}...`, { busy: true, progress: 70 });
   await loadWindow();
+  scheduleResearchPrefetch(state.researchCaseIndex);
   forceViewerRepaint();
 }
 
@@ -680,6 +693,16 @@ function bindControls() {
     el.addEventListener("input", check);
     el.addEventListener("keyup", check);
     el.addEventListener("mouseup", check);
+  });
+  [els.tcSelect, els.hfSelect, els.acSelect].filter(Boolean).forEach((el) => {
+    const schedule = (ev) => {
+      saveSettings();
+      scheduleFilterRefresh(ev.type, { delayMs: ev.type === "blur" ? 0 : 80 });
+    };
+    el.addEventListener("input", schedule);
+    el.addEventListener("blur", schedule);
+    el.addEventListener("pointerup", schedule);
+    el.addEventListener("touchend", schedule);
   });
   els.sensitivitySelect?.addEventListener("input", () => {
     saveSettings();
@@ -1212,7 +1235,7 @@ function researchMontageTimingPayload() {
     analysisTotals[row.montage] = Number(Number((analysisTotals[row.montage] || 0) + Number(row.durationSec || 0)).toFixed(3));
   }
   const analysisDisplayedMontages = Object.keys(analysisTotals);
-  const analysisHasBipolar = analysisDisplayedMontages.some((montage) => ["longitudinal", "transverse", "circular"].includes(montage));
+  const analysisHasBipolar = analysisDisplayedMontages.some((montage) => ["longitudinal", "transverse"].includes(montage));
   const analysisHasReference = analysisDisplayedMontages.some((montage) => ["conventional", "conventional_average", "a1a2", "average", "cz"].includes(montage));
   const montageSequence = switches
     .map((row, index) => ({
@@ -3206,7 +3229,7 @@ function onKeyDown(ev) {
   } else if (ev.key === "ArrowDown" || ev.key === "-" || ev.key === "_") {
     ev.preventDefault();
     stepSensitivity(1);
-  } else if (["1", "2", "3", "4", "5", "6", "7", "8"].includes(ev.key)) {
+  } else if (["1", "2", "3", "4", "5", "6", "7"].includes(ev.key)) {
     ev.preventDefault();
     const montageByKey = {
       1: "conventional",
@@ -3216,7 +3239,6 @@ function onKeyDown(ev) {
       5: "a1a2",
       6: "average",
       7: "cz",
-      8: "circular",
     };
     setMontage(montageByKey[ev.key]);
   }

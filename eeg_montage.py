@@ -353,14 +353,6 @@ def montage_trace_requirements(montage: str) -> tuple[list[str], set[str]]:
             ("Fz", "Cz"), ("Cz", "Pz"),
         ]
         return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
-    if montage == "circular":
-        pairs = [
-            ("Fp1", "F7"), ("F7", "T7"), ("T7", "P7"), ("P7", "O1"), ("O1", "O2"),
-            ("O2", "P8"), ("P8", "T8"), ("T8", "F8"), ("F8", "Fp2"), ("Fp2", "Fp1"),
-            ("Fz", "F3"), ("F3", "C3"), ("C3", "P3"), ("P3", "Pz"), ("Pz", "P4"),
-            ("P4", "C4"), ("C4", "F4"), ("F4", "Fz"),
-        ]
-        return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
     if montage == "average":
         return [f"{ch}-AVG" for ch in SCALP_ORDER], set(SCALP_ORDER)
     if montage == "conventional_average":
@@ -534,29 +526,6 @@ def build_montage_traces(
             ("Fz", "Cz", "midline"),
             ("Cz", "Pz", "midline"),
         ]:
-            diff(a, b, group)
-    elif montage == "circular":
-        pairs = [
-            ("Fp1", "F7", "left_temporal"),
-            ("F7", "T7", "left_temporal"),
-            ("T7", "P7", "left_temporal"),
-            ("P7", "O1", "left_temporal"),
-            ("O1", "O2", "midline"),
-            ("O2", "P8", "right_temporal"),
-            ("P8", "T8", "right_temporal"),
-            ("T8", "F8", "right_temporal"),
-            ("F8", "Fp2", "right_temporal"),
-            ("Fp2", "Fp1", "midline"),
-            ("Fz", "F3", "left_parasagittal"),
-            ("F3", "C3", "left_parasagittal"),
-            ("C3", "P3", "left_parasagittal"),
-            ("P3", "Pz", "left_parasagittal"),
-            ("Pz", "P4", "right_parasagittal"),
-            ("P4", "C4", "right_parasagittal"),
-            ("C4", "F4", "right_parasagittal"),
-            ("F4", "Fz", "right_parasagittal"),
-        ]
-        for a, b, group in pairs:
             diff(a, b, group)
     elif montage == "average":
         scalp = [ch for ch in SCALP_ORDER if ch in index]

@@ -152,7 +152,7 @@ DISPLAY_FILTER_PADDING_SEC = 5.0
 MAX_POST_BODY_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_EEG_BYTES = int(float(os.environ.get("EEG_VIEWER_MAX_REMOTE_EEG_MB", "512")) * 1024 * 1024)
-MAX_RAW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_RAW_CACHE_RECORDS", "4"))))
+MAX_RAW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_RAW_CACHE_RECORDS", "8"))))
 ALLOWED_REMOTE_HOSTS = {
     host.strip().lower()
     for host in os.environ.get("EEG_VIEWER_ALLOWED_REMOTE_HOSTS", "raw.githubusercontent.com,github.com").split(",")
@@ -1172,6 +1172,7 @@ class RecordingStore:
             "channelValidation": channel_validation,
             "channelConfiguration": channel_configuration,
             "filterPadding": filter_padding,
+            "displayFilters": {"tc": tc, "hf": hf, "ac": ac},
             "signalUnit": "uV",
             "warnings": warnings,
             "metadata": metadata,
@@ -1259,7 +1260,6 @@ class RecordingStore:
             "average": "平均参照基準2",
             "cz": "Cz参照基準",
             "transverse": "横双極誘導",
-            "circular": "環状双極誘導",
         }
         requested = [m for m in (montages or []) if m in montage_labels]
         if not requested:
@@ -1303,6 +1303,7 @@ class RecordingStore:
             "channelValidation": channel_validation,
             "channelConfiguration": channel_configuration,
             "filterPadding": filter_padding,
+            "displayFilters": {"tc": tc, "hf": hf, "ac": ac},
             "signalUnit": "uV",
             "warnings": warnings,
             "metadata": metadata,
@@ -1357,7 +1358,7 @@ RESEARCH_RATING_ALIASES = {
     "てんかん性異常なし": RESEARCH_RATING_NEGATIVE,
     "てんかん性異常あり": RESEARCH_RATING_POSITIVE,
 }
-RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse", "circular"]
+RESEARCH_MONTAGE_KEYS = ["longitudinal", "a1a2", "conventional", "conventional_average", "average", "cz", "transverse"]
 RESEARCH_MONTAGE_LABELS = {
     "longitudinal": "縦双極誘導",
     "a1a2": "同側耳朶参照基準2",
@@ -1366,7 +1367,6 @@ RESEARCH_MONTAGE_LABELS = {
     "average": "平均参照基準2",
     "cz": "Cz参照基準",
     "transverse": "横双極誘導",
-    "circular": "環状双極誘導",
 }
 RESEARCH_PHASE1_SAMPLE_TOTAL = 20
 RESEARCH_PHASE1_SAMPLE_PER_GROUP = 20

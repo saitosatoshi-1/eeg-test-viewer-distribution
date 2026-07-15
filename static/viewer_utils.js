@@ -15,14 +15,9 @@ function nkLabel(label) {
 
 function traceColor(trace, rowIndex, montage = activeMontageValue()) {
   if (trace.role === "ecg") return "#5f6762";
-  if (montage === "circular") {
-    if (trace.group === "midline") return "#303030";
-    if (trace.group === "left_temporal" || trace.group === "left_parasagittal") return "#1b3298";
-    if (trace.group === "right_temporal" || trace.group === "right_parasagittal") return "#b4232d";
-  }
   if (montage === "conventional" || montage === "conventional_average") {
     const label = String(trace.label || "");
-    if (/(^|-)Fz($|-)|(^|-)Cz($|-)/.test(label)) return "#23734f";
+    if (/(^|-)Fz($|-)|(^|-)Cz($|-)|(^|-)Pz($|-)/.test(label)) return "#23734f";
     if (trace.group === "midline") return "#303030";
     if (trace.group === "left_temporal" || trace.group === "left_parasagittal") return "#1b3298";
     if (trace.group === "right_temporal" || trace.group === "right_parasagittal") return "#b4232d";
