@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from app import (
+from app import research_case_patient_key
+from eeg_montage import (
     SCALP_ORDER,
     build_montage_traces,
     channel_configuration_payload,
     channel_validation_payload,
     montage_status_payload,
-    research_case_patient_key,
     volts_to_microvolts,
 )
 
