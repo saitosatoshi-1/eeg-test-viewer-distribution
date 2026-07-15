@@ -558,13 +558,14 @@ function filterControlKey() {
 
 function normalizeAcValue(value) {
   const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "60";
   if (raw === "50" || raw === "50HZ") return "50";
   if (raw === "60" || raw === "60HZ") return "60";
   return "OFF";
 }
 
 function normalizeAcSelect() {
-  if (!els.acSelect) return "OFF";
+  if (!els.acSelect) return "60";
   const value = normalizeAcValue(els.acSelect.value);
   if (els.acSelect.value !== value) els.acSelect.value = value;
   return value;
@@ -573,6 +574,14 @@ function normalizeAcSelect() {
 function acFilterLabel(value = normalizeAcValue(els.acSelect?.value)) {
   const normalized = normalizeAcValue(value);
   return normalized === "OFF" ? "OFF" : `${normalized} Hz`;
+}
+
+function waveformActionText() {
+  return isMobileViewport() ? "波形をタッチ" : "波形を左クリック";
+}
+
+function tutorialRatingStepText() {
+  return `${isMobileViewport() ? "波形をタッチ" : "波形上を左クリック"}し、表示された三択から てんかん性異常あり / てんかん性異常なし / 判断困難 を選びます。`;
 }
 
 function preferredWindowMontages(activeMontage = activeMontageValue()) {
@@ -625,9 +634,11 @@ async function handleDurationControlChange(source = "change") {
 
 async function handleFilterControlChange(source = "change") {
   state.lastFilterControlKey = filterControlKey();
+  clearWindowCacheForCurrentRecording();
+  resetResearchPrefetch();
   renderStatus();
   forceViewerRepaint();
-  setStatus(`Loading filters TC ${tcText()} / HF ${hfText()}...`, { busy: true, progress: 70 });
+  setStatus(`Loading filters TC ${tcText()} / HF ${hfText()} / AC ${acFilterLabel()}...`, { busy: true, progress: 70 });
   await loadWindow();
   forceViewerRepaint();
 }
@@ -1353,6 +1364,20 @@ function downloadResearchResultBackup() {
   return null;
 }
 
+async function shareJsonFile(filename, text, title, bodyText) {
+  const file = new File([text], filename, { type: "text/plain" });
+  const shareData = {
+    title,
+    text: bodyText,
+    files: [file],
+  };
+  if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+    await navigator.share(shareData);
+    return true;
+  }
+  return false;
+}
+
 function isMobileViewport() {
   return window.matchMedia?.("(max-width: 700px)")?.matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
 }
@@ -1561,7 +1586,11 @@ function updateResearchTutorial(item = currentResearchCase()) {
   }
   if (els.researchTutorialNextTestNote) els.researchTutorialNextTestNote.hidden = !isMontageSetup;
   if (els.researchTutorialTargetNote) els.researchTutorialTargetNote.hidden = isMontageSetup;
-  if (els.researchTutorialSteps) els.researchTutorialSteps.hidden = isMontageSetup;
+  if (els.researchTutorialSteps) {
+    const ratingStep = els.researchTutorialSteps.querySelector("li:nth-child(2)");
+    if (ratingStep) ratingStep.textContent = tutorialRatingStepText();
+    els.researchTutorialSteps.hidden = isMontageSetup;
+  }
   els.researchTutorial.hidden = !show;
   els.researchTutorial.setAttribute("aria-hidden", show ? "false" : "true");
 }
@@ -2415,7 +2444,7 @@ async function showResearchCase(index) {
     state.researchCaseStartedAt = new Date().toISOString();
     startResearchMontageTiming();
     renderResearchInlineProgress();
-    setStatus(isValidationWorkflow() ? `Validation: ${state.researchCaseIndex + 1}/${cases.length} · 波形を左クリックして採用/除外を選択してください` : (isResearchPracticeCase(item) ? `${researchPracticeLabel(item)}: 波形を左クリックして三択から回答してください` : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`)));
+    setStatus(isValidationWorkflow() ? `Validation: ${state.researchCaseIndex + 1}/${cases.length} · ${waveformActionText()}して採用/除外を選択してください` : (isResearchPracticeCase(item) ? `${researchPracticeLabel(item)}: ${waveformActionText()}して三択から回答してください` : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`)));
     renderRightResearchPanels();
     scheduleResearchPrefetch(state.researchCaseIndex);
   } catch (err) {
@@ -2707,14 +2736,7 @@ async function shareResearchJsonByEmail() {
       setStatus("Validation結果JSONファイルを共有準備中...", { busy: true });
       const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId, validationSet: activeValidationDatasetKind() })}`);
       saveResearchResultBackup(jsonFilename, jsonText);
-      const file = new File([jsonText], jsonFilename, { type: "application/json" });
-      const shareData = {
-        title: `脳波Validation結果（${validationKindLabel}）`,
-        text: researchEmailBodyText(profile),
-        files: [file],
-      };
-      if (navigator.canShare?.({ files: [file] }) && navigator.share) {
-        await navigator.share(shareData);
+      if (await shareJsonFile(jsonFilename, jsonText, `脳波Validation結果（${validationKindLabel}）`, researchEmailBodyText(profile))) {
         if (els.researchSavedCsvName) els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
         setStatus(`Validation結果JSONファイルを共有しました: ${jsonFilename}`);
         return;
@@ -2749,6 +2771,11 @@ async function shareResearchJsonByEmail() {
     await retryPendingResearchResponses();
     const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
     saveResearchResultBackup(jsonFilename, jsonText);
+    if (await shareJsonFile(jsonFilename, jsonText, "脳波読影テスト結果", researchEmailBodyText(profile))) {
+      if (els.researchSavedCsvName) els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
+      setStatus(`結果JSONファイルを共有しました: ${jsonFilename}`);
+      return;
+    }
     downloadTextFile(jsonFilename, jsonText);
     window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent("脳波読影テスト結果")}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
     if (els.researchSavedCsvName) {
@@ -3484,6 +3511,17 @@ function rememberWindowCache(key, data) {
   while (state.windowCache.size > MAX_WINDOW_CACHE_ENTRIES) {
     const firstKey = state.windowCache.keys().next().value;
     state.windowCache.delete(firstKey);
+  }
+}
+
+function clearWindowCacheForCurrentRecording() {
+  const recordId = String(state.recordingId || "");
+  if (!recordId) {
+    state.windowCache.clear();
+    return;
+  }
+  for (const key of Array.from(state.windowCache.keys())) {
+    if (String(key).startsWith(`${recordId}|`)) state.windowCache.delete(key);
   }
 }
 
