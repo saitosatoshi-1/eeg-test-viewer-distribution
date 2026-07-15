@@ -153,6 +153,7 @@ MAX_POST_BODY_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_EEG_BYTES = int(float(os.environ.get("EEG_VIEWER_MAX_REMOTE_EEG_MB", "512")) * 1024 * 1024)
 MAX_RAW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_RAW_CACHE_RECORDS", "8"))))
+MAX_WINDOW_SOURCE_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_WINDOW_SOURCE_CACHE_RECORDS", "16"))))
 ALLOWED_REMOTE_HOSTS = {
     host.strip().lower()
     for host in os.environ.get("EEG_VIEWER_ALLOWED_REMOTE_HOSTS", "raw.githubusercontent.com,github.com").split(",")
@@ -673,6 +674,7 @@ class RecordingStore:
         self.edf_dirs = edf_dirs or []
         self.user_files: list[Path] = load_user_files()
         self._raw_cache: dict[str, Any] = {}
+        self._window_source_cache: dict[tuple[str, float, float], dict[str, Any]] = {}
         self._direct_cache: dict[str, DirectNktInfo] = {}
         self._recordings: dict[str, Recording] = {}
         self._last_refresh_at = 0.0
@@ -739,6 +741,8 @@ class RecordingStore:
     def invalidate_recording_cache(self, record_id: str) -> None:
         with self._lock:
             self._raw_cache.pop(record_id, None)
+            for key in [key for key in self._window_source_cache if key[0] == record_id]:
+                self._window_source_cache.pop(key, None)
             self._direct_cache.pop(record_id, None)
 
     def format_for_path(self, path: Path) -> str:
@@ -1084,6 +1088,69 @@ class RecordingStore:
         data = (data - 32768.0) * (6400.0 / 65535.0)
         return data, list(info.ch_names or []), sfreq, start / sfreq, n_samples / sfreq
 
+    def window_source(self, record_id: str, start_sec: float, duration_sec: float) -> dict[str, Any] | None:
+        duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
+        cache_key = (record_id, round(float(start_sec), 3), round(float(duration_sec), 3))
+        cached = self._window_source_cache.pop(cache_key, None)
+        if cached is not None:
+            self._window_source_cache[cache_key] = cached
+            return cached
+
+        direct = self.direct_info(record_id)
+        source_warnings: list[str] = []
+        if direct.available:
+            sfreq = float(direct.sfreq)
+            start = max(0, int(round(start_sec * sfreq)))
+            stop = min(direct.n_samples, int(round((start_sec + duration_sec) * sfreq)))
+            if stop <= start:
+                start = 0
+                stop = min(direct.n_samples, int(round(duration_sec * sfreq)))
+            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
+            padded_start = max(0, start - pad)
+            padded_stop = min(direct.n_samples, stop + pad)
+            data, ch_names, sfreq, actual_start, actual_duration = self.direct_window(
+                record_id, padded_start / sfreq, (padded_stop - padded_start) / sfreq
+            )
+            original_ch_names = list(ch_names)
+            actual_start_sample = int(round(actual_start * sfreq))
+            source_warnings.append("Using direct EEG-1200 37-channel frame reader; MNE preview is bypassed.")
+        else:
+            raw = self.raw(record_id)
+            if raw is None:
+                return None
+            sfreq = float(raw.info["sfreq"])
+            start = max(0, int(round(start_sec * sfreq)))
+            stop = min(raw.n_times, int(round((start_sec + duration_sec) * sfreq)))
+            if stop <= start:
+                start = 0
+                stop = min(raw.n_times, int(round(duration_sec * sfreq)))
+            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
+            padded_start = max(0, start - pad)
+            padded_stop = min(raw.n_times, stop + pad)
+            picks = list(range(len(raw.ch_names)))
+            data = volts_to_microvolts(raw.get_data(picks=picks, start=padded_start, stop=padded_stop))
+            original_ch_names = list(raw.ch_names)
+            ch_names = [normalize_label(ch) for ch in raw.ch_names]
+            actual_start_sample = padded_start
+
+        payload = {
+            "data": data,
+            "chNames": ch_names,
+            "originalChNames": original_ch_names,
+            "sfreq": sfreq,
+            "start": start,
+            "stop": stop,
+            "paddedStart": padded_start,
+            "paddedStop": padded_stop,
+            "actualStartSample": actual_start_sample,
+            "warnings": source_warnings,
+        }
+        self._window_source_cache[cache_key] = payload
+        while len(self._window_source_cache) > MAX_WINDOW_SOURCE_CACHE_RECORDS:
+            oldest = next(iter(self._window_source_cache))
+            self._window_source_cache.pop(oldest, None)
+        return payload
+
     def window(
         self,
         record_id: str,
@@ -1100,50 +1167,27 @@ class RecordingStore:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
         warnings = list(metadata["warnings"])
-        direct = self.direct_info(record_id)
-        if direct.available:
-            sfreq = float(direct.sfreq)
-            start = max(0, int(round(start_sec * sfreq)))
-            stop = min(direct.n_samples, int(round((start_sec + duration_sec) * sfreq)))
-            if stop <= start:
-                start = 0
-                stop = min(direct.n_samples, int(round(duration_sec * sfreq)))
-            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
-            padded_start = max(0, start - pad)
-            padded_stop = min(direct.n_samples, stop + pad)
-            data, ch_names, sfreq, actual_start, actual_duration = self.direct_window(
-                record_id, padded_start / sfreq, (padded_stop - padded_start) / sfreq
-            )
-            original_ch_names = list(ch_names)
-            actual_start_sample = int(round(actual_start * sfreq))
-            warnings.append("Using direct EEG-1200 37-channel frame reader; MNE preview is bypassed.")
-        else:
-            raw = self.raw(record_id)
-            if raw is None:
-                return {
-                    "id": record_id,
-                    "sfreq": 0,
-                    "start": start_sec,
-                    "duration": duration_sec,
-                    "times": [],
-                    "traces": [],
-                    "warnings": warnings,
-                }
-
-            sfreq = float(raw.info["sfreq"])
-            start = max(0, int(round(start_sec * sfreq)))
-            stop = min(raw.n_times, int(round((start_sec + duration_sec) * sfreq)))
-            if stop <= start:
-                start = 0
-                stop = min(raw.n_times, int(round(duration_sec * sfreq)))
-            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
-            padded_start = max(0, start - pad)
-            padded_stop = min(raw.n_times, stop + pad)
-            picks = list(range(len(raw.ch_names)))
-            data = volts_to_microvolts(raw.get_data(picks=picks, start=padded_start, stop=padded_stop))
-            original_ch_names = list(raw.ch_names)
-            ch_names = [normalize_label(ch) for ch in raw.ch_names]
-            actual_start_sample = padded_start
+        source = self.window_source(record_id, start_sec, duration_sec)
+        if source is None:
+            return {
+                "id": record_id,
+                "sfreq": 0,
+                "start": start_sec,
+                "duration": duration_sec,
+                "times": [],
+                "traces": [],
+                "warnings": warnings,
+            }
+        warnings.extend(source.get("warnings") or [])
+        data = source["data"]
+        ch_names = list(source["chNames"])
+        original_ch_names = list(source["originalChNames"])
+        sfreq = float(source["sfreq"])
+        start = int(source["start"])
+        stop = int(source["stop"])
+        padded_start = int(source["paddedStart"])
+        padded_stop = int(source["paddedStop"])
+        actual_start_sample = int(source["actualStartSample"])
         filter_padding = filter_padding_payload(start, stop, padded_start, padded_stop, sfreq)
         channel_validation = channel_validation_payload(original_ch_names, ch_names)
         channel_configuration = channel_configuration_payload(channel_validation)
@@ -1196,52 +1240,29 @@ class RecordingStore:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
         warnings = list(metadata["warnings"])
-        direct = self.direct_info(record_id)
-        if direct.available:
-            sfreq = float(direct.sfreq)
-            start = max(0, int(round(start_sec * sfreq)))
-            stop = min(direct.n_samples, int(round((start_sec + duration_sec) * sfreq)))
-            if stop <= start:
-                start = 0
-                stop = min(direct.n_samples, int(round(duration_sec * sfreq)))
-            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
-            padded_start = max(0, start - pad)
-            padded_stop = min(direct.n_samples, stop + pad)
-            data, ch_names, sfreq, actual_start, actual_duration = self.direct_window(
-                record_id, padded_start / sfreq, (padded_stop - padded_start) / sfreq
-            )
-            original_ch_names = list(ch_names)
-            actual_start_sample = int(round(actual_start * sfreq))
-            warnings.append("Using direct EEG-1200 37-channel frame reader; MNE preview is bypassed.")
-        else:
-            raw = self.raw(record_id)
-            if raw is None:
-                return {
-                    "id": record_id,
-                    "sfreq": 0,
-                    "start": start_sec,
-                    "duration": duration_sec,
-                    "times": [],
-                    "traces": [],
-                    "montage": active_montage,
-                    "montageViews": [],
-                    "warnings": warnings,
-                }
-
-            sfreq = float(raw.info["sfreq"])
-            start = max(0, int(round(start_sec * sfreq)))
-            stop = min(raw.n_times, int(round((start_sec + duration_sec) * sfreq)))
-            if stop <= start:
-                start = 0
-                stop = min(raw.n_times, int(round(duration_sec * sfreq)))
-            pad = int(round(DISPLAY_FILTER_PADDING_SEC * sfreq))
-            padded_start = max(0, start - pad)
-            padded_stop = min(raw.n_times, stop + pad)
-            picks = list(range(len(raw.ch_names)))
-            data = volts_to_microvolts(raw.get_data(picks=picks, start=padded_start, stop=padded_stop))
-            original_ch_names = list(raw.ch_names)
-            ch_names = [normalize_label(ch) for ch in raw.ch_names]
-            actual_start_sample = padded_start
+        source = self.window_source(record_id, start_sec, duration_sec)
+        if source is None:
+            return {
+                "id": record_id,
+                "sfreq": 0,
+                "start": start_sec,
+                "duration": duration_sec,
+                "times": [],
+                "traces": [],
+                "montage": active_montage,
+                "montageViews": [],
+                "warnings": warnings,
+            }
+        warnings.extend(source.get("warnings") or [])
+        data = source["data"]
+        ch_names = list(source["chNames"])
+        original_ch_names = list(source["originalChNames"])
+        sfreq = float(source["sfreq"])
+        start = int(source["start"])
+        stop = int(source["stop"])
+        padded_start = int(source["paddedStart"])
+        padded_stop = int(source["paddedStop"])
+        actual_start_sample = int(source["actualStartSample"])
         filter_padding = filter_padding_payload(start, stop, padded_start, padded_stop, sfreq)
         channel_validation = channel_validation_payload(original_ch_names, ch_names)
         channel_configuration = channel_configuration_payload(channel_validation)

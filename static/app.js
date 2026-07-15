@@ -13,12 +13,9 @@ const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
 const ECG_AUTO_MAX_UV_PER_MM = 250;
-const MOBILE_SWIPE_PX_PER_STEP = 12;
-const MOBILE_SWIPE_STEP_SEC = 0.2;
 const MOBILE_WINDOW_MAX_POINTS = 1500;
 const MOBILE_MULTI_MONTAGE_MAX_POINTS = 1000;
 const DESKTOP_WINDOW_MAX_POINTS = 5000;
-const MOBILE_SWIPE_LOAD_DEBOUNCE_MS = 160;
 const MAX_WINDOW_CACHE_ENTRIES = 72;
 const RESEARCH_PREFETCH_LOOKAHEAD = 5;
 const MONTAGE_LABELS = {
@@ -64,7 +61,6 @@ const state = {
   windowLoadPromise: null,
   windowCache: new Map(),
   suppressNextClick: false,
-  touchSwipe: null,
   lastWaveWheelPageAt: 0,
   lastMontageSelectValue: "",
   lastDurationSelectValue: "",
@@ -72,7 +68,6 @@ const state = {
   controlWatchTimer: null,
   durationRefreshTimer: null,
   filterRefreshTimer: null,
-  mobileSwipeLoadTimer: null,
   durationSelectFocusedAt: 0,
   panelResizeDrag: null,
   researchTutorialDrag: null,
@@ -623,7 +618,10 @@ async function handleDurationControlChange(source = "change") {
   if (state.windowData) {
     state.windowData.duration = nextDuration;
   }
-  state.start = clampStart(state.start, nextDuration);
+  const researchCase = currentResearchCase();
+  state.start = TEST_ONLY_DISTRIBUTION && isMobileViewport() && researchCase
+    ? centeredStartForResearchCase(researchCase, nextDuration)
+    : clampStart(state.start, nextDuration);
   updateWaveScrollbar();
   renderStatus();
   forceViewerRepaint();
@@ -751,10 +749,6 @@ function bindControls() {
   window.addEventListener("mouseup", onWaveMouseUp);
   els.waveCanvas?.addEventListener("mouseleave", onWaveMouseLeave);
   els.waveCanvas?.addEventListener("wheel", onWaveWheel, { passive: false });
-  els.waveCanvas?.addEventListener("touchstart", onWaveTouchStart, { passive: true });
-  els.waveCanvas?.addEventListener("touchmove", onWaveTouchMove, { passive: false });
-  els.waveCanvas?.addEventListener("touchend", onWaveTouchEnd, { passive: false });
-  els.waveCanvas?.addEventListener("touchcancel", onWaveTouchCancel);
   els.waveCanvas?.addEventListener("click", onWaveClick);
   els.waveCanvas?.addEventListener("dblclick", onWaveDoubleClick);
   if (els.waveScrollbar) {
@@ -3262,86 +3256,6 @@ function shiftWaveformSeconds(deltaSec) {
   updateWaveScrollbar();
   renderStatus();
   loadWindow();
-}
-
-function clearMobileSwipeLoadTimer() {
-  if (!state.mobileSwipeLoadTimer) return;
-  clearTimeout(state.mobileSwipeLoadTimer);
-  state.mobileSwipeLoadTimer = null;
-}
-
-function scheduleMobileSwipeLoad() {
-  clearMobileSwipeLoadTimer();
-  setWaveLoading(true);
-  state.mobileSwipeLoadTimer = setTimeout(() => {
-    state.mobileSwipeLoadTimer = null;
-    loadWindow();
-  }, MOBILE_SWIPE_LOAD_DEBOUNCE_MS);
-}
-
-function onWaveTouchStart(ev) {
-  if (!state.windowData?.traces?.length || ev.touches.length !== 1) return;
-  const touch = ev.touches[0];
-  state.touchSwipe = {
-    startX: touch.clientX,
-    startY: touch.clientY,
-    lastX: touch.clientX,
-    lastY: touch.clientY,
-    startTime: Number(state.start || 0),
-    appliedSeconds: 0,
-    swiping: false,
-  };
-}
-
-function onWaveTouchMove(ev) {
-  if (!state.touchSwipe || ev.touches.length !== 1) return;
-  const touch = ev.touches[0];
-  const dx = touch.clientX - state.touchSwipe.startX;
-  const dy = touch.clientY - state.touchSwipe.startY;
-  state.touchSwipe.lastX = touch.clientX;
-  state.touchSwipe.lastY = touch.clientY;
-  if (!state.touchSwipe.swiping && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-    state.touchSwipe.swiping = true;
-    hideContextMenu();
-  }
-  if (state.touchSwipe.swiping) {
-    ev.preventDefault();
-    state.suppressNextClick = true;
-    const steps = Math.round((-dx / MOBILE_SWIPE_PX_PER_STEP) || 0);
-    const deltaSec = Number((steps * MOBILE_SWIPE_STEP_SEC).toFixed(3));
-    if (deltaSec !== state.touchSwipe.appliedSeconds) {
-      state.start = clampStart(Number((state.touchSwipe.startTime + deltaSec).toFixed(3)));
-      state.touchSwipe.appliedSeconds = deltaSec;
-      state.cursorTime = null;
-      updateWaveScrollbar();
-      renderStatus();
-      draw();
-      scheduleMobileSwipeLoad();
-    }
-  }
-}
-
-function onWaveTouchEnd(ev) {
-  const swipe = state.touchSwipe;
-  state.touchSwipe = null;
-  if (!swipe?.swiping) return;
-  const dx = swipe.lastX - swipe.startX;
-  if (Math.abs(dx) < 16) return;
-  ev.preventDefault();
-  state.suppressNextClick = true;
-  hideContextMenu();
-  clearMobileSwipeLoadTimer();
-  if (!swipe.appliedSeconds) {
-    shiftWaveformSeconds(dx < 0 ? MOBILE_SWIPE_STEP_SEC : -MOBILE_SWIPE_STEP_SEC);
-  } else {
-    loadWindow();
-  }
-}
-
-function onWaveTouchCancel() {
-  state.touchSwipe = null;
-  clearMobileSwipeLoadTimer();
-  setWaveLoading(false);
 }
 
 function onWaveScrollbarInput(ev) {
