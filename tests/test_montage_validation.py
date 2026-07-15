@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from app import research_case_patient_key
 from eeg_montage import (
     SCALP_ORDER,
     build_montage_traces,
@@ -11,6 +10,7 @@ from eeg_montage import (
     montage_status_payload,
     volts_to_microvolts,
 )
+from research_sampling import balanced_research_sample_by_exposure, research_case_patient_key
 
 
 def sample_data(ch_names: list[str]) -> np.ndarray:
@@ -121,6 +121,33 @@ def test_bipolar_only_channels_do_not_allow_montage_derivation() -> None:
 def test_patient_key_uses_recording_name_before_epoch_start() -> None:
     row = {"recordingId": "CHEW_aaaaacyf_aaaaacyf_s007_t003_start000070.129_dur010.000"}
     assert research_case_patient_key(row) == "CHEW_aaaaacyf_aaaaacyf_s007_t003"
+
+
+def test_balanced_sampling_prefers_less_exposed_cases() -> None:
+    rows = [
+        {"caseId": "low_1", "recordingId": "patient_a_start000001"},
+        {"caseId": "low_2", "recordingId": "patient_b_start000001"},
+        {"caseId": "high_1", "recordingId": "patient_c_start000001"},
+    ]
+    sampled = balanced_research_sample_by_exposure(
+        rows,
+        2,
+        {"low_1": 0, "low_2": 0, "high_1": 4},
+        ("dataset", "reader", "phase1"),
+    )
+
+    assert {row["caseId"] for row in sampled} == {"low_1", "low_2"}
+
+
+def test_balanced_sampling_avoids_same_patient_when_possible() -> None:
+    rows = [
+        {"caseId": "same_1", "recordingId": "patient_a_start000001"},
+        {"caseId": "same_2", "recordingId": "patient_a_start000002"},
+        {"caseId": "other_1", "recordingId": "patient_b_start000001"},
+    ]
+    sampled = balanced_research_sample_by_exposure(rows, 2, {}, ("dataset", "reader", "phase1"))
+
+    assert len({research_case_patient_key(row) for row in sampled}) == 2
 
 
 def test_volts_to_microvolts_is_single_scale_conversion() -> None:
