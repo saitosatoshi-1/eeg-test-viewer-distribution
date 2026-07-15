@@ -95,6 +95,43 @@ JSONには、各エポックで三択を選んだ瞬間の設定を `settingsAtA
 - モンタージュ切り替え時の先読み/キャッシュが過剰な負荷になっていないか。
 - 個人情報、Temple University由来データ、管理コードがGitHubへ漏れない構造になっているか。
 
+## 今回お願いしたいリファクタリング範囲
+
+主に波形描画に関与する部分を、挙動を変えずにレビュー・整理していただきたいです。
+
+Main request in English: please review and refactor the waveform rendering path without changing behavior, especially around montage construction, display filters, sensitivity/time constant/high-frequency/AC controls, and canvas drawing.
+
+優先して見ていただきたい範囲:
+
+- 波形データ取得から描画までの流れ。
+  - `static/app.js`: `loadWindow`, `applyWindowData`, `draw`, `drawWaveColumn`, `drawViewerWaveformPath`
+  - `app.py`: `EEGStore.window`, `EEGStore.window_multi`
+- モンタージュ構成とチャンネル名処理。
+  - `eeg_montage.py`: `build_montage_traces`, `channel_validation_payload`, `channel_configuration_payload`
+  - 特に横双極誘導はACNS TB-18.2相当の構成を期待しています。
+- 感度、時定数、HF、ACフィルター、表示スケールの操作反映。
+  - `static/app.js`: `handleFilterControlChange`, `filterControlKey`, `sensitivityValue`, `displayTraces`
+  - `eeg_montage.py`: `tc_to_highpass`, `hf_to_lowpass`, `apply_display_filters`
+- キャッシュと先読み。
+  - `static/app.js`: `windowCacheKey`, `rememberWindowCache`, `clearWindowCacheForCurrentRecording`, `prefetchResearchWindow`
+  - フィルターやモンタージュ変更後に古い波形が表示されないかを確認したいです。
+- スマホ表示での描画負荷と可読性。
+  - canvasサイズ、行間、ラベル、操作UIが小さい画面でも破綻しないかを確認したいです。
+
+できれば避けたいこと:
+
+- 研究仕様、JSON形式、サンプリング仕様の変更。
+- UI全体の作り直し。
+- 波形の極性や単位変換を理由なく変更すること。
+- 大きなフレームワーク導入。
+
+歓迎する整理:
+
+- `static/app.js` の波形描画関数を小さなファイルに分ける提案。
+- モンタージュ定義、表示フィルター、canvas描画の責務境界を明確にする提案。
+- 変更前後で同じケース・同じ設定なら同じ波形が出ることを確認できる簡単なテスト方針。
+- 研究者が確認すべき点と、エンジニア側だけで判断できる点の切り分け。
+
 ## 今は避けたい作業
 
 - 大規模なファイル分割。
