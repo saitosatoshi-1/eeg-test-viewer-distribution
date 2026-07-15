@@ -405,7 +405,8 @@ def montage_status_payload(montage: str, ch_names: list[str], traces: list[dict[
 def apply_display_filters(
     data: np.ndarray, ch_names: list[str], sfreq: float, tc: str, hf: str, ac: str, warnings: list[str]
 ) -> tuple[np.ndarray, list[str]]:
-    if data.shape[1] < 16 or ensure_signal() is None:
+    sig = ensure_signal()
+    if data.shape[1] < 16 or sig is None:
         if tc.upper() != "OFF" or hf.upper() != "OFF" or ac.upper() != "OFF":
             warnings.append("SciPy filter support is unavailable or the window is too short; filters skipped.")
         return data, ch_names
@@ -417,18 +418,18 @@ def apply_display_filters(
     try:
         non_ecg_indices = [idx for idx in range(filtered.shape[0]) if idx not in ecg_indices]
         if hp and hp < sfreq / 2 and non_ecg_indices:
-            sos = signal.butter(2, hp, btype="highpass", fs=sfreq, output="sos")
-            filtered[non_ecg_indices] = signal.sosfiltfilt(sos, filtered[non_ecg_indices], axis=1)
+            sos = sig.butter(2, hp, btype="highpass", fs=sfreq, output="sos")
+            filtered[non_ecg_indices] = sig.sosfiltfilt(sos, filtered[non_ecg_indices], axis=1)
         if lp and lp < sfreq / 2 and non_ecg_indices:
-            sos = signal.butter(4, lp, btype="lowpass", fs=sfreq, output="sos")
-            filtered[non_ecg_indices] = signal.sosfiltfilt(sos, filtered[non_ecg_indices], axis=1)
+            sos = sig.butter(4, lp, btype="lowpass", fs=sfreq, output="sos")
+            filtered[non_ecg_indices] = sig.sosfiltfilt(sos, filtered[non_ecg_indices], axis=1)
         ecg_hp = tc_to_highpass(str(ECG_TC_SECONDS))
         if ecg_indices and ecg_hp and ecg_hp < sfreq / 2:
-            sos = signal.butter(2, ecg_hp, btype="highpass", fs=sfreq, output="sos")
-            filtered[ecg_indices] = signal.sosfiltfilt(sos, filtered[ecg_indices], axis=1)
+            sos = sig.butter(2, ecg_hp, btype="highpass", fs=sfreq, output="sos")
+            filtered[ecg_indices] = sig.sosfiltfilt(sos, filtered[ecg_indices], axis=1)
         if ecg_indices and ECG_LOWPASS_HZ < sfreq / 2:
-            sos = signal.butter(4, ECG_LOWPASS_HZ, btype="lowpass", fs=sfreq, output="sos")
-            filtered[ecg_indices] = signal.sosfiltfilt(sos, filtered[ecg_indices], axis=1)
+            sos = sig.butter(4, ECG_LOWPASS_HZ, btype="lowpass", fs=sfreq, output="sos")
+            filtered[ecg_indices] = sig.sosfiltfilt(sos, filtered[ecg_indices], axis=1)
         notch_freqs: list[float] = []
         if ac == "50":
             notch_freqs = [50.0]
@@ -440,8 +441,8 @@ def apply_display_filters(
             notch_freqs = [60.0, 120.0]
         for freq in notch_freqs:
             if freq < sfreq / 2:
-                b, a = signal.iirnotch(freq, Q=30.0, fs=sfreq)
-                filtered = signal.filtfilt(b, a, filtered, axis=1)
+                b, a = sig.iirnotch(freq, Q=30.0, fs=sfreq)
+                filtered = sig.filtfilt(b, a, filtered, axis=1)
     except Exception as exc:
         warnings.append(f"Display filter skipped: {exc}")
         return data, ch_names

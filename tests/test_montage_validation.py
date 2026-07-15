@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
+import eeg_montage
 from eeg_montage import (
     SCALP_ORDER,
+    apply_display_filters,
     build_montage_traces,
     channel_configuration_payload,
     channel_validation_payload,
@@ -152,3 +154,44 @@ def test_balanced_sampling_avoids_same_patient_when_possible() -> None:
 
 def test_volts_to_microvolts_is_single_scale_conversion() -> None:
     assert volts_to_microvolts(np.asarray([1e-6, -2e-6])).tolist() == [1.0, -2.0]
+
+
+def test_apply_display_filters_uses_loaded_signal_module() -> None:
+    class FakeSignal:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+
+        def butter(self, *args, **kwargs):
+            self.calls.append(("butter", kwargs.get("btype")))
+            return ("sos", kwargs.get("btype"))
+
+        def sosfiltfilt(self, sos, data, axis=1):
+            self.calls.append(("sosfiltfilt", sos))
+            return data + 1.0
+
+        def iirnotch(self, freq, Q, fs):
+            self.calls.append(("iirnotch", freq))
+            return ("b", freq), ("a", freq)
+
+        def filtfilt(self, b, a, data, axis=1):
+            self.calls.append(("filtfilt", b[1]))
+            return data + 1.0
+
+    fake = FakeSignal()
+    previous_signal = eeg_montage._signal
+    previous_attempted = eeg_montage._SIGNAL_IMPORT_ATTEMPTED
+    try:
+        eeg_montage._signal = fake
+        eeg_montage._SIGNAL_IMPORT_ATTEMPTED = True
+        warnings: list[str] = []
+        data = np.ones((2, 64), dtype=float)
+        filtered, _ = apply_display_filters(data, ["Fp1", "Fp2"], 256.0, "0.3", "30", "60", warnings)
+    finally:
+        eeg_montage._signal = previous_signal
+        eeg_montage._SIGNAL_IMPORT_ATTEMPTED = previous_attempted
+
+    assert not warnings
+    assert filtered.mean() > data.mean()
+    assert ("butter", "highpass") in fake.calls
+    assert ("butter", "lowpass") in fake.calls
+    assert ("iirnotch", 60.0) in fake.calls
