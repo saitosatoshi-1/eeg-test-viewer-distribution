@@ -34,13 +34,23 @@ def encoded_link(dataset_id: str) -> str:
 def update_static_app(dataset_id: str) -> bool:
     path = ROOT / "static" / "app.js"
     text = read_text(path)
-    text = re.sub(
-        r'const DEFAULT_PUBLIC_DATASET_PATH = "private:[^"]+";',
-        f'const DEFAULT_PUBLIC_DATASET_PATH = "private:{dataset_id}";',
-        text,
-    )
+    replacements = [
+        (
+            r'const DEFAULT_PUBLIC_TEST_DATASET_PATH = "private:[^"]+";',
+            f'const DEFAULT_PUBLIC_TEST_DATASET_PATH = "private:{dataset_id}";',
+        ),
+        (
+            r'const DEFAULT_PUBLIC_VALIDATION_DATASET_PATH = "private:[^"]+";',
+            f'const DEFAULT_PUBLIC_VALIDATION_DATASET_PATH = "private:{dataset_id}";',
+        ),
+        (
+            r'const DEFAULT_PUBLIC_DATASET_PATH = "private:[^"]+";',
+            f'const DEFAULT_PUBLIC_DATASET_PATH = "private:{dataset_id}";',
+        ),
+    ]
+    for pattern, value in replacements:
+        text = re.sub(pattern, value, text)
     return write_text_if_changed(path, text)
-
 
 def update_static_index(dataset_id: str, cache_tag: str) -> bool:
     path = ROOT / "static" / "index.html"
