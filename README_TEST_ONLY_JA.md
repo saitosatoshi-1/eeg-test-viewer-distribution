@@ -5,7 +5,7 @@
 ## 共同研究者用リンク
 
 ```text
-https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
+https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 ```
 
 共有時は `access=ncnp` を付けません。リンクを開くとパスワード入力画面が表示され、`ncnp` 入力後にテスト画面へ進みます。
@@ -30,9 +30,9 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
 
 ## データ方針
 
-Temple University由来など再配布禁止の可能性があるEDFはGitHubに置きません。現在のテスト用データは `private:validation_tuea_v2` としてRenderの永続ディスク上に置く運用です。以前のデータ `private:validation_tuea_v1` と仮データ `private:gakkai_v1` は上書きせず残しています。
+Temple University由来など再配布禁止の可能性があるEDFはGitHubに置きません。現在のテスト/validation用データは `private:validation_v1` としてRenderの永続ディスク上に置く運用です。過去datasetは現在の運用対象ではありません。
 
-データセットを差し替える・追加する場合は `DATASET_SWAP.md` を参照します。既存データを上書きせず、`validation_tuea_v2` のように新しいdataset idを作るのを基本方針とします。
+データセットを差し替える・追加する場合は `DATASET_SWAP.md` を参照します。過去datasetの再現性が不要な場合は、現在のdataset idを更新する運用で構いません。
 
 ## レビュー前の方針
 

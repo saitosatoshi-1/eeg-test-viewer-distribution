@@ -5,8 +5,8 @@
   "appName": "EEG Test Viewer",
   "deployment": "Render web service",
   "renderUrl": "https://eeg-test-viewer.onrender.com/",
-  "sharedTestLink": "https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2",
-  "dataset": "private:validation_tuea_v2",
+  "sharedTestLink": "https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1",
+  "dataset": "private:validation_v1",
   "codexInstructionFiles": [
     "AGENTS.md",
     "CODEX.md"

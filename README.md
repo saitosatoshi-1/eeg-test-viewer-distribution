@@ -7,7 +7,7 @@ Web-based EEG reading test and cut-epoch validation viewer for research use. Thi
 Use the password-protected link when sharing the viewer:
 
 ```text
-https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
+https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 ```
 
 The link shows a password screen. Enter `ncnp` to set an HTTP-only access cookie. Do not place the password in the URL.
@@ -15,8 +15,8 @@ The link shows a password screen. Enter `ncnp` to set an HTTP-only access cookie
 Use URL parameters to select the workflow:
 
 ```text
-https://eeg-test-viewer.onrender.com/?mode=test&dataset=private%3Avalidation_tuea_v2
-https://eeg-test-viewer.onrender.com/?mode=validation&dataset=private%3Avalidation_tuea_v2
+https://eeg-test-viewer.onrender.com/?mode=test&dataset=private%3Avalidation_v1
+https://eeg-test-viewer.onrender.com/?mode=validation&dataset=private%3Avalidation_v1
 ```
 
 `mode` defaults to `test` for compatibility. Validation asks only for reviewer name and evaluation target, then records `採用` / `除外` decisions. Results are saved separately from test submissions under `/data/research/validation_results/<datasetId>/<reviewerName>.json`.
@@ -38,7 +38,7 @@ Old Windows/macOS installer bundles, desktop launchers, and packaged distributio
 Typical dataset path for the viewer:
 
 ```text
-private:validation_tuea_v2
+private:validation_v1
 ```
 
 ## Local Development

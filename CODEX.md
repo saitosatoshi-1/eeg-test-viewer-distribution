@@ -8,7 +8,7 @@ Use this project root:
 
 Current shared test link:
 
-`https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2`
+`https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1`
 
 Before asking an engineer for review, point them to `REVIEW_NOTES_JA.md`. Prefer small, behavior-preserving cleanup over large refactors until the research workflow is stable.
 

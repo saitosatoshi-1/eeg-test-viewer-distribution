@@ -2,60 +2,39 @@
 
 This repository does not store EDF data in GitHub. Private EDF datasets are uploaded to the Render persistent disk and referenced as `private:<dataset_id>`.
 
-## Current Render Datasets
+## Current Render Dataset
 
-- `private:gakkai_v1`
-  - Earlier temporary Gakkai dataset.
-  - Keep it unless the user explicitly asks to replace or remove it.
-- `private:validation_tuea_v1`
-  - Uploaded on 2026-06-29.
+- `private:validation_v1`
+  - Prepared on 2026-07-15 from the validation source folders.
+  - Current shared/default dataset for both test mode and validation mode.
   - Source folders on Saito's Mac:
-    - epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/epilepsy`
-    - no_epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/no_epilepsy/TUEA`
-  - Counts: epilepsy 36, no_epilepsy 30, total 66.
-  - Previous validation dataset. Keep it for reproducibility.
-- `private:validation_tuea_v2`
-  - Uploaded on 2026-06-29; refreshed from the validation source folders on 2026-07-09.
-  - Current shared/default dataset.
-  - Source folders on Saito's Mac:
-    - epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/epilepsy`
-    - no_epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/no_epilepsy`
-  - Counts: epilepsy 36, no_epilepsy 30, total 66.
-  - Test URL:
+    - epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation/epilepsy`
+    - no_epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation/no_epilepsy`
+  - Counts: epilepsy 30, no_epilepsy 30, total 60.
+  - URLs:
 
 ```text
-https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
-```
-- `private:validation_before_v1`
-  - Uploaded on 2026-07-01.
-  - Validation dataset from:
-    - epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/epilepsy`
-    - no_epilepsy: `/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/no_epilepsy`
-  - Counts: epilepsy 31, no_epilepsy 30, total 61.
-  - Validation URLs:
-
-```text
-https://eeg-test-viewer.onrender.com/?mode=validation&dataset=private%3Avalidation_before_v1
-https://eeg-test-viewer.onrender.com/?mode=test&dataset=private%3Avalidation_before_v1
+https://eeg-test-viewer.onrender.com/?mode=test&dataset=private%3Avalidation_v1
+https://eeg-test-viewer.onrender.com/?mode=validation&dataset=private%3Avalidation_v1
 ```
 
 ## Standard Rule
 
-When the user wants to try a new dataset, do not overwrite an existing dataset unless explicitly requested. Use a new dataset id, for example:
+When the user wants to try a new dataset, use the current dataset id when they do not need to preserve older datasets. If a reproducible comparison is needed, use a new dataset id, for example:
 
 ```text
-validation_tuea_v2
-validation_tuea_v3
+validation_v1
+validation_v2
 ```
 
-This keeps old test links reproducible and avoids accidental data loss.
+Old private datasets are not part of the active workflow unless the user explicitly asks to keep or restore them.
 
 After uploading and verifying a new dataset, update the viewer default and shared links with:
 
 ```bash
 python3 tools/set_default_dataset.py \
-  --dataset-id validation_tuea_v2 \
-  --cache-tag 20260629-dataset2
+  --dataset-id validation_v1 \
+  --cache-tag 20260715-validation-v1
 ```
 
 This updates `static/app.js`, `static/index.html`, `APP_ID.json`, and the main instruction/readme files together. Do this before committing and pushing, otherwise links without a `dataset=` query can fall back to an older dataset.
@@ -71,16 +50,16 @@ Example:
 
 ```bash
 python3 tools/build_private_dataset_zip.py \
-  --epilepsy "/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/epilepsy" \
-  --no-epilepsy "/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation前/no_epilepsy/TUEA" \
-  --out /tmp/validation_tuea_v2_private.zip
+  --epilepsy "/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation/epilepsy" \
+  --no-epilepsy "/Users/saitosatoshi/Desktop/神経/NCNP/研究/montage/test_data/validation/no_epilepsy" \
+  --out /tmp/validation_v1_private.zip
 ```
 
 Check the zip before upload:
 
 ```bash
-ls -lh /tmp/validation_tuea_v2_private.zip
-zipinfo -1 /tmp/validation_tuea_v2_private.zip | sort | head -80
+ls -lh /tmp/validation_v1_private.zip
+zipinfo -1 /tmp/validation_v1_private.zip | sort | head -80
 ```
 
 ## Upload To Render
@@ -93,9 +72,9 @@ Example:
 EEG_VIEWER_ADMIN_CODE='<actual Render admin code>' python3 tools/upload_private_dataset.py \
   --viewer-url "https://eeg-test-viewer.onrender.com" \
   --access-code ncnp \
-  --dataset-id validation_tuea_v2 \
-  --name "Validation TUEA v2" \
-  --zip /tmp/validation_tuea_v2_private.zip
+  --dataset-id validation_v1 \
+  --name "Validation v1" \
+  --zip /tmp/validation_v1_private.zip
 ```
 
 If the command shows a Japanese placeholder error, replace `<管理コード>` or `<actual Render admin code>` with the real value from the Render Dashboard environment variables.
@@ -107,9 +86,9 @@ After upload, confirm the returned JSON. Expected shape:
 ```json
 {
   "ok": true,
-  "datasetPath": "private:validation_tuea_v2",
-  "caseCount": 66,
-  "epilepsyCount": 36,
+  "datasetPath": "private:validation_v1",
+  "caseCount": 60,
+  "epilepsyCount": 30,
   "noEpilepsyCount": 30
 }
 ```
@@ -117,7 +96,7 @@ After upload, confirm the returned JSON. Expected shape:
 Then open:
 
 ```text
-https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
+https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 ```
 
 For API checks, log in first and use the `eeg-viewer-token` from the HTML as `X-EEG-Viewer-Token`.
@@ -155,13 +134,13 @@ Render stores submitted JSON files under:
 For example:
 
 ```text
-/data/research/submitted_results/validation_tuea_v1/
+/data/research/submitted_results/validation_v1/
 ```
 
 Result filenames include the dataset id, completion timestamp, and reader name:
 
 ```text
-validation_tuea_v1_20260629_035027_Taro_Yamada.json
+validation_v1_20260715_035027_Taro_Yamada.json
 ```
 
 This makes it clear which dataset version each participant belongs to after datasets are swapped. The participant download/share filename uses the same pattern.

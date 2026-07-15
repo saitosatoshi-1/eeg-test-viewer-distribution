@@ -18,7 +18,7 @@ Render URL:
 
 Shared test link:
 
-`https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2`
+`https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1`
 
 ## Current Scope
 
@@ -30,7 +30,7 @@ Keep this repository focused on the web test workflow:
 - `Dockerfile`, `render.yaml`, and `DEPLOY_WEB.md`
 - documentation for Render and private dataset operation
 
-For dataset replacement or adding a new Render private dataset, read `DATASET_SWAP.md` first. Prefer adding a new `private:<dataset_id>` such as `validation_tuea_v2` instead of overwriting an existing dataset.
+For dataset replacement or adding a new Render private dataset, read `DATASET_SWAP.md` first. Old private datasets are not part of the active workflow unless the user explicitly asks to preserve or restore them.
 
 Do not reintroduce old Windows/macOS distribution bundles, launchers, installer scripts, or packaged collaborator folders unless the user explicitly asks to rebuild desktop distribution.
 

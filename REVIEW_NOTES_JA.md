@@ -11,20 +11,20 @@
 ## 現在の共有リンク
 
 ```text
-https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_tuea_v2
+https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 ```
 
 共有時はURLにアクセスコードを含めません。参加者はパスワード画面で `ncnp` を入力します。
 
 ## 現在のデータセット
 
-- dataset id: `private:validation_tuea_v2`
-- 由来: validation前データ
+- dataset id: `private:validation_v1`
+- 由来: validationデータ
 - 構成: `epilepsy` と `no_epilepsy`
 - 現在の想定: epilepsy 30件、no_epilepsy 30件、合計60件
 - EDFはGitHubにコミットしません。
 
-データセット差し替え手順は `DATASET_SWAP.md` を参照します。既存datasetを上書きせず、新しいdataset idを作る運用を基本とします。
+データセット差し替え手順は `DATASET_SWAP.md` を参照します。過去datasetは現在の運用対象ではありません。
 
 ## テスト手順の仕様
 

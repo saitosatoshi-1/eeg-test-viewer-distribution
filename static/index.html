@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260709-reading-unit" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260715-validation-v1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -128,7 +128,7 @@
             <div class="research-setup-panel">
               <div class="research-setup-title">テスト設定</div>
               <div class="research-setup-message" id="researchSetupMessage" role="status" aria-live="polite"></div>
-              <input id="researchSetupDatasetPathInput" type="hidden" value="private:test_tuea_v2" />
+              <input id="researchSetupDatasetPathInput" type="hidden" value="private:validation_v1" />
               <div class="validation-set-control" id="validationSetControl" hidden>
                 <label>検証データセット<select id="validationSetSelect" aria-label="Validation dataset"><option value="ied" selected>IEDデータセット</option><option value="artifact">アーチファクトデータセット</option></select></label>
               </div>
@@ -245,6 +245,6 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/app.js?v=20260709-reading-unit"></script>
+    <script src="/static/app.js?v=20260715-validation-v1"></script>
   </body>
 </html>

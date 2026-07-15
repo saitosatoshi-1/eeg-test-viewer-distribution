@@ -102,9 +102,7 @@ VALIDATION_RESULTS_DIR = RESEARCH_DIR / "validation_results"
 PRIVATE_DATASET_DIR = RESEARCH_DIR / "private_datasets"
 VALIDATION_WORKFLOW_ENABLED = env_flag("EEG_VIEWER_VALIDATION_WORKFLOW", default=env_flag("EEG_VIEWER_PUBLIC_MODE"))
 PRIVATE_DATASET_ADMIN_ENABLED = env_flag("EEG_VIEWER_PRIVATE_DATASET_ADMIN", default=env_flag("EEG_VIEWER_PUBLIC_MODE"))
-PRIVATE_DATASET_ALIASES = {
-    "test_tuea_v2": "validation_tuea_v2",
-}
+PRIVATE_DATASET_ALIASES: dict[str, str] = {}
 USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
