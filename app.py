@@ -2132,7 +2132,7 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     analysis_montage_usage = research_montage_sequence_payload(payload.get("analysisMontageUsage"))
     analysis_montage_durations = research_montage_duration_payload(payload.get("analysisMontageDurationsSec"))
     montage_timeline = research_montage_sequence_payload(payload.get("montageTimeline"))
-    montage_switches = research_montage_sequence_payload(payload.get("montageSwitches"))
+    montage_switches = research_montage_switch_payload(payload.get("montageSwitches"))
     if not montage_sequence and montage_switches:
         montage_sequence = [
             {
@@ -2410,6 +2410,19 @@ def research_montage_sequence_payload(value: Any) -> list[dict[str, Any]]:
                 item[key] = row.get(key)
         out.append(item)
     return out
+
+
+def research_montage_switch_payload(value: Any) -> list[dict[str, Any]]:
+    switches: list[dict[str, Any]] = []
+    for row in research_montage_sequence_payload(value):
+        from_montage = str(row.get("from") or "").strip()
+        to_montage = str(row.get("to") or "").strip()
+        if not from_montage or not to_montage or from_montage == to_montage:
+            continue
+        item = dict(row)
+        item["index"] = len(switches) + 1
+        switches.append(item)
+    return switches
 
 
 def response_reader_profile(*responses: dict[str, Any]) -> dict[str, Any]:

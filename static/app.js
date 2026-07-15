@@ -1155,12 +1155,7 @@ function startResearchMontageTiming() {
     activeMontages,
     totalsSec: {},
     timeline: [],
-    switches: activeMontages.map((montage, index) => ({
-      index: index + 1,
-      atSec: 0,
-      from: "",
-      to: montage,
-    })),
+    switches: [],
   };
 }
 
