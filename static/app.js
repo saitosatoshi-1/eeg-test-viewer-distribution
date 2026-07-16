@@ -1192,6 +1192,30 @@ function updateResearchMontageTiming(nextMontages = currentResearchDisplayedMont
   timing.activeMontages = nextUnique;
 }
 
+function mergeAdjacentMontageTimeline(rows = []) {
+  const merged = [];
+  for (const row of rows || []) {
+    const montage = String(row.montage || "").trim();
+    const durationSec = Number(row.durationSec || 0);
+    if (!montage || durationSec <= 0) continue;
+    const normalized = {
+      index: merged.length + 1,
+      montage,
+      startSec: Number(Number(row.startSec || 0).toFixed(3)),
+      endSec: Number(Number(row.endSec || 0).toFixed(3)),
+      durationSec: Number(durationSec.toFixed(3)),
+    };
+    const previous = merged[merged.length - 1];
+    if (previous?.montage === montage) {
+      previous.endSec = normalized.endSec;
+      previous.durationSec = Number(Number(previous.durationSec + normalized.durationSec).toFixed(3));
+      continue;
+    }
+    merged.push(normalized);
+  }
+  return merged.map((row, index) => ({ ...row, index: index + 1 }));
+}
+
 function researchMontageTimingPayload() {
   updateResearchMontageTiming();
   const totals = {};
@@ -1204,7 +1228,7 @@ function researchMontageTimingPayload() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([montage, seconds]) => `${montage}:${seconds}`)
     .join(";");
-  const timeline = (timing?.timeline || []).filter((row) => Number(row.durationSec || 0) > 0);
+  const timeline = mergeAdjacentMontageTimeline(timing?.timeline || []);
   const analysisTimeline = timeline.filter((row) => Number(row.durationSec || 0) >= 1);
   const switches = timing?.switches || [];
   const montageUsage = timeline.map((row, index) => ({
