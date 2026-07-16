@@ -14,6 +14,7 @@ const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
 const ECG_AUTO_MAX_UV_PER_MM = 250;
 const MOBILE_WINDOW_MAX_POINTS = 1500;
+const MOBILE_HF_OFF_WINDOW_MAX_POINTS = 5000;
 const MOBILE_MULTI_MONTAGE_MAX_POINTS = 1000;
 const DESKTOP_WINDOW_MAX_POINTS = 5000;
 const MAX_WINDOW_CACHE_ENTRIES = 72;
@@ -592,6 +593,7 @@ function preferredResearchWindowMontages(activeMontage = activeMontageValue()) {
 
 function windowMaxPoints() {
   if (!isMobileViewport()) return DESKTOP_WINDOW_MAX_POINTS;
+  if (els.hfSelect?.value === "OFF") return MOBILE_HF_OFF_WINDOW_MAX_POINTS;
   return isMultiMontageMode() ? MOBILE_MULTI_MONTAGE_MAX_POINTS : MOBILE_WINDOW_MAX_POINTS;
 }
 
@@ -3761,7 +3763,7 @@ function draw() {
     els.timeReadout.textContent = `${formatSec(start)} - ${formatSec(start + duration)}`;
   }
   if (els.calReadout) {
-    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · AC ${acFilterLabel()} · ${els.paperSelect?.value || "30"} mm/s`;
+    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · HF ${hfText()} · AC ${acFilterLabel()} · ${els.paperSelect?.value || "30"} mm/s`;
   }
   if (!traces.length || !times.length) {
     ctx.fillStyle = "#68707c";
