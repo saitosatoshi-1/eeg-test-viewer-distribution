@@ -4,6 +4,7 @@ const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
 const RESEARCH_PENDING_RESPONSES_KEY = "eegViewerPendingResearchResponses.v1";
 const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
+const RESEARCH_RESULT_EMAIL_TO = "satoshi.saito@ncnp.go.jp";
 const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
 const TEST_ONLY_DISTRIBUTION = document.body.classList.contains("test-only-distribution");
 const PUBLIC_TEST_QUESTION_COUNT = 20;
@@ -1343,6 +1344,10 @@ function updateResearchEmailBody() {
   if (els.researchEmailBody) els.researchEmailBody.value = researchEmailBodyText();
 }
 
+function openResearchResultEmail(subject, bodyText) {
+  window.location.href = `mailto:${RESEARCH_RESULT_EMAIL_TO}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
+}
+
 function markResearchTestStarted(at = new Date()) {
   state.researchTestStartedAt = at.toISOString();
   state.researchTestStartedMs = at.getTime();
@@ -1400,20 +1405,6 @@ function downloadResearchResultBackup() {
     // Ignore malformed backup.
   }
   return null;
-}
-
-async function shareJsonFile(filename, text, title, bodyText) {
-  const file = new File([text], filename, { type: "text/plain" });
-  const shareData = {
-    title,
-    text: bodyText,
-    files: [file],
-  };
-  if (navigator.canShare?.({ files: [file] }) && navigator.share) {
-    await navigator.share(shareData);
-    return true;
-  }
-  return false;
 }
 
 function isMobileViewport() {
@@ -2774,17 +2765,12 @@ async function shareResearchJsonByEmail() {
       setStatus("Validation結果JSONファイルを共有準備中...", { busy: true });
       const jsonText = await fetchText(`/api/research/validation/export.json?${qs({ dataset: datasetPath, reviewerId, validationSet: activeValidationDatasetKind() })}`);
       saveResearchResultBackup(jsonFilename, jsonText);
-      if (await shareJsonFile(jsonFilename, jsonText, `脳波Validation結果（${validationKindLabel}）`, researchEmailBodyText(profile))) {
-        if (els.researchSavedCsvName) els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
-        setStatus(`Validation結果JSONファイルを共有しました: ${jsonFilename}`);
-        return;
-      }
       downloadTextFile(jsonFilename, jsonText);
-      window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent(`脳波Validation結果（${validationKindLabel}）`)}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
+      openResearchResultEmail(`脳波Validation結果（${validationKindLabel}）`, researchEmailBodyText(profile));
       if (els.researchSavedCsvName) {
-        els.researchSavedCsvName.textContent = `${jsonFilename}をダウンロードしました。メールに添付してください。`;
+        els.researchSavedCsvName.textContent = `${jsonFilename}をダウンロードしました。宛先（${RESEARCH_RESULT_EMAIL_TO}）入力済みのメールに添付してください。`;
       }
-      setStatus("Validation結果JSONファイルをダウンロードしました。メールに添付してください");
+      setStatus("宛先入力済みのメール画面を開きました。JSONファイルを添付してください");
     } catch (err) {
       if (err?.name === "AbortError") {
         setStatus("JSONファイル共有をキャンセルしました");
@@ -2809,15 +2795,10 @@ async function shareResearchJsonByEmail() {
     await retryPendingResearchResponses();
     const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
     saveResearchResultBackup(jsonFilename, jsonText);
-    if (await shareJsonFile(jsonFilename, jsonText, "脳波読影テスト結果", researchEmailBodyText(profile))) {
-      if (els.researchSavedCsvName) els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}`;
-      setStatus(`結果JSONファイルを共有しました: ${jsonFilename}`);
-      return;
-    }
     downloadTextFile(jsonFilename, jsonText);
-    window.location.href = `mailto:satoshi.saito@ncnp.go.jp?subject=${encodeURIComponent("脳波読影テスト結果")}&body=${encodeURIComponent(researchEmailBodyText(profile))}`;
+    openResearchResultEmail("脳波読影テスト結果", researchEmailBodyText(profile));
     if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = `${jsonFilename}をダウンロードしました。開いたメールに添付してください。`;
+      els.researchSavedCsvName.textContent = `${jsonFilename}をダウンロードしました。宛先（${RESEARCH_RESULT_EMAIL_TO}）入力済みのメールに添付してください。`;
     }
     setStatus("宛先入力済みのメール画面を開きました。JSONファイルを添付してください");
   } catch (err) {
