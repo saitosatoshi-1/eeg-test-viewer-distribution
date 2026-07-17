@@ -859,7 +859,7 @@ function updateEpilepsyCenterDurationRequirement() {
   els.researchEpilepsyCenterTrainingDurationInput.disabled = !hasTraining;
   els.researchEpilepsyCenterTrainingDurationInput.required = hasTraining;
   if (!hasTraining) els.researchEpilepsyCenterTrainingDurationInput.value = "";
-  els.researchEpilepsyCenterTrainingDurationInput.placeholder = hasTraining ? "例: 6か月、2年" : "勤務歴なしの場合は不要";
+  els.researchEpilepsyCenterTrainingDurationInput.placeholder = hasTraining ? "例: 6か月、2年" : "判読歴なしの場合は不要";
 }
 
 function validateResearchProfileForStart() {
