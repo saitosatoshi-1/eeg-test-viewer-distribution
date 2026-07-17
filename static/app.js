@@ -647,12 +647,13 @@ function scheduleFilterRefresh(source = "filter", options = {}) {
 
 async function handleFilterControlChange(source = "change") {
   state.lastFilterControlKey = filterControlKey();
-  clearWindowCacheForCurrentRecording();
   resetResearchPrefetch();
   renderStatus();
   forceViewerRepaint();
   setStatus(`Loading filters TC ${tcText()} / HF ${hfText()} / AC ${acFilterLabel()}...`, { busy: true, progress: 70 });
-  await loadWindow();
+  // 現在表示中のモンタージュを先に更新し、残りは裏で再取得する。
+  await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
+  scheduleCurrentResearchWindowPrefetch();
   scheduleResearchPrefetch(state.researchCaseIndex);
   forceViewerRepaint();
 }
@@ -3498,10 +3499,10 @@ function researchWindowPrefetchParams(recordId, item, options = {}) {
     duration,
     montage,
     montages,
-    tc: options.tc || "0.3",
-    hf: options.hf || "120",
-    ac: normalizeAcValue(options.ac || normalizeAcSelect()),
-    ecg: "1",
+    tc: options.tc ?? els.tcSelect?.value ?? "0.3",
+    hf: options.hf ?? els.hfSelect?.value ?? "120",
+    ac: normalizeAcValue(options.ac ?? normalizeAcSelect()),
+    ecg: options.ecg ?? (els.ecgToggle?.checked ? "1" : "0"),
     maxPoints: options.maxPoints || windowMaxPoints(),
     strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
   };
@@ -3611,6 +3612,28 @@ function scheduleResearchPrefetch(aroundIndex = state.researchCaseIndex) {
   enqueueResearchPrefetchCases(rest);
 }
 
+function scheduleCurrentResearchWindowPrefetch() {
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
+  const item = currentResearchCase();
+  if (!item?.edfPath || !state.recordingId) return;
+  const montage = activeMontageValue();
+  const duration = Number(els.durationSelect?.value || 10) || 10;
+  window.setTimeout(() => {
+    void prefetchResearchWindow(item, {
+      recordId: state.recordingId,
+      start: state.start,
+      duration,
+      montage,
+      montages: preferredResearchWindowMontages(montage).join(","),
+      tc: els.tcSelect?.value || "0.3",
+      hf: els.hfSelect?.value || "120",
+      ac: normalizeAcSelect(),
+      ecg: els.ecgToggle?.checked ? "1" : "0",
+      maxPoints: windowMaxPoints(),
+    });
+  }, 0);
+}
+
 function resetResearchPrefetch(options = {}) {
   state.researchPrefetchRunId += 1;
   state.researchPrefetchActive = false;
@@ -3651,7 +3674,7 @@ function updateMontageAvailabilityFromWindow(data = state.windowData) {
   }
 }
 
-async function loadWindow() {
+async function loadWindow(options = {}) {
   if (!state.recordingId) return;
   if (state.windowLoadInFlight) {
     state.windowLoadPending = true;
@@ -3669,12 +3692,17 @@ async function loadWindow() {
         setStatus("Loading waveform...", { busy: true, progress: 75 });
         const requestedMontage = activeMontageValue();
         const requestedDuration = Number(els.durationSelect?.value || 10) || 10;
+        const requestedMontages = options.activeMontageOnly
+          ? [requestedMontage]
+          : TEST_ONLY_DISTRIBUTION
+            ? preferredResearchWindowMontages(requestedMontage)
+            : preferredWindowMontages(requestedMontage);
         const params = {
           id: state.recordingId,
           start: state.start,
           duration: requestedDuration,
           montage: requestedMontage,
-          montages: TEST_ONLY_DISTRIBUTION ? preferredResearchWindowMontages(requestedMontage).join(",") : preferredWindowMontages(requestedMontage).join(","),
+          montages: requestedMontages.join(","),
           tc: els.tcSelect.value,
           hf: els.hfSelect.value,
           ac: normalizeAcSelect(),
