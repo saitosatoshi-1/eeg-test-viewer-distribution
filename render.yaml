@@ -27,5 +27,7 @@ services:
         value: "512"
       - key: EEG_VIEWER_MAX_RAW_CACHE_RECORDS
         value: "4"
+      - key: EEG_VIEWER_MAX_FILTERED_WINDOW_CACHE_RECORDS
+        value: "8"
       - key: PYTHONDONTWRITEBYTECODE
         value: "1"

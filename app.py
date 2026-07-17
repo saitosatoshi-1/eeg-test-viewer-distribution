@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import gzip
 import hashlib
 import hmac
 import ipaddress
@@ -154,6 +155,7 @@ MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_EEG_BYTES = int(float(os.environ.get("EEG_VIEWER_MAX_REMOTE_EEG_MB", "512")) * 1024 * 1024)
 MAX_RAW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_RAW_CACHE_RECORDS", "8"))))
 MAX_WINDOW_SOURCE_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_WINDOW_SOURCE_CACHE_RECORDS", "16"))))
+MAX_FILTERED_WINDOW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_FILTERED_WINDOW_CACHE_RECORDS", "8"))))
 ALLOWED_REMOTE_HOSTS = {
     host.strip().lower()
     for host in os.environ.get("EEG_VIEWER_ALLOWED_REMOTE_HOSTS", "raw.githubusercontent.com,github.com").split(",")
@@ -243,6 +245,13 @@ def json_safe(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()
     return value
+
+
+def maybe_gzip_http_body(body: bytes, accept_encoding: str, minimum_bytes: int = 16 * 1024) -> tuple[bytes, bool]:
+    """大きいJSONだけをlossless gzip圧縮し、波形転送時間を短縮する。"""
+    if len(body) < minimum_bytes or "gzip" not in str(accept_encoding or "").lower():
+        return body, False
+    return gzip.compress(body, compresslevel=1), True
 
 
 def normalize_path_input(value: Any) -> str:
@@ -675,6 +684,7 @@ class RecordingStore:
         self.user_files: list[Path] = load_user_files()
         self._raw_cache: dict[str, Any] = {}
         self._window_source_cache: dict[tuple[str, float, float], dict[str, Any]] = {}
+        self._filtered_window_cache: dict[tuple[str, float, float, str, str, str], dict[str, Any]] = {}
         self._direct_cache: dict[str, DirectNktInfo] = {}
         self._recordings: dict[str, Recording] = {}
         self._last_refresh_at = 0.0
@@ -1151,6 +1161,48 @@ class RecordingStore:
             self._window_source_cache.pop(oldest, None)
         return payload
 
+    def filtered_window_data(
+        self,
+        record_id: str,
+        start_sec: float,
+        duration_sec: float,
+        data: np.ndarray,
+        ch_names: list[str],
+        sfreq: float,
+        tc: str,
+        hf: str,
+        ac: str,
+    ) -> tuple[np.ndarray, list[str], list[str]]:
+        cache_key = (
+            record_id,
+            round(float(start_sec), 3),
+            round(float(duration_sec), 3),
+            str(tc).upper(),
+            str(hf).upper(),
+            str(ac).lower(),
+        )
+        with self._lock:
+            cached = self._filtered_window_cache.pop(cache_key, None)
+            if cached is not None:
+                self._filtered_window_cache[cache_key] = cached
+                return cached["data"], list(cached["chNames"]), list(cached["warnings"])
+
+        filter_warnings: list[str] = []
+        filtered, filtered_names = apply_display_filters(
+            data, list(ch_names), sfreq, tc, hf, ac, filter_warnings
+        )
+        payload = {
+            "data": filtered,
+            "chNames": list(filtered_names),
+            "warnings": list(filter_warnings),
+        }
+        with self._lock:
+            self._filtered_window_cache[cache_key] = payload
+            while len(self._filtered_window_cache) > MAX_FILTERED_WINDOW_CACHE_RECORDS:
+                oldest = next(iter(self._filtered_window_cache))
+                self._filtered_window_cache.pop(oldest, None)
+        return filtered, list(filtered_names), filter_warnings
+
     def window(
         self,
         record_id: str,
@@ -1191,7 +1243,10 @@ class RecordingStore:
         filter_padding = filter_padding_payload(start, stop, padded_start, padded_stop, sfreq)
         channel_validation = channel_validation_payload(original_ch_names, ch_names)
         channel_configuration = channel_configuration_payload(channel_validation)
-        data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
+        data, ch_names, filter_warnings = self.filtered_window_data(
+            record_id, start_sec, duration_sec, data, ch_names, sfreq, tc, hf, ac
+        )
+        warnings.extend(filter_warnings)
         crop_start = max(0, start - actual_start_sample)
         crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
         data = data[:, crop_start:crop_stop]
@@ -1266,7 +1321,10 @@ class RecordingStore:
         filter_padding = filter_padding_payload(start, stop, padded_start, padded_stop, sfreq)
         channel_validation = channel_validation_payload(original_ch_names, ch_names)
         channel_configuration = channel_configuration_payload(channel_validation)
-        data, ch_names = apply_display_filters(data, ch_names, sfreq, tc, hf, ac, warnings)
+        data, ch_names, filter_warnings = self.filtered_window_data(
+            record_id, start_sec, duration_sec, data, ch_names, sfreq, tc, hf, ac
+        )
+        warnings.extend(filter_warnings)
         crop_start = max(0, start - actual_start_sample)
         crop_stop = min(data.shape[1], crop_start + max(0, stop - start))
         data = data[:, crop_start:crop_stop]
@@ -3302,8 +3360,12 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
 
     def send_json(self, payload: Any, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False, default=json_safe).encode("utf-8")
+        body, compressed = maybe_gzip_http_body(body, self.headers.get("Accept-Encoding", ""))
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Vary", "Accept-Encoding")
+        if compressed:
+            self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Length", str(len(body)))
         self.send_security_headers()
         self.end_headers()
