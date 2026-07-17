@@ -926,8 +926,8 @@ function researchProfile() {
     eegReadingCountUnit: readingCount === "" ? "" : readingUnit,
     monthlyEegReadingCount: monthlyEegReadingCountValue(readingCount, readingUnit),
     annualEegReadingCount: annualEegReadingCountValue(readingCount, readingUnit),
-    epilepsyCenterTraining: els.researchEpilepsyCenterTrainingSelect?.value || "",
-    epilepsyCenterTrainingDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
+    videoEegReadingExperience: els.researchEpilepsyCenterTrainingSelect?.value || "",
+    videoEegReadingExperienceDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
     ethicsNoticeConfirmed: Boolean(els.researchConsentConfirmInput?.checked),
     dataProviderSharingAcknowledged: Boolean(els.researchConsentConfirmInput?.checked),
     dataProviderName: "Temple University, a university in the United States",
@@ -1136,8 +1136,12 @@ function restoreResearchProfile() {
   if (els.researchMonthlyEegReadingCountInput) {
     els.researchMonthlyEegReadingCountInput.value = profile.eegReadingCount ?? profile.monthlyEegReadingCount ?? "";
   }
-  if (els.researchEpilepsyCenterTrainingSelect) els.researchEpilepsyCenterTrainingSelect.value = profile.epilepsyCenterTraining || "";
-  if (els.researchEpilepsyCenterTrainingDurationInput) els.researchEpilepsyCenterTrainingDurationInput.value = profile.epilepsyCenterTrainingDuration || "";
+  if (els.researchEpilepsyCenterTrainingSelect) {
+    els.researchEpilepsyCenterTrainingSelect.value = profile.videoEegReadingExperience || profile.epilepsyCenterTraining || "";
+  }
+  if (els.researchEpilepsyCenterTrainingDurationInput) {
+    els.researchEpilepsyCenterTrainingDurationInput.value = profile.videoEegReadingExperienceDuration || profile.epilepsyCenterTrainingDuration || "";
+  }
   if (els.researchConsentConfirmInput) els.researchConsentConfirmInput.checked = Boolean(profile.ethicsNoticeConfirmed);
 }
 
