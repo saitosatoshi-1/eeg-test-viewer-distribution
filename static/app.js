@@ -883,10 +883,10 @@ function validateResearchProfileForStart() {
     [els.researchMonthlyEegReadingCountInput, "脳波判読件数"],
     [els.researchEpilepsySpecialistSelect, "てんかん専門医・指導医資格"],
     [els.researchClinicalNeurophysEegSpecialistSelect, "臨床神経生理学会脳波専門医・指導医資格"],
-    [els.researchEpilepsyCenterTrainingSelect, "てんかんセンター勤務歴"],
+    [els.researchEpilepsyCenterTrainingSelect, "ビデオ脳波判読歴"],
   ];
   if (els.researchEpilepsyCenterTrainingSelect?.value === "yes") {
-    requiredFields.splice(requiredFields.length - 1, 0, [els.researchEpilepsyCenterTrainingDurationInput, "勤務期間"]);
+    requiredFields.splice(requiredFields.length - 1, 0, [els.researchEpilepsyCenterTrainingDurationInput, "ビデオ脳波判読歴期間"]);
   }
   const missing = requiredFields.filter(([el]) => !String(el?.value ?? "").trim());
   const email = String(els.researchSetupReaderEmailInput?.value || "").trim();
