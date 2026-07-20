@@ -85,6 +85,7 @@ const state = {
   researchTestStartedMs: 0,
   researchTestCompletedAt: "",
   researchResultAutoSubmitted: false,
+  researchPreparedJsonShare: null,
   researchDebriefSubmitted: false,
   researchSaving: false,
   researchRetryingPending: false,
@@ -1353,10 +1354,24 @@ function openResearchResultEmail(subject, bodyText) {
   window.location.href = `mailto:${RESEARCH_RESULT_EMAIL_TO}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
 }
 
+async function shareJsonFile(filename, text, title, bodyText) {
+  if (typeof File !== "function" || typeof navigator.share !== "function") return false;
+  const file = new File([text], filename, { type: "text/plain" });
+  const files = [file];
+  if (typeof navigator.canShare === "function" && !navigator.canShare({ files })) return false;
+  await navigator.share({
+    title,
+    text: `${bodyText}\n\n送信先: ${RESEARCH_RESULT_EMAIL_TO}`,
+    files,
+  });
+  return true;
+}
+
 function markResearchTestStarted(at = new Date()) {
   state.researchTestStartedAt = at.toISOString();
   state.researchTestStartedMs = at.getTime();
   state.researchTestCompletedAt = "";
+  state.researchPreparedJsonShare = null;
 }
 
 function researchTestTimingPayload(completedAt = "") {
@@ -1459,14 +1474,22 @@ function showResearchCompletion() {
   const validation = isValidationWorkflow();
   if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
   if (els.researchCompleteMessage) {
-    els.researchCompleteMessage.hidden = mobile && !validation;
+    els.researchCompleteMessage.hidden = false;
     els.researchCompleteMessage.textContent = validation
       ? "Validation結果JSONファイルをダウンロードし、メールに添付して送ってください。"
-      : (mobile ? "" : "JSONファイルをダウンロードし、メールに添付して送ってください。");
+      : (mobile
+        ? `ボタンを押してメールを選び、JSONファイルを ${RESEARCH_RESULT_EMAIL_TO} へ送ってください。`
+        : "JSONファイルをダウンロードし、メールに添付して送ってください。");
   }
   if (els.researchMailBox) els.researchMailBox.hidden = mobile && !validation;
   if (els.researchCopyEmailBtn) els.researchCopyEmailBtn.hidden = mobile && !validation;
-  if (els.researchShareJsonBtn) els.researchShareJsonBtn.hidden = validation || !mobile;
+  if (els.researchShareJsonBtn) {
+    els.researchShareJsonBtn.hidden = validation || !mobile;
+    els.researchShareJsonBtn.disabled = !validation && mobile && !state.researchPreparedJsonShare;
+    els.researchShareJsonBtn.textContent = els.researchShareJsonBtn.disabled
+      ? "JSONファイルを準備中..."
+      : "JSONファイルをメールで送る";
+  }
   if (els.researchCompleteSaveDesktopBtn) {
     els.researchCompleteSaveDesktopBtn.hidden = mobile && !validation;
     els.researchCompleteSaveDesktopBtn.textContent = "JSONファイルをダウンロード";
@@ -1812,15 +1835,31 @@ async function completeResearchTest() {
     return;
   }
   showResearchCompletion();
-  if (state.researchMode !== "test" || state.researchResultAutoSubmitted) return;
-  state.researchResultAutoSubmitted = true;
-  try {
-    await submitResearchJson({ automatic: true });
-  } catch (err) {
-    if (els.researchSavedCsvName) {
-      els.researchSavedCsvName.textContent = "JSONファイルをダウンロードしてメールに添付してください。";
+  if (state.researchMode !== "test") return;
+  if (!state.researchResultAutoSubmitted) {
+    state.researchResultAutoSubmitted = true;
+    try {
+      await submitResearchJson({ automatic: true });
+    } catch (err) {
+      if (els.researchSavedCsvName) {
+        els.researchSavedCsvName.textContent = "JSONファイルをダウンロードしてメールに添付してください。";
+      }
+      setStatus(`Result auto submit failed: ${err.message}`, { error: true });
     }
-    setStatus(`Result auto submit failed: ${err.message}`, { error: true });
+  }
+  if (isMobileViewport() && !state.researchPreparedJsonShare) {
+    try {
+      await prepareResearchJsonShare();
+    } catch (err) {
+      setStatus(`JSON共有準備に失敗しました: ${err.message}`, { error: true });
+    } finally {
+      if (els.researchShareJsonBtn) {
+        els.researchShareJsonBtn.disabled = false;
+        els.researchShareJsonBtn.textContent = state.researchPreparedJsonShare
+          ? "JSONファイルをメールで送る"
+          : "JSONをダウンロードしてメールを開く";
+      }
+    }
   }
 }
 
@@ -2757,6 +2796,19 @@ async function exportResearchJson() {
   }
 }
 
+async function prepareResearchJsonShare() {
+  const datasetPath = state.researchDatasetPath || "";
+  if (!datasetPath || isValidationWorkflow()) return null;
+  const profile = researchProfile();
+  const readerId = activeResearchReaderId(profile);
+  const filename = researchJsonFilename(readerId, profile);
+  const text = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
+  const payload = { datasetPath, readerId, filename, text };
+  state.researchPreparedJsonShare = payload;
+  saveResearchResultBackup(filename, text);
+  return payload;
+}
+
 async function shareResearchJsonByEmail() {
   const datasetPath = state.researchDatasetPath || "";
   if (!datasetPath) return setStatus("Enter dataset folder path", { error: true });
@@ -2797,9 +2849,23 @@ async function shareResearchJsonByEmail() {
   const jsonFilename = researchJsonFilename(readerId, profile);
   try {
     setStatus("結果JSONファイルをメール送信準備中...", { busy: true });
-    await retryPendingResearchResponses();
-    const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
+    const prepared = state.researchPreparedJsonShare;
+    const preparedMatches = prepared
+      && prepared.datasetPath === datasetPath
+      && prepared.readerId === readerId
+      && prepared.filename === jsonFilename;
+    if (!preparedMatches) await retryPendingResearchResponses();
+    const jsonText = preparedMatches
+      ? prepared.text
+      : await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
     saveResearchResultBackup(jsonFilename, jsonText);
+    if (await shareJsonFile(jsonFilename, jsonText, "脳波読影テスト結果", researchEmailBodyText(profile))) {
+      if (els.researchSavedCsvName) {
+        els.researchSavedCsvName.textContent = `共有しました: ${jsonFilename}。送信先は ${RESEARCH_RESULT_EMAIL_TO} です。`;
+      }
+      setStatus(`結果JSONファイルを共有しました: ${jsonFilename}`);
+      return;
+    }
     downloadTextFile(jsonFilename, jsonText);
     openResearchResultEmail("脳波読影テスト結果", researchEmailBodyText(profile));
     if (els.researchSavedCsvName) {
