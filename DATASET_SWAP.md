@@ -115,11 +115,19 @@ For the current viewer settings:
 - Practice epochs: 2
 - Main test epochs: 20
 - Main test balance: 10 epileptiform and 10 non_epileptiform
-- Sampling: balanced random sampling with assignment exposure counts
-- Within each reader's main 20 epochs, avoid assigning multiple epochs from the same patient/source recording when possible.
+- Sampling: six fixed connected forms (`A`-`F`) with randomized-block form assignment
+- Each form contains 20 cases, and every one of the 60 cases belongs to exactly two forms.
+- Each six-reader assignment block uses every form once; four constrained order variants are rotated across blocks.
+- A reader never receives multiple epochs from the same patient/source recording, including the two practice epochs.
 - Patient/source recording identity is read from `patientId`/`subjectId` if present; otherwise the viewer uses the EDF/recording name before `_start...`.
 
-Note: Creating a validation session through the session API records assignment exposure counts. This is usually fine because future sampling prioritizes less-exposed cases, but avoid unnecessary repeated test-session API calls before formal testing.
+The first formal session freezes the form manifest under `assignments/phase1_fixed-forms-v1.json` before assigning a reader. The manifest is reused unchanged. If case identity, label, or patient identity changes afterward, the viewer stops with an integrity error instead of silently rebuilding the forms.
+
+正式セッションの初回割当前に、6つの固定問題セットを `assignments/phase1_fixed-forms-v1.json` へ保存します。以後は同じセット構成を使用し、症例・ラベル・患者識別情報が変更された場合は自動再生成せず整合性エラーにします。
+
+The compact result JSON uses export version `compact-3`. Each reader contains an `assignment` object with `designVersion`, `formId`, `orderVersion`, `assignmentBlock`, `assignmentPosition`, and `samplingMethod` for audit and analysis.
+
+結果JSONは `compact-3` とし、各読影者の `assignment` にセットID・順序ID・割付ブロック等を記録します。
 
 ## Submitted Result JSON Storage
 

@@ -12,7 +12,13 @@ from eeg_montage import (
     montage_status_payload,
     volts_to_microvolts,
 )
-from research_sampling import balanced_research_sample_by_exposure, research_case_patient_key
+from research_sampling import (
+    RESEARCH_FIXED_FORM_IDS,
+    balanced_research_sample_by_exposure,
+    fixed_research_form_assignment_slot,
+    fixed_research_form_definitions,
+    research_case_patient_key,
+)
 
 
 def sample_data(ch_names: list[str]) -> np.ndarray:
@@ -150,6 +156,40 @@ def test_balanced_sampling_avoids_same_patient_when_possible() -> None:
     sampled = balanced_research_sample_by_exposure(rows, 2, {}, ("dataset", "reader", "phase1"))
 
     assert len({research_case_patient_key(row) for row in sampled}) == 2
+
+
+def test_fixed_forms_are_balanced_connected_and_patient_unique() -> None:
+    rows = []
+    for index in range(30):
+        patient_id = f"patient_{index:02d}"
+        rows.extend([
+            {"caseId": f"epi_{index:02d}", "patientId": patient_id, "labelGroup": "epileptiform"},
+            {"caseId": f"non_{index:02d}", "patientId": patient_id, "labelGroup": "non_epileptiform"},
+        ])
+
+    forms = fixed_research_form_definitions(rows, "validation_v1")
+
+    assert set(forms) == set(RESEARCH_FIXED_FORM_IDS)
+    exposure_counts = {str(row["caseId"]): 0 for row in rows}
+    for form_rows in forms.values():
+        assert len(form_rows) == 20
+        assert sum(row["labelGroup"] == "epileptiform" for row in form_rows) == 10
+        assert sum(row["labelGroup"] == "non_epileptiform" for row in form_rows) == 10
+        patients = [research_case_patient_key(row) for row in form_rows]
+        assert len(patients) == len(set(patients))
+        for row in form_rows:
+            exposure_counts[str(row["caseId"])] += 1
+    assert set(exposure_counts.values()) == {2}
+
+
+def test_fixed_form_assignment_is_balanced_in_each_six_reader_block() -> None:
+    first_block = [fixed_research_form_assignment_slot("validation_v1", index) for index in range(6)]
+    second_block = [fixed_research_form_assignment_slot("validation_v1", index) for index in range(6, 12)]
+
+    assert {row["formId"] for row in first_block} == set(RESEARCH_FIXED_FORM_IDS)
+    assert {row["formId"] for row in second_block} == set(RESEARCH_FIXED_FORM_IDS)
+    assert {row["orderVersion"][-1] for row in first_block} == {"1"}
+    assert {row["orderVersion"][-1] for row in second_block} == {"2"}
 
 
 def test_volts_to_microvolts_is_single_scale_conversion() -> None:

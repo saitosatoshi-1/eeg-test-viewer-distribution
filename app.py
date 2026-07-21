@@ -54,7 +54,11 @@ from eeg_montage import (
     volts_to_microvolts,
 )
 from research_sampling import (
+    RESEARCH_FIXED_FORM_DESIGN_VERSION,
     balanced_research_sample_by_exposure,
+    fixed_research_form_assignment_slot,
+    fixed_research_form_definitions,
+    fixed_research_form_order,
     research_case_patient_key,
     stable_balanced_research_order,
 )
@@ -1819,7 +1823,13 @@ def research_case_exposure_counts(dataset_dir: Path, phase: str = "1") -> dict[s
     return counts
 
 
-def save_research_assignment(dataset_dir: Path, reader_id: str, phase: str, cases: list[dict[str, Any]]) -> None:
+def save_research_assignment(
+    dataset_dir: Path,
+    reader_id: str,
+    phase: str,
+    cases: list[dict[str, Any]],
+    design: dict[str, Any] | None = None,
+) -> None:
     case_ids = [str(row.get("caseId") or "").strip() for row in cases if not row.get("sampleEpoch") and str(row.get("caseId") or "").strip()]
     if not case_ids:
         return
@@ -1835,6 +1845,18 @@ def save_research_assignment(dataset_dir: Path, reader_id: str, phase: str, case
         "assignedAt": utc_now_iso(),
         "caseIds": case_ids,
     }
+    if isinstance(design, dict):
+        # 固定問題セットの監査情報を割当記録と結果JSONの両方に残す。
+        for key in (
+            "designVersion",
+            "formId",
+            "orderVersion",
+            "assignmentBlock",
+            "assignmentPosition",
+            "samplingMethod",
+        ):
+            if design.get(key) not in (None, ""):
+                next_row[key] = design[key]
     replaced = False
     for index, row in enumerate(assignments):
         if isinstance(row, dict) and row.get("assignmentId") == assignment_id:
@@ -1863,6 +1885,93 @@ def research_assignment_case_ids(dataset_dir: Path, reader_id: str, phase: str =
                 if str(case_id or "").strip()
             ]
     return []
+
+
+def research_assignment_record(dataset_dir: Path, reader_id: str, phase: str = "1") -> dict[str, Any]:
+    assignment_id = f"{research_reader_id(reader_id)}|{phase}"
+    assignments = load_research_assignments(dataset_dir, phase).get("assignments", [])
+    if not isinstance(assignments, list):
+        return {}
+    return next((row for row in assignments if isinstance(row, dict) and row.get("assignmentId") == assignment_id), {})
+
+
+def research_assignment_design_payload(assignment: Any) -> dict[str, Any]:
+    if not isinstance(assignment, dict):
+        return {}
+    keys = (
+        "designVersion",
+        "formId",
+        "orderVersion",
+        "assignmentBlock",
+        "assignmentPosition",
+        "samplingMethod",
+    )
+    return {key: assignment.get(key) for key in keys if assignment.get(key) not in (None, "")}
+
+
+def research_fixed_form_assignment_count(dataset_dir: Path, phase: str = "1") -> int:
+    assignments = load_research_assignments(dataset_dir, phase).get("assignments", [])
+    if not isinstance(assignments, list):
+        return 0
+    return sum(
+        1 for row in assignments
+        if isinstance(row, dict) and row.get("designVersion") == RESEARCH_FIXED_FORM_DESIGN_VERSION
+    )
+
+
+def research_fixed_forms_path(dataset_dir: Path, phase: str = "1") -> Path:
+    filename = f"phase{safe_filename_part(phase, '1')}_{RESEARCH_FIXED_FORM_DESIGN_VERSION}.json"
+    return dataset_dir / "assignments" / filename
+
+
+def research_fixed_form_case_fingerprint(rows: list[dict[str, Any]]) -> str:
+    values = sorted(
+        f"{row.get('caseId', '')}|{row.get('labelGroup', '')}|{research_case_patient_key(row)}"
+        for row in rows
+    )
+    return hashlib.sha256("\n".join(values).encode("utf-8")).hexdigest()
+
+
+def load_or_create_research_fixed_forms(
+    dataset_dir: Path,
+    dataset: dict[str, Any],
+    phase: str = "1",
+) -> dict[str, list[dict[str, Any]]]:
+    """Freeze form membership before assignment. / 割当前にセット構成を固定保存する。"""
+    included = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
+    by_id = {str(row.get("caseId") or ""): row for row in included}
+    fingerprint = research_fixed_form_case_fingerprint(included)
+    path = research_fixed_forms_path(dataset_dir, phase)
+    stored = json_read(path, {}) if path.exists() else {}
+    if isinstance(stored, dict) and stored:
+        if stored.get("designVersion") != RESEARCH_FIXED_FORM_DESIGN_VERSION:
+            raise ValueError("Stored research form design version does not match the active design.")
+        if stored.get("caseFingerprint") != fingerprint:
+            raise ValueError("The research dataset changed after fixed forms were created.")
+        memberships = stored.get("forms") if isinstance(stored.get("forms"), dict) else {}
+        forms = {
+            form_id: [by_id[case_id] for case_id in memberships.get(form_id, []) if case_id in by_id]
+            for form_id in ("A", "B", "C", "D", "E", "F")
+        }
+        if all(len(form_rows) == 20 for form_rows in forms.values()):
+            return forms
+        raise ValueError("Stored research form definitions are incomplete.")
+
+    forms = fixed_research_form_definitions(included, str(dataset.get("datasetId") or ""))
+    json_write(path, {
+        "designVersion": RESEARCH_FIXED_FORM_DESIGN_VERSION,
+        "createdAt": utc_now_iso(),
+        "datasetId": str(dataset.get("datasetId") or ""),
+        "caseFingerprint": fingerprint,
+        "formCount": 6,
+        "casesPerForm": 20,
+        "caseAppearancesAcrossForms": 2,
+        "forms": {
+            form_id: [str(row.get("caseId") or "") for row in form_rows]
+            for form_id, form_rows in forms.items()
+        },
+    })
+    return forms
 
 
 def save_research_responses(dataset_dir: Path, reader_id: str, responses: list[dict[str, Any]], reader_profile: dict[str, Any] | None = None) -> None:
@@ -2027,13 +2136,28 @@ def research_is_epilepsy_sample_candidate(row: dict[str, Any]) -> bool:
     return "epilepsy" in group_text and "no_epilepsy" not in group_text
 
 
-def research_sample_case(dataset: dict[str, Any], reader_id: str, phase: str, pool: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def research_sample_case(
+    dataset: dict[str, Any],
+    reader_id: str,
+    phase: str,
+    pool: list[dict[str, Any]],
+    excluded_patient_keys: set[str] | None = None,
+) -> list[dict[str, Any]]:
     sample_pool = [row for row in pool if research_is_epilepsy_sample_candidate(row)]
     if not sample_pool:
         sample_pool = [row for row in pool if row.get("labelGroup") == "epileptiform"]
-    sample = stable_research_sample(sample_pool, 2, (str(dataset.get("datasetId", "")), reader_id, phase, "sample"))
+    sample = balanced_research_sample_by_exposure(
+        sample_pool,
+        2,
+        {},
+        (str(dataset.get("datasetId", "")), reader_id, phase, "sample"),
+        set(excluded_patient_keys or set()),
+    )
     if len(sample) == 1:
         sample = sample * 2
+    patient_keys = [research_case_patient_key(row) for row in sample]
+    if len(sample) < 2 or len(patient_keys) != len(set(patient_keys)):
+        raise ValueError("Two patient-unique practice epochs are required for this assignment.")
     steps = [("operation_practice", "操作説明用練習"), ("montage_setup", "普段使用モンタージュ設定用練習")]
     return [
         {
@@ -2063,9 +2187,10 @@ def research_phase_case_pool(dataset: dict[str, Any], reader_id: str, phase: str
 
 def research_assigned_case_rows(dataset: dict[str, Any], reader_id: str, phase: str, case_ids: list[str]) -> list[dict[str, Any]]:
     included = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
-    sample = research_sample_case(dataset, reader_id, "phase1", included)
     by_id = {str(row.get("caseId", "")): row for row in included}
     assigned = [by_id[case_id] for case_id in case_ids if case_id in by_id]
+    assigned_patient_keys = {research_case_patient_key(row) for row in assigned if research_case_patient_key(row)}
+    sample = research_sample_case(dataset, reader_id, "phase1", included, assigned_patient_keys)
     return sample + assigned
 
 
@@ -2121,12 +2246,43 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         active = active_response_map(responses)
         settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
         requested_total = research_phase1_total_count(settings)
-        assignment_ids = research_assignment_case_ids(dataset_dir, reader_id, phase)
+        assignment = research_assignment_record(dataset_dir, reader_id, phase)
+        assignment_ids = [
+            str(case_id or "").strip()
+            for case_id in (assignment.get("caseIds") if isinstance(assignment.get("caseIds"), list) else [])
+            if str(case_id or "").strip()
+        ]
         if assignment_ids:
             all_cases = research_assigned_case_rows(dataset, reader_id, phase, assignment_ids)
         else:
-            all_cases = cap_phase1_cases_by_group(research_phase_case_pool(dataset, reader_id, phase, active), requested_total)
-            save_research_assignment(dataset_dir, reader_id, phase, all_cases)
+            included = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
+            group_counts = {
+                group: sum(1 for row in included if str(row.get("labelGroup") or "") == group)
+                for group in ("epileptiform", "non_epileptiform")
+            }
+            fixed_forms_available = requested_total == 20 and group_counts == {
+                "epileptiform": 30,
+                "non_epileptiform": 30,
+            }
+            if fixed_forms_available:
+                form_definitions = load_or_create_research_fixed_forms(dataset_dir, dataset, phase)
+                assignment = fixed_research_form_assignment_slot(
+                    str(dataset.get("datasetId") or ""),
+                    research_fixed_form_assignment_count(dataset_dir, phase),
+                )
+                assigned = fixed_research_form_order(
+                    form_definitions[str(assignment["formId"])],
+                    str(dataset.get("datasetId") or ""),
+                    str(assignment["formId"]),
+                    str(assignment["orderVersion"]),
+                )
+                assigned_patient_keys = {research_case_patient_key(row) for row in assigned if research_case_patient_key(row)}
+                sample = research_sample_case(dataset, reader_id, "phase1", included, assigned_patient_keys)
+                all_cases = sample + assigned
+            else:
+                all_cases = cap_phase1_cases_by_group(research_phase_case_pool(dataset, reader_id, phase, active), requested_total)
+                assignment = {"samplingMethod": "balanced_random_sampling_with_assignment_exposure_counts"}
+            save_research_assignment(dataset_dir, reader_id, phase, all_cases, assignment)
         cases = [
             row for row in all_cases
             if row.get("sampleEpoch") or not active.get((str(row.get("caseId")), phase))
@@ -2140,6 +2296,7 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         if key[1] == phase and key[0] in assigned_ids
     }
     active_rows = list(active.values())
+    assignment_design = research_assignment_design_payload(assignment)
     return {
         "datasetPath": dataset_path,
         "datasetId": dataset.get("datasetId"),
@@ -2155,7 +2312,11 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         "requestedTotalCount": requested_total,
         "samplePerGroup": max(1, math.ceil(requested_total / 2)),
         "groupCounts": {group: sum(1 for row in non_sample_cases if row.get("labelGroup") == group) for group in ("epileptiform", "non_epileptiform")},
-        "samplingMethod": "balanced_random_sampling_with_assignment_exposure_counts",
+        "assignment": assignment_design,
+        "designVersion": assignment_design.get("designVersion", "legacy-exposure-balanced"),
+        "formId": assignment_design.get("formId", ""),
+        "orderVersion": assignment_design.get("orderVersion", ""),
+        "samplingMethod": assignment_design.get("samplingMethod", "balanced_random_sampling_with_assignment_exposure_counts"),
         "assignmentExposureCounts": {str(row.get("caseId")): exposure_counts.get(str(row.get("caseId")), 0) for row in non_sample_cases},
         "ratings": [RESEARCH_RATING_POSITIVE, RESEARCH_RATING_NEGATIVE, RESEARCH_RATING_UNKNOWN],
     }
@@ -2851,15 +3012,17 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
             settings = dataset.get("settings") if isinstance(dataset.get("settings"), dict) else {}
             compact_responses = compact_responses[:research_phase1_total_count(settings)]
         profile = response_reader_profile(*active.values())
+        assignment = research_assignment_design_payload(research_assignment_record(dataset_dir, rid, "1"))
         readers.append({
             "readerId": rid,
+            "assignment": assignment,
             "readerProfile": research_compact_reader_profile(profile),
             "summary": research_reader_summary(compact_responses),
             "postTestDebriefing": research_export_debriefing_payload(response_payload.get("postTestDebriefing")),
             "responses": [research_export_response_payload(response) for response in compact_responses],
         })
     payload = {
-        "exportVersion": "compact-2",
+        "exportVersion": "compact-3",
         "exportedAt": utc_now_iso(),
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "readers": readers,
