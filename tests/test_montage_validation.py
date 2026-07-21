@@ -17,7 +17,9 @@ from research_sampling import (
     balanced_research_sample_by_exposure,
     fixed_research_form_assignment_slot,
     fixed_research_form_definitions,
+    fixed_research_form_order,
     research_case_patient_key,
+    research_max_consecutive_group_count,
 )
 
 
@@ -183,13 +185,43 @@ def test_fixed_forms_are_balanced_connected_and_patient_unique() -> None:
 
 
 def test_fixed_form_assignment_is_balanced_in_each_six_reader_block() -> None:
-    first_block = [fixed_research_form_assignment_slot("validation_v1", index) for index in range(6)]
-    second_block = [fixed_research_form_assignment_slot("validation_v1", index) for index in range(6, 12)]
+    assignments = [fixed_research_form_assignment_slot("validation_v1", index) for index in range(30)]
 
-    assert {row["formId"] for row in first_block} == set(RESEARCH_FIXED_FORM_IDS)
-    assert {row["formId"] for row in second_block} == set(RESEARCH_FIXED_FORM_IDS)
-    assert {row["orderVersion"][-1] for row in first_block} == {"1"}
-    assert {row["orderVersion"][-1] for row in second_block} == {"2"}
+    for block_index in range(5):
+        block = assignments[block_index * 6:(block_index + 1) * 6]
+        assert {row["formId"] for row in block} == set(RESEARCH_FIXED_FORM_IDS)
+        assert {row["orderVersion"][-1] for row in block} == {str(block_index + 1)}
+
+    form_order_combinations = {
+        (row["formId"], row["orderVersion"])
+        for row in assignments
+    }
+    assert len(form_order_combinations) == 30
+    for form_id in RESEARCH_FIXED_FORM_IDS:
+        assert {
+            row["orderVersion"]
+            for row in assignments
+            if row["formId"] == form_id
+        } == {f"{form_id}{number}" for number in range(1, 6)}
+
+
+def test_each_form_has_five_distinct_constrained_orders() -> None:
+    rows = []
+    for index in range(30):
+        patient_id = f"patient_{index:02d}"
+        rows.extend([
+            {"caseId": f"epi_{index:02d}", "patientId": patient_id, "labelGroup": "epileptiform"},
+            {"caseId": f"non_{index:02d}", "patientId": patient_id, "labelGroup": "non_epileptiform"},
+        ])
+    forms = fixed_research_form_definitions(rows, "validation_v1")
+
+    for form_id, form_rows in forms.items():
+        orders = [
+            fixed_research_form_order(form_rows, "validation_v1", form_id, f"{form_id}{number}")
+            for number in range(1, 6)
+        ]
+        assert len({tuple(str(row["caseId"]) for row in order) for order in orders}) == 5
+        assert all(research_max_consecutive_group_count(order) <= 3 for order in orders)
 
 
 def test_volts_to_microvolts_is_single_scale_conversion() -> None:

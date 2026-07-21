@@ -117,13 +117,13 @@ For the current viewer settings:
 - Main test balance: 10 epileptiform and 10 non_epileptiform
 - Sampling: six fixed connected forms (`A`-`F`) with randomized-block form assignment
 - Each form contains 20 cases, and every one of the 60 cases belongs to exactly two forms.
-- Each six-reader assignment block uses every form once; four constrained order variants are rotated across blocks.
+- Each six-reader assignment block uses every form once. Five constrained order variants are rotated across five blocks, producing all 30 form-order combinations exactly once for 30 readers.
 - A reader never receives multiple epochs from the same patient/source recording, including the two practice epochs.
 - Patient/source recording identity is read from `patientId`/`subjectId` if present; otherwise the viewer uses the EDF/recording name before `_start...`.
 
-The first formal session freezes the form manifest under `assignments/phase1_fixed-forms-v1.json` before assigning a reader. The manifest is reused unchanged. If case identity, label, or patient identity changes afterward, the viewer stops with an integrity error instead of silently rebuilding the forms.
+The first formal session freezes the form manifest under `assignments/phase1_fixed-forms-v2.json` before assigning a reader. The manifest is reused unchanged. If case identity, label, or patient identity changes afterward, the viewer stops with an integrity error instead of silently rebuilding the forms.
 
-正式セッションの初回割当前に、6つの固定問題セットを `assignments/phase1_fixed-forms-v1.json` へ保存します。以後は同じセット構成を使用し、症例・ラベル・患者識別情報が変更された場合は自動再生成せず整合性エラーにします。
+正式セッションの初回割当前に、6つの固定問題セットを `assignments/phase1_fixed-forms-v2.json` へ保存します。各フォームについて5種類の制約付き提示順序を使用し、30判読者では6フォームと5順序の30通りを1回ずつ割り付けます。以後は同じセット構成を使用し、症例・ラベル・患者識別情報が変更された場合は自動再生成せず整合性エラーにします。
 
 The compact result JSON uses export version `compact-3`. Each reader contains an `assignment` object with `designVersion`, `formId`, `orderVersion`, `assignmentBlock`, `assignmentPosition`, and `samplingMethod` for audit and analysis.
 
