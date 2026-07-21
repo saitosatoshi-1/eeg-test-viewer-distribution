@@ -1325,6 +1325,14 @@ dd {
   font-weight: 800;
 }
 
+.research-tutorial-target-emphasis {
+  border-left: 4px solid #b45309;
+  padding: 7px 10px;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-weight: 800;
+}
+
 .research-tutorial-next-test {
   border-left: 4px solid #2563eb;
   padding: 7px 10px;
@@ -2246,6 +2254,11 @@ body.test-only-distribution.mobile-viewport .research-tutorial p {
   margin-bottom: 3px;
   font-size: 11px;
   line-height: 1.28;
+}
+
+body.test-only-distribution.mobile-viewport .research-tutorial-target-emphasis {
+  padding: 3px 5px;
+  border-left-width: 3px;
 }
 
 body.test-only-distribution.mobile-viewport .research-tutorial ol {
