@@ -4239,6 +4239,11 @@ function openContextMenu(ev) {
 function openResearchRatingMenu(ev) {
   ev.preventDefault();
   ev.stopPropagation();
+  // スマホでは波形の再タッチで三択メニューを閉じる。
+  if (isMobileViewport() && !els.contextMenu.classList.contains("hidden")) {
+    hideContextMenu();
+    return;
+  }
   const point = canvasToData(ev);
   if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
   state.cursorTime = point.onset;
