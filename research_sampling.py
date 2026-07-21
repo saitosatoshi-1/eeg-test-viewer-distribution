@@ -4,13 +4,18 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+import re
 from pathlib import Path
 from typing import Any
 
 
 RESEARCH_FIXED_FORM_IDS = ("A", "B", "C", "D", "E", "F")
-RESEARCH_FIXED_FORM_DESIGN_VERSION = "fixed-forms-v3"
+RESEARCH_FIXED_FORM_DESIGN_VERSION = "fixed-forms-v4"
 RESEARCH_FIXED_FORM_ORDER_VARIANTS = 3
+RESEARCH_FIXED_FORM_CASES_PER_FORM = 20
+RESEARCH_FIXED_FORM_CASES_PER_LABEL = 10
+RESEARCH_FIXED_FORM_CASE_APPEARANCES = 2
+RESEARCH_FIXED_FORM_MAX_CONSECUTIVE_LABEL = 3
 
 
 def research_order_group(row: dict[str, Any]) -> str:
@@ -26,6 +31,9 @@ def research_case_patient_key(row: dict[str, Any]) -> str:
     if not recording_id:
         edf_path = str(row.get("edfPath") or "").strip()
         recording_id = Path(edf_path).stem if edf_path else str(row.get("caseId") or "").strip()
+    tuev_subject = re.search(r"(?<![a-z0-9])(a{5}[a-z]{3})(?![a-z0-9])", recording_id.lower())
+    if tuev_subject:
+        return tuev_subject.group(1)
     if "_start" in recording_id:
         recording_id = recording_id.split("_start", 1)[0]
     return recording_id or str(row.get("caseId") or "")
@@ -61,7 +69,7 @@ def stable_balanced_research_order(rows: list[dict[str, Any]], seed_parts: tuple
     largest_group = max(group_counts.values(), default=0)
     other_count = max(0, len(shuffled) - largest_group)
     minimum_possible_run = math.ceil(largest_group / max(1, other_count + 1))
-    max_consecutive = max(3, minimum_possible_run)
+    max_consecutive = max(RESEARCH_FIXED_FORM_MAX_CONSECUTIVE_LABEL, minimum_possible_run)
 
     for _ in range(500):
         rng.shuffle(shuffled)
@@ -269,6 +277,14 @@ def fixed_research_form_assignment_slot(dataset_id: str, assignment_index: int) 
         "assignmentBlock": block_index + 1,
         "assignmentPosition": block_position + 1,
         "samplingMethod": "pre_generated_connected_balanced_forms",
+        "formCount": len(RESEARCH_FIXED_FORM_IDS),
+        "orderVariantCount": RESEARCH_FIXED_FORM_ORDER_VARIANTS,
+        "assignmentCycleLength": len(RESEARCH_FIXED_FORM_IDS) * RESEARCH_FIXED_FORM_ORDER_VARIANTS,
+        "casesPerForm": RESEARCH_FIXED_FORM_CASES_PER_FORM,
+        "epileptiformCount": RESEARCH_FIXED_FORM_CASES_PER_LABEL,
+        "nonEpileptiformCount": RESEARCH_FIXED_FORM_CASES_PER_LABEL,
+        "caseAppearancesAcrossForms": RESEARCH_FIXED_FORM_CASE_APPEARANCES,
+        "maxConsecutiveSameLabel": RESEARCH_FIXED_FORM_MAX_CONSECUTIVE_LABEL,
     }
 
 

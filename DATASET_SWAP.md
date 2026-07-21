@@ -121,13 +121,13 @@ For the current viewer settings:
 - A reader never receives multiple epochs from the same patient/source recording, including the two practice epochs.
 - Patient/source recording identity is read from `patientId`/`subjectId` if present; otherwise the viewer uses the EDF/recording name before `_start...`.
 
-The first formal session freezes the form manifest under `assignments/phase1_fixed-forms-v3.json` before assigning a reader. The manifest is reused unchanged. If case identity, label, or patient identity changes afterward, the viewer stops with an integrity error instead of silently rebuilding the forms.
+The first formal session freezes the form manifest under `assignments/phase1_fixed-forms-v4.json` before assigning a reader. The manifest is reused unchanged. If case identity, label, or patient identity changes afterward, the viewer stops with an integrity error instead of silently rebuilding the forms.
 
-正式セッションの初回割当前に、6つの固定問題セットを `assignments/phase1_fixed-forms-v3.json` へ保存します。各フォームについて3種類の制約付き提示順序を使用し、6フォームと3順序の18通りを3ブロック周期で順次割り付けます。以後は同じセット構成を使用し、症例・ラベル・患者識別情報が変更された場合は自動再生成せず整合性エラーにします。
+正式セッションの初回割当前に、6つの固定問題セットを `assignments/phase1_fixed-forms-v4.json` へ保存します。各フォームについて3種類の制約付き提示順序を使用し、6フォームと3順序の18通りを3ブロック周期で順次割り付けます。TUEV形式のファイル名から被験者コードを正規化し、IED側とnon-IED側を通じて同一患者の重複を防ぎます。以後は同じセット構成を使用し、症例・ラベル・患者識別情報が変更された場合は自動再生成せず整合性エラーにします。
 
-The compact result JSON uses export version `compact-3`. Each reader contains an `assignment` object with `designVersion`, `formId`, `orderVersion`, `assignmentBlock`, `assignmentPosition`, and `samplingMethod` for audit and analysis.
+The compact result JSON uses export version `compact-4`. Each reader contains an `assignment` object with the form/order identifiers, block position, ordered case IDs, and fixed-design constraints for audit and analysis.
 
-結果JSONは `compact-3` とし、各読影者の `assignment` にセットID・順序ID・割付ブロック等を記録します。
+結果JSONは `compact-4` とし、各読影者の `assignment` にセットID、順序ID、割付ブロック、提示順の症例ID、固定フォーム数、順序数、IED/non-IED数、同一ラベルの最大連続数等を記録します。`cases` には症例ID、正規化した患者キー、記録ID、IED/non-IED区分を記録し、割付内容を追跡可能にします。
 
 ## Submitted Result JSON Storage
 

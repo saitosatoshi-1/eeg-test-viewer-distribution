@@ -130,7 +130,15 @@ def test_bipolar_only_channels_do_not_allow_montage_derivation() -> None:
 
 def test_patient_key_uses_recording_name_before_epoch_start() -> None:
     row = {"recordingId": "CHEW_aaaaacyf_aaaaacyf_s007_t003_start000070.129_dur010.000"}
-    assert research_case_patient_key(row) == "CHEW_aaaaacyf_aaaaacyf_s007_t003"
+    assert research_case_patient_key(row) == "aaaaacyf"
+
+
+def test_patient_key_matches_same_tuev_subject_across_label_prefixes() -> None:
+    ied = {"recordingId": "aaaaamhb_s013_t001_start001031.840_dur010.000"}
+    non_ied = {"recordingId": "EYEM_aaaaamhb_aaaaamhb_s006_t001_start001000.373_dur010.000"}
+
+    assert research_case_patient_key(ied) == "aaaaamhb"
+    assert research_case_patient_key(non_ied) == "aaaaamhb"
 
 
 def test_balanced_sampling_prefers_less_exposed_cases() -> None:
@@ -186,6 +194,15 @@ def test_fixed_forms_are_balanced_connected_and_patient_unique() -> None:
 
 def test_fixed_form_assignment_is_balanced_in_each_six_reader_block() -> None:
     assignments = [fixed_research_form_assignment_slot("validation_v1", index) for index in range(30)]
+
+    assert all(row["formCount"] == 6 for row in assignments)
+    assert all(row["orderVariantCount"] == 3 for row in assignments)
+    assert all(row["assignmentCycleLength"] == 18 for row in assignments)
+    assert all(row["casesPerForm"] == 20 for row in assignments)
+    assert all(row["epileptiformCount"] == 10 for row in assignments)
+    assert all(row["nonEpileptiformCount"] == 10 for row in assignments)
+    assert all(row["caseAppearancesAcrossForms"] == 2 for row in assignments)
+    assert all(row["maxConsecutiveSameLabel"] == 3 for row in assignments)
 
     for block_index in range(5):
         block = assignments[block_index * 6:(block_index + 1) * 6]

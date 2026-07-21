@@ -1854,6 +1854,14 @@ def save_research_assignment(
             "assignmentBlock",
             "assignmentPosition",
             "samplingMethod",
+            "formCount",
+            "orderVariantCount",
+            "assignmentCycleLength",
+            "casesPerForm",
+            "epileptiformCount",
+            "nonEpileptiformCount",
+            "caseAppearancesAcrossForms",
+            "maxConsecutiveSameLabel",
         ):
             if design.get(key) not in (None, ""):
                 next_row[key] = design[key]
@@ -1905,6 +1913,15 @@ def research_assignment_design_payload(assignment: Any) -> dict[str, Any]:
         "assignmentBlock",
         "assignmentPosition",
         "samplingMethod",
+        "formCount",
+        "orderVariantCount",
+        "assignmentCycleLength",
+        "casesPerForm",
+        "epileptiformCount",
+        "nonEpileptiformCount",
+        "caseAppearancesAcrossForms",
+        "maxConsecutiveSameLabel",
+        "caseIds",
     )
     return {key: assignment.get(key) for key in keys if assignment.get(key) not in (None, "")}
 
@@ -2728,7 +2745,10 @@ def research_export_case_payload(dataset: dict[str, Any]) -> list[dict[str, Any]
         if not bool(row.get("include", True)):
             continue
         rows.append({
+            "caseId": row.get("caseId", ""),
+            "patientKey": research_case_patient_key(row),
             "edfFile": Path(str(row.get("edfPath") or "")).name,
+            "recordingId": row.get("recordingId", ""),
             "sourceGroup": row.get("sourceGroup", ""),
             "labelGroup": row.get("labelGroup", ""),
             "sourceAnnotation": str(row.get("sourceAnnotation") or ""),
@@ -3022,7 +3042,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
             "responses": [research_export_response_payload(response) for response in compact_responses],
         })
     payload = {
-        "exportVersion": "compact-3",
+        "exportVersion": "compact-4",
         "exportedAt": utc_now_iso(),
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "readers": readers,
