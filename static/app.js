@@ -10,6 +10,9 @@ const TEST_ONLY_DISTRIBUTION = document.body.classList.contains("test-only-distr
 const PUBLIC_TEST_QUESTION_COUNT = 20;
 const DEFAULT_PUBLIC_TEST_DATASET_PATH = "private:validation_v1";
 const DEFAULT_PUBLIC_VALIDATION_DATASET_PATH = "private:validation_v1";
+// ACフィルターは研究条件として60 Hzに固定し、画面では操作させない。
+const FIXED_AC_FILTER = "60";
+const FIXED_AC_FILTER_LABEL = "60 Hz";
 const ECG_UV_PER_MM = 5;
 const ECG_AUTO_TARGET_MM = 4.5;
 const ECG_AUTO_MIN_UV_PER_MM = 5;
@@ -117,7 +120,6 @@ const els = {
   sensitivitySelect: document.getElementById("sensitivitySelect"),
   tcSelect: document.getElementById("tcSelect"),
   hfSelect: document.getElementById("hfSelect"),
-  acSelect: document.getElementById("acSelect"),
   durationSelect: document.getElementById("durationSelect"),
   paperSelect: document.getElementById("paperSelect"),
   ecgToggle: document.getElementById("ecgToggle"),
@@ -313,7 +315,6 @@ function updateMobileControlLabels() {
     [els.tcSelect, "時定数", "TC"],
     [els.hfSelect, "高域", "HF"],
     [els.montageSelect, "モンタージュ", "Montage"],
-    [els.acSelect, "交流", "AC"],
     [els.durationSelect, "表示秒", "Timebase"],
   ];
   const mobile = TEST_ONLY_DISTRIBUTION && isMobileViewport();
@@ -549,29 +550,9 @@ function filterControlKey() {
   return [
     els.tcSelect?.value || "",
     els.hfSelect?.value || "",
-    normalizeAcValue(els.acSelect?.value),
+    FIXED_AC_FILTER,
     els.ecgToggle?.checked ? "1" : "0",
   ].join("|");
-}
-
-function normalizeAcValue(value) {
-  const raw = String(value || "").trim().toUpperCase();
-  if (!raw) return "60";
-  if (raw === "50" || raw === "50HZ") return "50";
-  if (raw === "60" || raw === "60HZ") return "60";
-  return "OFF";
-}
-
-function normalizeAcSelect() {
-  if (!els.acSelect) return "60";
-  const value = normalizeAcValue(els.acSelect.value);
-  if (els.acSelect.value !== value) els.acSelect.value = value;
-  return value;
-}
-
-function acFilterLabel(value = normalizeAcValue(els.acSelect?.value)) {
-  const normalized = normalizeAcValue(value);
-  return normalized === "OFF" ? "OFF" : `${normalized} Hz`;
 }
 
 function waveformActionText() {
@@ -651,7 +632,7 @@ async function handleFilterControlChange(source = "change") {
   resetResearchPrefetch();
   renderStatus();
   forceViewerRepaint();
-  setStatus(`Loading filters TC ${tcText()} / HF ${hfText()} / AC ${acFilterLabel()}...`, { busy: true, progress: 70 });
+  setStatus(`Loading filters TC ${tcText()} / HF ${hfText()}...`, { busy: true, progress: 70 });
   // 現在表示中のモンタージュを先に更新し、残りは裏で再取得する。
   await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
   scheduleCurrentResearchWindowPrefetch();
@@ -676,7 +657,6 @@ function bindControls() {
     els.sensitivitySelect,
     els.tcSelect,
     els.hfSelect,
-    els.acSelect,
     els.durationSelect,
     els.paperSelect,
     els.ecgToggle,
@@ -687,7 +667,6 @@ function bindControls() {
     els.durationSelect,
     els.tcSelect,
     els.hfSelect,
-    els.acSelect,
     els.ecgToggle,
   ].filter(Boolean).forEach((el) => {
     const check = () => window.setTimeout(() => checkDeferredControlValues("deferred"), 0);
@@ -697,7 +676,7 @@ function bindControls() {
     el.addEventListener("keyup", check);
     el.addEventListener("mouseup", check);
   });
-  [els.tcSelect, els.hfSelect, els.acSelect].filter(Boolean).forEach((el) => {
+  [els.tcSelect, els.hfSelect].filter(Boolean).forEach((el) => {
     const schedule = (ev) => {
       saveSettings();
       scheduleFilterRefresh(ev.type, { delayMs: ev.type === "blur" ? 0 : 80 });
@@ -2493,7 +2472,6 @@ async function showResearchCase(index) {
     if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
     if (els.tcSelect) els.tcSelect.value = "0.3";
     if (els.hfSelect) els.hfSelect.value = "120";
-    if (els.acSelect) els.acSelect.value = "60";
     const researchTimebase = defaultResearchTimebaseSec();
     if (els.durationSelect) els.durationSelect.value = String(researchTimebase);
     state.start = centeredStartForResearchCase(item, researchTimebase);
@@ -2556,10 +2534,10 @@ function researchSpikeSelectionPayload() {
     hf: els.hfSelect?.value || "",
     highCutFilter: els.hfSelect?.value || "",
     highCutFilterLabel: hfText(),
-    ac: normalizeAcValue(els.acSelect?.value),
-    acFilter: normalizeAcValue(els.acSelect?.value),
-    acFilterLabel: acFilterLabel(),
-    acFilterUsed: normalizeAcValue(els.acSelect?.value) !== "OFF",
+    ac: FIXED_AC_FILTER,
+    acFilter: FIXED_AC_FILTER,
+    acFilterLabel: FIXED_AC_FILTER_LABEL,
+    acFilterUsed: true,
     timebaseSec: Number(els.durationSelect?.value || visibleDuration() || 0),
     spikeTime: Number.isFinite(onset) ? onset : "",
     spikeSampleIndex: Number.isFinite(Number(context.sampleIndex)) ? Number(context.sampleIndex) : "",
@@ -3032,8 +3010,6 @@ function restoreSettings() {
     setSelectValue(els.sensitivitySelect, settings.sensitivity);
     setSelectValue(els.tcSelect, settings.tc);
     setSelectValue(els.hfSelect, settings.hf);
-    setSelectValue(els.acSelect, normalizeAcValue(settings.ac));
-    normalizeAcSelect();
     setSelectValue(els.durationSelect, settings.duration);
     syncTimebaseButtons();
     setSelectValue(els.paperSelect, settings.paper);
@@ -3055,7 +3031,6 @@ function saveSettings() {
     sensitivity: els.sensitivitySelect.value,
     tc: els.tcSelect.value,
     hf: els.hfSelect.value,
-    ac: normalizeAcSelect(),
     duration: els.durationSelect.value,
     paper: els.paperSelect.value,
     ecg: els.ecgToggle.checked,
@@ -3483,7 +3458,7 @@ async function onControlChange(ev) {
     state.cursorTime = null;
     state.dragSelection = null;
     await loadMetadata();
-  } else if ([els.tcSelect, els.hfSelect, els.acSelect, els.ecgToggle].includes(ev.target)) {
+  } else if ([els.tcSelect, els.hfSelect, els.ecgToggle].includes(ev.target)) {
     await handleFilterControlChange("change");
     return;
   }
@@ -3567,7 +3542,7 @@ function researchWindowPrefetchParams(recordId, item, options = {}) {
     montages,
     tc: options.tc ?? els.tcSelect?.value ?? "0.3",
     hf: options.hf ?? els.hfSelect?.value ?? "120",
-    ac: normalizeAcValue(options.ac ?? normalizeAcSelect()),
+    ac: FIXED_AC_FILTER,
     ecg: options.ecg ?? (els.ecgToggle?.checked ? "1" : "0"),
     maxPoints: options.maxPoints || windowMaxPoints(),
     strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
@@ -3693,7 +3668,7 @@ function scheduleCurrentResearchWindowPrefetch() {
       montages: preferredResearchWindowMontages(montage).join(","),
       tc: els.tcSelect?.value || "0.3",
       hf: els.hfSelect?.value || "120",
-      ac: normalizeAcSelect(),
+      ac: FIXED_AC_FILTER,
       ecg: els.ecgToggle?.checked ? "1" : "0",
       maxPoints: windowMaxPoints(),
     });
@@ -3771,7 +3746,7 @@ async function loadWindow(options = {}) {
           montages: requestedMontages.join(","),
           tc: els.tcSelect.value,
           hf: els.hfSelect.value,
-          ac: normalizeAcSelect(),
+          ac: FIXED_AC_FILTER,
           ecg: els.ecgToggle.checked ? "1" : "0",
           maxPoints: windowMaxPoints(),
           strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
@@ -3839,10 +3814,9 @@ function renderStatus() {
   const firstTrace = state.windowData?.traces?.[0]?.label ? ` · ${state.windowData.traces[0].label}` : "";
   const loadedDuration = Number(state.windowData?.duration || 0);
   const durationText = loadedDuration ? ` · loaded ${loadedDuration.toFixed(2)}s` : "";
-  const acText = acFilterLabel();
-  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
+  setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);
   els.timeReadout.textContent = `${formatSec(state.start)} - ${formatSec(end)}`;
-  els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · AC ${acText} · ${els.paperSelect.value} mm/s`;
+  els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · ${els.paperSelect.value} mm/s`;
 }
 
 function isMultiWindowData() {
@@ -3866,7 +3840,7 @@ function draw() {
     els.timeReadout.textContent = `${formatSec(start)} - ${formatSec(start + duration)}`;
   }
   if (els.calReadout) {
-    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · HF ${hfText()} · AC ${acFilterLabel()} · ${els.paperSelect?.value || "30"} mm/s`;
+    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · HF ${hfText()} · ${els.paperSelect?.value || "30"} mm/s`;
   }
   if (!traces.length || !times.length) {
     ctx.fillStyle = "#68707c";

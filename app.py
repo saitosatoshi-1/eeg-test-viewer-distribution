@@ -150,6 +150,8 @@ ACCESS_COOKIE_NAME = "eeg_viewer_access"
 ACCESS_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14
 MAX_WINDOW_DURATION_SEC = 120.0
 DISPLAY_FILTER_PADDING_SEC = 5.0
+# ACフィルターは研究条件として60 Hzに固定する。
+FIXED_AC_FILTER = "60"
 MAX_POST_BODY_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_EEG_BYTES = int(float(os.environ.get("EEG_VIEWER_MAX_REMOTE_EEG_MB", "512")) * 1024 * 1024)
@@ -3715,7 +3717,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                             qs.get("montage", ["longitudinal"])[0],
                             qs.get("tc", ["0.3"])[0],
                             qs.get("hf", ["120"])[0],
-                            qs.get("ac", ["60"])[0],
+                            FIXED_AC_FILTER,
                             qs.get("ecg", ["1"])[0] == "1",
                             requested_montages,
                             int(qs.get("maxPoints", ["1800"])[0]),
@@ -3730,7 +3732,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         qs.get("montage", ["longitudinal"])[0],
                         qs.get("tc", ["0.3"])[0],
                         qs.get("hf", ["120"])[0],
-                        qs.get("ac", ["60"])[0],
+                        FIXED_AC_FILTER,
                         qs.get("ecg", ["1"])[0] == "1",
                         int(qs.get("maxPoints", ["1800"])[0]),
                         strict_montage,
