@@ -190,22 +190,22 @@ def test_fixed_form_assignment_is_balanced_in_each_six_reader_block() -> None:
     for block_index in range(5):
         block = assignments[block_index * 6:(block_index + 1) * 6]
         assert {row["formId"] for row in block} == set(RESEARCH_FIXED_FORM_IDS)
-        assert {row["orderVersion"][-1] for row in block} == {str(block_index + 1)}
+        assert {row["orderVersion"][-1] for row in block} == {str(block_index % 3 + 1)}
 
     form_order_combinations = {
         (row["formId"], row["orderVersion"])
-        for row in assignments
+        for row in assignments[:18]
     }
-    assert len(form_order_combinations) == 30
+    assert len(form_order_combinations) == 18
     for form_id in RESEARCH_FIXED_FORM_IDS:
         assert {
             row["orderVersion"]
-            for row in assignments
+            for row in assignments[:18]
             if row["formId"] == form_id
-        } == {f"{form_id}{number}" for number in range(1, 6)}
+        } == {f"{form_id}{number}" for number in range(1, 4)}
 
 
-def test_each_form_has_five_distinct_constrained_orders() -> None:
+def test_each_form_has_three_distinct_constrained_orders() -> None:
     rows = []
     for index in range(30):
         patient_id = f"patient_{index:02d}"
@@ -218,9 +218,9 @@ def test_each_form_has_five_distinct_constrained_orders() -> None:
     for form_id, form_rows in forms.items():
         orders = [
             fixed_research_form_order(form_rows, "validation_v1", form_id, f"{form_id}{number}")
-            for number in range(1, 6)
+            for number in range(1, 4)
         ]
-        assert len({tuple(str(row["caseId"]) for row in order) for order in orders}) == 5
+        assert len({tuple(str(row["caseId"]) for row in order) for order in orders}) == 3
         assert all(research_max_consecutive_group_count(order) <= 3 for order in orders)
 
 

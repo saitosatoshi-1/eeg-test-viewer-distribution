@@ -9,8 +9,8 @@ from typing import Any
 
 
 RESEARCH_FIXED_FORM_IDS = ("A", "B", "C", "D", "E", "F")
-RESEARCH_FIXED_FORM_DESIGN_VERSION = "fixed-forms-v2"
-RESEARCH_FIXED_FORM_ORDER_VARIANTS = 5
+RESEARCH_FIXED_FORM_DESIGN_VERSION = "fixed-forms-v3"
+RESEARCH_FIXED_FORM_ORDER_VARIANTS = 3
 
 
 def research_order_group(row: dict[str, Any]) -> str:
