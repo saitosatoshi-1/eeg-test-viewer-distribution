@@ -2757,7 +2757,6 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
             "monthlyEegReadingCount", "annualEegReadingCount",
             "videoEegReadingExperience", "videoEegReadingExperienceDuration",
             "usualMontage", "ethicsNoticeConfirmed",
-            "dataProviderSharingAcknowledged",
         )
     }
 
@@ -2937,9 +2936,7 @@ def research_reader_timing_summary(responses: list[dict[str, Any]]) -> dict[str,
         "testStartedAt": test_started_at,
         "testCompletedAt": test_completed_at,
         "tutorialCompletedAt": tutorial_completed_at,
-        "tutorialToTestCompletedMs": tutorial_elapsed_ms,
         "tutorialToTestCompletedSec": round(tutorial_elapsed_ms / 1000, 3) if tutorial_elapsed_ms else 0,
-        "totalElapsedMs": total_elapsed_ms,
         "totalElapsedSec": round(total_elapsed_ms / 1000, 3) if total_elapsed_ms else 0,
     }
 
@@ -2968,6 +2965,7 @@ def research_export_response_payload(response: dict[str, Any]) -> dict[str, Any]
         "testStartedAt",
         "testCompletedAt",
         "tutorialCompletedAt",
+        "elapsedMs",
         "tutorialToTestCompletedMs",
         "tutorialToTestCompletedSec",
         "totalElapsedMs",
@@ -3037,7 +3035,6 @@ def research_export_debriefing_payload(debriefing: Any) -> dict[str, Any]:
         "montageSwitchIncreaseLikert",
         "behaviorChangeFreeText",
         "continuedDataUseConsent",
-        "individualFeedbackRequested",
     )
     return {
         key: debriefing.get(key)
@@ -3085,7 +3082,7 @@ def export_research_responses_json(dataset_dir: Path, reader_id: str | None = No
             "responses": [research_export_response_payload(response) for response in compact_responses],
         })
     payload = {
-        "exportVersion": "compact-4",
+        "exportVersion": "compact-5",
         "exportedAt": utc_now_iso(),
         "dataset": research_compact_dataset_payload(dataset, dataset_dir),
         "readers": readers,
