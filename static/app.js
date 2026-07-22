@@ -98,6 +98,8 @@ const state = {
   researchPrefetchRecordIds: new Map(),
   researchPrefetchQueuedCases: new Set(),
   researchPrefetchQueuedKeys: new Set(),
+  researchPrefetchControllers: new Set(),
+  researchPrefetchResumeTimer: null,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
   researchUsualMontage: "",
@@ -481,19 +483,6 @@ function scheduleLayoutRefresh() {
   window.setTimeout(refresh, 300);
 }
 
-function forceViewerRepaint() {
-  const refresh = () => {
-    resizeCanvas();
-    draw();
-    renderStatus();
-  };
-  refresh();
-  requestAnimationFrame(refresh);
-  window.setTimeout(refresh, 60);
-  window.setTimeout(refresh, 180);
-  window.setTimeout(refresh, 420);
-}
-
 function rememberControlValues() {
   state.lastMontageSelectValue = els.montageSelect?.value || "";
   state.lastDurationSelectValue = els.durationSelect?.value || "";
@@ -585,6 +574,7 @@ function cancelActiveWindowLoad(options = {}) {
 
 async function handleMontageControlChange(source = "change") {
   if (!els.montageSelect) return;
+  resetResearchPrefetch();
   state.lastMontageSelectValue = els.montageSelect.value || "";
   state.activeMontage = state.lastMontageSelectValue || state.activeMontage;
   updateResearchMontageTiming();
@@ -594,11 +584,12 @@ async function handleMontageControlChange(source = "change") {
     cancelActiveWindowLoad();
     draw();
     setStatus("Ready");
+    schedulePrefetchAfterControlInteraction();
     return;
   }
   setStatus(`Loading montage ${state.activeMontage} / ${labelForMontage()}...`, { busy: true, progress: 70 });
   await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
-  scheduleCurrentResearchWindowPrefetch();
+  schedulePrefetchAfterControlInteraction();
   draw();
 }
 
@@ -628,6 +619,7 @@ function loadedWindowMatchesCurrentDisplay(start, duration) {
 
 async function handleDurationControlChange(source = "change") {
   if (!els.durationSelect) return;
+  resetResearchPrefetch();
   state.lastDurationSelectValue = els.durationSelect.value || "";
   const nextDuration = Number(state.lastDurationSelectValue || 10) || 10;
   const researchCase = currentResearchCase();
@@ -637,17 +629,17 @@ async function handleDurationControlChange(source = "change") {
   state.start = nextStart;
   updateWaveScrollbar();
   renderStatus();
-  forceViewerRepaint();
   if (loadedWindowMatchesCurrentDisplay(nextStart, nextDuration)) {
     cancelActiveWindowLoad();
     syncActiveMontageData({ requireExact: true });
+    draw();
     setStatus("Ready");
+    schedulePrefetchAfterControlInteraction();
     return;
   }
   setStatus(`Loading timebase ${state.lastDurationSelectValue}s...`, { busy: true, progress: 70 });
   await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
-  scheduleCurrentResearchWindowPrefetch();
-  forceViewerRepaint();
+  schedulePrefetchAfterControlInteraction();
 }
 
 function scheduleFilterRefresh(source = "filter", options = {}) {
@@ -666,13 +658,10 @@ async function handleFilterControlChange(source = "change") {
   state.lastFilterControlKey = filterControlKey();
   resetResearchPrefetch();
   renderStatus();
-  forceViewerRepaint();
   setStatus(`Loading filters TC ${tcText()} / HF ${hfText()}...`, { busy: true, progress: 70 });
   // 現在表示中のモンタージュを先に更新し、残りは裏で再取得する。
   await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
-  scheduleCurrentResearchWindowPrefetch();
-  scheduleResearchPrefetch(state.researchCaseIndex);
-  forceViewerRepaint();
+  schedulePrefetchAfterControlInteraction();
 }
 
 function resizeCanvas() {
@@ -3495,6 +3484,7 @@ function windowCacheKey(params) {
     params.ecg,
     params.maxPoints || "",
     params.strictMontage || "",
+    params.compactActive || "",
   ].join("|");
 }
 
@@ -3558,7 +3548,7 @@ function researchWindowPrefetchParams(recordId, item, options = {}) {
   };
 }
 
-async function openResearchCaseForPrefetch(item) {
+async function openResearchCaseForPrefetch(item, signal = null) {
   const path = String(item?.edfPath || "");
   if (!path) return "";
   if (state.researchPrefetchRecordIds.has(path)) return state.researchPrefetchRecordIds.get(path);
@@ -3566,6 +3556,7 @@ async function openResearchCaseForPrefetch(item) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     retryAttempts: 1,
+    signal,
     body: JSON.stringify({ path }),
   });
   const recordId = opened?.id || "";
@@ -3575,20 +3566,25 @@ async function openResearchCaseForPrefetch(item) {
 
 async function prefetchResearchWindow(item, options = {}) {
   if (!TEST_ONLY_DISTRIBUTION || !item?.edfPath) return false;
-  const recordId = options.recordId || await openResearchCaseForPrefetch(item);
-  if (!recordId) return false;
-  const params = researchWindowPrefetchParams(recordId, item, options);
-  const cacheKey = windowCacheKey(params);
-  if (state.windowCache.has(cacheKey) || state.researchPrefetchQueuedKeys.has(cacheKey)) return false;
-  state.researchPrefetchQueuedKeys.add(cacheKey);
+  const controller = new AbortController();
+  state.researchPrefetchControllers.add(controller);
+  let cacheKey = "";
   try {
-    const data = await fetchJson(`/api/window?${qs(params)}`, { retryAttempts: 1 });
+    const recordId = options.recordId || await openResearchCaseForPrefetch(item, controller.signal);
+    if (!recordId || controller.signal.aborted) return false;
+    const params = researchWindowPrefetchParams(recordId, item, options);
+    cacheKey = windowCacheKey(params);
+    if (state.windowCache.has(cacheKey) || state.researchPrefetchQueuedKeys.has(cacheKey)) return false;
+    state.researchPrefetchQueuedKeys.add(cacheKey);
+    const data = await fetchJson(`/api/window?${qs(params)}`, { retryAttempts: 1, signal: controller.signal });
+    if (controller.signal.aborted) return false;
     rememberWindowCache(cacheKey, data);
     return true;
   } catch {
     return false;
   } finally {
-    state.researchPrefetchQueuedKeys.delete(cacheKey);
+    if (cacheKey) state.researchPrefetchQueuedKeys.delete(cacheKey);
+    state.researchPrefetchControllers.delete(controller);
   }
 }
 
@@ -3637,10 +3633,9 @@ async function drainResearchPrefetchQueue(runId) {
     state.researchPrefetchActive = false;
     if (
       state.researchPrefetchQueue.length &&
-      runId === state.researchPrefetchRunId &&
       hasActiveResearchPrefetchSession()
     ) {
-      drainResearchPrefetchQueue(runId);
+      drainResearchPrefetchQueue(state.researchPrefetchRunId);
     }
   }
 }
@@ -3684,9 +3679,22 @@ function scheduleCurrentResearchWindowPrefetch() {
   }, 0);
 }
 
+function schedulePrefetchAfterControlInteraction(delayMs = 400) {
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
+  if (state.researchPrefetchResumeTimer) window.clearTimeout(state.researchPrefetchResumeTimer);
+  state.researchPrefetchResumeTimer = window.setTimeout(() => {
+    state.researchPrefetchResumeTimer = null;
+    scheduleCurrentResearchWindowPrefetch();
+    scheduleResearchPrefetch(state.researchCaseIndex);
+  }, delayMs);
+}
+
 function resetResearchPrefetch(options = {}) {
   state.researchPrefetchRunId += 1;
-  state.researchPrefetchActive = false;
+  if (state.researchPrefetchResumeTimer) window.clearTimeout(state.researchPrefetchResumeTimer);
+  state.researchPrefetchResumeTimer = null;
+  for (const controller of state.researchPrefetchControllers) controller.abort();
+  state.researchPrefetchControllers.clear();
   state.researchPrefetchQueue = [];
   state.researchPrefetchQueuedCases.clear();
   state.researchPrefetchQueuedKeys.clear();
@@ -3757,6 +3765,7 @@ async function loadWindow(options = {}) {
         ecg: els.ecgToggle.checked ? "1" : "0",
         maxPoints: windowMaxPoints(),
         strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
+        compactActive: options.activeMontageOnly ? "1" : "0",
       };
       const cacheKey = windowCacheKey(params);
       const cached = state.windowCache.get(cacheKey);

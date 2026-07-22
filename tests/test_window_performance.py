@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from app import RecordingStore, maybe_gzip_http_body
+from app import RecordingStore, compact_active_window_payload, maybe_gzip_http_body
 
 
 def test_maybe_gzip_http_body_compresses_large_json_losslessly() -> None:
@@ -35,3 +35,25 @@ def test_filtered_window_data_reuses_same_filter_result() -> None:
 
     assert apply_filter.call_count == 1
     assert np.array_equal(first[0], second[0])
+
+
+def test_compact_active_window_payload_removes_duplicate_waveform_container() -> None:
+    payload = {
+        "times": [0.0, 0.1],
+        "traces": [{"label": "Fp1-A1", "values": [1.0, 2.0]}],
+        "montageViews": [{"montage": "conventional", "times": [0.0, 0.1], "traces": [{"values": [1.0, 2.0]}]}],
+        "metadata": {"raw": {"durationSec": 10}},
+        "channelValidation": {"valid": True},
+        "channelConfiguration": {"montageDerivationAllowed": True},
+        "filterPadding": {"beforeSec": 5},
+        "displayFilters": {"tc": "0.3", "hf": "120", "ac": "60"},
+    }
+
+    compact = compact_active_window_payload(payload, True)
+
+    assert compact["compactActive"] is True
+    assert compact["times"] == payload["times"]
+    assert compact["traces"] == payload["traces"]
+    for key in ("montageViews", "metadata", "channelValidation", "channelConfiguration", "filterPadding"):
+        assert key not in compact
+    assert compact_active_window_payload(payload, False) is payload

@@ -48,3 +48,20 @@ def test_timebase_can_reuse_loaded_filtered_window() -> None:
     assert "cancelActiveWindowLoad();" in handler
     assert "state.windowData.duration = nextDuration" not in handler
     assert "loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION })" in handler
+
+
+def test_active_only_window_requests_compact_payload_and_avoid_forced_repaints() -> None:
+    source = app_source()
+
+    assert 'compactActive: options.activeMontageOnly ? "1" : "0"' in source
+    assert "params.compactActive" in source
+    assert "forceViewerRepaint" not in source
+
+
+def test_control_interactions_pause_and_resume_background_prefetch() -> None:
+    source = app_source()
+
+    assert "researchPrefetchControllers: new Set()" in source
+    assert "schedulePrefetchAfterControlInteraction(delayMs = 400)" in source
+    assert "for (const controller of state.researchPrefetchControllers) controller.abort();" in source
+    assert "signal: controller.signal" in source

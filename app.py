@@ -1297,13 +1297,14 @@ class RecordingStore:
         montages: list[str] | None = None,
         max_points: int = 1800,
         strict_montage: bool = False,
+        compact_active: bool = False,
     ) -> dict[str, Any]:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         metadata = self.metadata(record_id)
         warnings = list(metadata["warnings"])
         source = self.window_source(record_id, start_sec, duration_sec)
         if source is None:
-            return {
+            return compact_active_window_payload({
                 "id": record_id,
                 "sfreq": 0,
                 "start": start_sec,
@@ -1313,7 +1314,7 @@ class RecordingStore:
                 "montage": active_montage,
                 "montageViews": [],
                 "warnings": warnings,
-            }
+            }, compact_active)
         warnings.extend(source.get("warnings") or [])
         data = source["data"]
         ch_names = list(source["chNames"])
@@ -1375,7 +1376,7 @@ class RecordingStore:
             if montage == active:
                 active_traces = traces
                 active_times = view_times
-        return {
+        payload = {
             "id": record_id,
             "sfreq": sfreq,
             "start": float(start / sfreq),
@@ -1393,6 +1394,18 @@ class RecordingStore:
             "warnings": warnings,
             "metadata": metadata,
         }
+        return compact_active_window_payload(payload, compact_active)
+
+
+def compact_active_window_payload(payload: dict[str, Any], enabled: bool) -> dict[str, Any]:
+    if not enabled:
+        return payload
+    compact = dict(payload)
+    # 即時表示ではトップ階層の波形だけを返し、同一波形の二重転送を避ける。
+    for key in ("montageViews", "channelValidation", "channelConfiguration", "filterPadding", "metadata"):
+        compact.pop(key, None)
+    compact["compactActive"] = True
+    return compact
 
 
 
@@ -3891,6 +3904,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     if item.strip()
                 ]
                 strict_montage = qs.get("strictMontage", ["0"])[0] == "1"
+                compact_active = qs.get("compactActive", ["0"])[0] == "1"
                 if requested_montages:
                     return self.send_json(
                         self.store.window_multi(
@@ -3905,6 +3919,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                             requested_montages,
                             int(qs.get("maxPoints", ["1800"])[0]),
                             strict_montage,
+                            compact_active,
                         )
                     )
                 return self.send_json(
