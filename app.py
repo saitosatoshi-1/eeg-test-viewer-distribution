@@ -160,8 +160,10 @@ MAX_POST_BODY_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_DATASET_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_EEG_BYTES = int(float(os.environ.get("EEG_VIEWER_MAX_REMOTE_EEG_MB", "512")) * 1024 * 1024)
 MAX_RAW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_RAW_CACHE_RECORDS", "8"))))
-MAX_WINDOW_SOURCE_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_WINDOW_SOURCE_CACHE_RECORDS", "16"))))
-MAX_FILTERED_WINDOW_CACHE_RECORDS = max(1, int(float(os.environ.get("EEG_VIEWER_MAX_FILTERED_WINDOW_CACHE_RECORDS", "8"))))
+MAX_WINDOW_SOURCE_CACHE_BYTES = max(1, int(float(os.environ.get("EEG_VIEWER_WINDOW_SOURCE_CACHE_MB", "64")) * 1024 * 1024))
+MAX_FILTERED_WINDOW_CACHE_BYTES = max(1, int(float(os.environ.get("EEG_VIEWER_FILTERED_WINDOW_CACHE_MB", "64")) * 1024 * 1024))
+MAX_CONCURRENT_WINDOW_REQUESTS = max(1, min(2, int(float(os.environ.get("EEG_VIEWER_MAX_CONCURRENT_WINDOW_REQUESTS", "2")))))
+WINDOW_REQUEST_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_WINDOW_REQUESTS)
 ALLOWED_REMOTE_HOSTS = {
     host.strip().lower()
     for host in os.environ.get("EEG_VIEWER_ALLOWED_REMOTE_HOSTS", "raw.githubusercontent.com,github.com").split(",")
@@ -178,6 +180,34 @@ ALLOWED_RESEARCH_WRITE_ROOTS = (
 RESEARCH_RESPONSE_LOCK = threading.RLock()
 RESEARCH_SESSION_TOKEN_TTL_SEC = 60 * 60 * 24
 TOKEN_EXEMPT_GET_PATHS = {"/api/health"}
+
+
+def estimated_cache_bytes(value: Any, seen: set[int] | None = None) -> int:
+    """キャッシュ値の概算メモリ量を返す。 / Estimate cache memory usage."""
+    if seen is None:
+        seen = set()
+    value_id = id(value)
+    if value_id in seen:
+        return 0
+    seen.add(value_id)
+    if isinstance(value, np.ndarray):
+        return int(value.nbytes)
+    size = sys.getsizeof(value)
+    if isinstance(value, dict):
+        size += sum(estimated_cache_bytes(key, seen) + estimated_cache_bytes(item, seen) for key, item in value.items())
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        size += sum(estimated_cache_bytes(item, seen) for item in value)
+    return int(size)
+
+
+def trim_cache_to_bytes(cache: dict[Any, Any], max_bytes: int) -> int:
+    """古い項目から削除してメモリ上限内に収める。 / Trim oldest entries to a byte budget."""
+    total = sum(estimated_cache_bytes(key) + estimated_cache_bytes(value) for key, value in cache.items())
+    while cache and total > max_bytes:
+        oldest = next(iter(cache))
+        removed = cache.pop(oldest)
+        total -= estimated_cache_bytes(oldest) + estimated_cache_bytes(removed)
+    return max(0, total)
 MUTATING_PATHS = {
     "/api/open-file",
     "/api/research/test/response",
@@ -759,6 +789,8 @@ class RecordingStore:
             self._raw_cache.pop(record_id, None)
             for key in [key for key in self._window_source_cache if key[0] == record_id]:
                 self._window_source_cache.pop(key, None)
+            for key in [key for key in self._filtered_window_cache if key[0] == record_id]:
+                self._filtered_window_cache.pop(key, None)
             self._direct_cache.pop(record_id, None)
 
     def format_for_path(self, path: Path) -> str:
@@ -1107,10 +1139,11 @@ class RecordingStore:
     def window_source(self, record_id: str, start_sec: float, duration_sec: float) -> dict[str, Any] | None:
         duration_sec = clamp_duration(duration_sec, 10.0, 0.1, MAX_WINDOW_DURATION_SEC)
         cache_key = (record_id, round(float(start_sec), 3), round(float(duration_sec), 3))
-        cached = self._window_source_cache.pop(cache_key, None)
-        if cached is not None:
-            self._window_source_cache[cache_key] = cached
-            return cached
+        with self._lock:
+            cached = self._window_source_cache.pop(cache_key, None)
+            if cached is not None:
+                self._window_source_cache[cache_key] = cached
+                return cached
 
         direct = self.direct_info(record_id)
         source_warnings: list[str] = []
@@ -1161,10 +1194,9 @@ class RecordingStore:
             "actualStartSample": actual_start_sample,
             "warnings": source_warnings,
         }
-        self._window_source_cache[cache_key] = payload
-        while len(self._window_source_cache) > MAX_WINDOW_SOURCE_CACHE_RECORDS:
-            oldest = next(iter(self._window_source_cache))
-            self._window_source_cache.pop(oldest, None)
+        with self._lock:
+            self._window_source_cache[cache_key] = payload
+            trim_cache_to_bytes(self._window_source_cache, MAX_WINDOW_SOURCE_CACHE_BYTES)
         return payload
 
     def filtered_window_data(
@@ -1204,9 +1236,7 @@ class RecordingStore:
         }
         with self._lock:
             self._filtered_window_cache[cache_key] = payload
-            while len(self._filtered_window_cache) > MAX_FILTERED_WINDOW_CACHE_RECORDS:
-                oldest = next(iter(self._filtered_window_cache))
-                self._filtered_window_cache.pop(oldest, None)
+            trim_cache_to_bytes(self._filtered_window_cache, MAX_FILTERED_WINDOW_CACHE_BYTES)
         return filtered, list(filtered_names), filter_warnings
 
     def window(
@@ -3864,6 +3894,11 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         "researchDir": str(RESEARCH_DIR),
                         "privateDatasetDir": str(PRIVATE_DATASET_DIR),
                         "validationResultsDir": str(VALIDATION_RESULTS_DIR),
+                        "windowPerformance": {
+                            "maxConcurrentRequests": MAX_CONCURRENT_WINDOW_REQUESTS,
+                            "sourceCacheBytes": MAX_WINDOW_SOURCE_CACHE_BYTES,
+                            "filteredCacheBytes": MAX_FILTERED_WINDOW_CACHE_BYTES,
+                        },
                         "allowedResearchWriteRoots": [str(root) for root in ALLOWED_RESEARCH_WRITE_ROOTS],
                         "buildInfo": app_build_info(),
                         "appFingerprint": app_fingerprint(),
@@ -3906,8 +3941,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 strict_montage = qs.get("strictMontage", ["0"])[0] == "1"
                 compact_active = qs.get("compactActive", ["0"])[0] == "1"
                 if requested_montages:
-                    return self.send_json(
-                        self.store.window_multi(
+                    with WINDOW_REQUEST_SEMAPHORE:
+                        payload = self.store.window_multi(
                             required(qs, "id"),
                             float(qs.get("start", ["0"])[0]),
                             float(qs.get("duration", ["10"])[0]),
@@ -3921,9 +3956,9 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                             strict_montage,
                             compact_active,
                         )
-                    )
-                return self.send_json(
-                    self.store.window(
+                    return self.send_json(payload)
+                with WINDOW_REQUEST_SEMAPHORE:
+                    payload = self.store.window(
                         required(qs, "id"),
                         float(qs.get("start", ["0"])[0]),
                         float(qs.get("duration", ["10"])[0]),
@@ -3935,7 +3970,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                         int(qs.get("maxPoints", ["1800"])[0]),
                         strict_montage,
                     )
-                )
+                return self.send_json(payload)
             if path == "/api/research/dataset":
                 dataset = load_research_dataset(qs.get("path", qs.get("dataset", [""]))[0])
                 return self.send_json(dataset)

@@ -65,3 +65,31 @@ def test_control_interactions_pause_and_resume_background_prefetch() -> None:
     assert "schedulePrefetchAfterControlInteraction(delayMs = 400)" in source
     assert "for (const controller of state.researchPrefetchControllers) controller.abort();" in source
     assert "signal: controller.signal" in source
+
+
+def test_filter_and_timebase_controls_reuse_cache_before_showing_loading() -> None:
+    source = app_source()
+
+    assert "function cachedWindowForParams(params)" in source
+    assert "preferredResearchWindowMontages(params.montage)" in source
+    assert "if (cached) {" in source
+    assert "setWaveLoading(true);" in source
+    assert source.index("if (cached) {") < source.index("setWaveLoading(true);")
+
+
+def test_research_prefetch_limits_render_load() -> None:
+    source = app_source()
+
+    assert "const RESEARCH_PREFETCH_LOOKAHEAD = 2" in source
+    assert "const montages = options.montages || montage" in source
+    assert 'compactActive: options.compactActive === false ? "0" : "1"' in source
+    assert "enqueueResearchPrefetchCases(rest)" not in source
+
+
+def test_reader_display_settings_persist_between_epochs() -> None:
+    source = app_source()
+
+    assert "researchDisplaySettingsInitialized: false" in source
+    assert "if (!state.researchDisplaySettingsInitialized)" in source
+    assert "state.researchDisplaySettingsInitialized = true" in source
+    assert "options.duration || els.durationSelect?.value || defaultResearchTimebaseSec()" in source

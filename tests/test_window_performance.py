@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import gzip
 import threading
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
-from app import RecordingStore, compact_active_window_payload, maybe_gzip_http_body
+from app import RecordingStore, compact_active_window_payload, estimated_cache_bytes, maybe_gzip_http_body, trim_cache_to_bytes
 
 
 def test_maybe_gzip_http_body_compresses_large_json_losslessly() -> None:
@@ -57,3 +58,24 @@ def test_compact_active_window_payload_removes_duplicate_waveform_container() ->
     for key in ("montageViews", "metadata", "channelValidation", "channelConfiguration", "filterPadding"):
         assert key not in compact
     assert compact_active_window_payload(payload, False) is payload
+
+
+def test_window_cache_is_trimmed_by_memory_usage() -> None:
+    cache = {
+        "old": {"data": np.zeros((4, 1000), dtype=np.float64)},
+        "new": {"data": np.ones((4, 1000), dtype=np.float64)},
+    }
+    one_entry_budget = estimated_cache_bytes("new") + estimated_cache_bytes(cache["new"]) + 512
+
+    remaining = trim_cache_to_bytes(cache, one_entry_budget)
+
+    assert list(cache) == ["new"]
+    assert remaining <= one_entry_budget
+
+
+def test_window_request_concurrency_is_limited_to_two() -> None:
+    source = Path("app.py").read_text(encoding="utf-8")
+
+    assert 'EEG_VIEWER_MAX_CONCURRENT_WINDOW_REQUESTS", "2"' in source
+    assert "max(1, min(2," in source
+    assert "with WINDOW_REQUEST_SEMAPHORE:" in source

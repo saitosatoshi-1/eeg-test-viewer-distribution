@@ -22,7 +22,7 @@ const MOBILE_HF_OFF_WINDOW_MAX_POINTS = 5000;
 const MOBILE_MULTI_MONTAGE_MAX_POINTS = 1000;
 const DESKTOP_WINDOW_MAX_POINTS = 5000;
 const MAX_WINDOW_CACHE_ENTRIES = 72;
-const RESEARCH_PREFETCH_LOOKAHEAD = 5;
+const RESEARCH_PREFETCH_LOOKAHEAD = 2;
 const MONTAGE_LABELS = {
   longitudinal: "縦双極誘導",
   a1a2: "同側耳朶参照基準2",
@@ -100,6 +100,7 @@ const state = {
   researchPrefetchQueuedKeys: new Set(),
   researchPrefetchControllers: new Set(),
   researchPrefetchResumeTimer: null,
+  researchDisplaySettingsInitialized: false,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
   researchUsualMontage: "",
@@ -2209,6 +2210,7 @@ async function startValidationWorkflow() {
   state.researchTestStartedMs = 0;
   state.researchTestCompletedAt = "";
   state.researchResultAutoSubmitted = false;
+  state.researchDisplaySettingsInitialized = false;
   resetResearchPrefetch({ clearRecords: true });
   const profile = researchProfile();
   const reviewerId = safeResultFilenamePart(profile.readerName || profile.readerId || "reviewer", "reviewer");
@@ -2388,6 +2390,7 @@ async function startResearchTest() {
   state.researchResultAutoSubmitted = false;
   state.researchDebriefSubmitted = false;
   state.researchUsualMontage = "";
+  state.researchDisplaySettingsInitialized = false;
   resetResearchPrefetch({ clearRecords: true });
   hideResearchTutorial();
   const profile = researchProfile();
@@ -2467,10 +2470,14 @@ async function showResearchCase(index) {
     state.dragSelection = null;
     const profile = researchProfile();
     const usualMontage = isValidationWorkflow() ? "longitudinal" : (isResearchPracticeCase(item) ? "conventional" : (state.researchUsualMontage || profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional"));
-    if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
-    if (els.tcSelect) els.tcSelect.value = "0.3";
-    if (els.hfSelect) els.hfSelect.value = "120";
-    const researchTimebase = defaultResearchTimebaseSec();
+    if (!state.researchDisplaySettingsInitialized) {
+      if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
+      if (els.tcSelect) els.tcSelect.value = "0.3";
+      if (els.hfSelect) els.hfSelect.value = "120";
+      if (els.durationSelect) els.durationSelect.value = String(defaultResearchTimebaseSec());
+      state.researchDisplaySettingsInitialized = true;
+    }
+    const researchTimebase = Number(els.durationSelect?.value || defaultResearchTimebaseSec()) || defaultResearchTimebaseSec();
     if (els.durationSelect) els.durationSelect.value = String(researchTimebase);
     state.start = centeredStartForResearchCase(item, researchTimebase);
     state.viewMode = "single";
@@ -2486,7 +2493,7 @@ async function showResearchCase(index) {
       setRightPanelVisible(false, { save: false });
     }
     state.windowData = null;
-    await loadWindow();
+    await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
     scheduleLayoutRefresh();
     if (isValidationWorkflow()) hideResearchTutorial();
     else updateResearchTutorial(item);
@@ -2495,6 +2502,7 @@ async function showResearchCase(index) {
     renderResearchInlineProgress();
     setStatus(isValidationWorkflow() ? `Validation: ${state.researchCaseIndex + 1}/${cases.length} · ${waveformActionText()}して採用/除外を選択してください` : (isResearchPracticeCase(item) ? `${researchPracticeLabel(item)}: ${waveformActionText()}して三択から回答してください` : (item.sampleEpoch ? `Phase ${state.researchSession?.phase || ""} sample` : `Test ${state.researchSession?.phase || ""}: ${state.researchCaseIndex + 1}/${cases.length}`)));
     renderRightResearchPanels();
+    scheduleCurrentResearchWindowPrefetch();
     scheduleResearchPrefetch(state.researchCaseIndex);
   } catch (err) {
     hideResearchTutorial();
@@ -3497,6 +3505,18 @@ function rememberWindowCache(key, data) {
   }
 }
 
+function cachedWindowForParams(params) {
+  const exact = state.windowCache.get(windowCacheKey(params));
+  if (exact || params.compactActive !== "1") return exact;
+  // 現在モンタージュを含む全モンタージュ応答も、同じ表示条件なら再利用できる。
+  const fullParams = {
+    ...params,
+    montages: preferredResearchWindowMontages(params.montage).join(","),
+    compactActive: "0",
+  };
+  return state.windowCache.get(windowCacheKey(fullParams));
+}
+
 function clearWindowCacheForCurrentRecording() {
   const recordId = String(state.recordingId || "");
   if (!recordId) {
@@ -3530,9 +3550,9 @@ function researchCasePrefetchMontage(item) {
 }
 
 function researchWindowPrefetchParams(recordId, item, options = {}) {
-  const duration = Number(options.duration || defaultResearchTimebaseSec()) || defaultResearchTimebaseSec();
+  const duration = Number(options.duration || els.durationSelect?.value || defaultResearchTimebaseSec()) || defaultResearchTimebaseSec();
   const montage = options.montage || researchCasePrefetchMontage(item);
-  const montages = options.montages || preferredResearchWindowMontages(montage).join(",");
+  const montages = options.montages || montage;
   return {
     id: recordId,
     start: options.start ?? researchCasePrefetchStart(item, duration),
@@ -3545,6 +3565,7 @@ function researchWindowPrefetchParams(recordId, item, options = {}) {
     ecg: options.ecg ?? (els.ecgToggle?.checked ? "1" : "0"),
     maxPoints: options.maxPoints || windowMaxPoints(),
     strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
+    compactActive: options.compactActive === false ? "0" : "1",
   };
 }
 
@@ -3652,9 +3673,7 @@ function scheduleResearchPrefetch(aroundIndex = state.researchCaseIndex) {
     ...cases.slice(0, index),
   ].filter((item) => item?.sampleEpoch || !answeredIds.has(String(item?.caseId || "")));
   const ahead = ordered.slice(0, RESEARCH_PREFETCH_LOOKAHEAD);
-  const rest = ordered.slice(RESEARCH_PREFETCH_LOOKAHEAD);
   enqueueResearchPrefetchCases(ahead, { priority: true });
-  enqueueResearchPrefetchCases(rest);
 }
 
 function scheduleCurrentResearchWindowPrefetch() {
@@ -3675,6 +3694,7 @@ function scheduleCurrentResearchWindowPrefetch() {
       ac: FIXED_AC_FILTER,
       ecg: els.ecgToggle?.checked ? "1" : "0",
       maxPoints: windowMaxPoints(),
+      compactActive: false,
     });
   }, 0);
 }
@@ -3701,7 +3721,7 @@ function resetResearchPrefetch(options = {}) {
   if (options.clearRecords) state.researchPrefetchRecordIds.clear();
 }
 
-function applyWindowData(data, requestedMontage) {
+function applyWindowData(data, requestedMontage, options = {}) {
   state.windowData = data;
   updateMontageAvailabilityFromWindow(data);
   if (TEST_ONLY_DISTRIBUTION && Array.isArray(data?.montageViews)) {
@@ -3717,7 +3737,8 @@ function applyWindowData(data, requestedMontage) {
     }
   }
   state.activeMontage = data.montage || requestedMontage;
-  state.start = state.windowData.start || 0;
+  const viewportStart = Number(options.viewportStart);
+  state.start = Number.isFinite(viewportStart) ? viewportStart : (state.windowData.start || 0);
   renderStatus();
   updateWaveScrollbar();
   renderWarnings();
@@ -3734,51 +3755,50 @@ function updateMontageAvailabilityFromWindow(data = state.windowData) {
 
 async function loadWindow(options = {}) {
   if (!state.recordingId) return;
-  cancelActiveWindowLoad({ hideLoading: false });
+  cancelActiveWindowLoad();
+  const requestedMontage = activeMontageValue();
+  const viewportStart = Number(state.start || 0);
+  const viewportDuration = Number(els.durationSelect?.value || 10) || 10;
+  const requestedMontages = options.activeMontageOnly
+    ? [requestedMontage]
+    : TEST_ONLY_DISTRIBUTION
+      ? preferredResearchWindowMontages(requestedMontage)
+      : preferredWindowMontages(requestedMontage);
+  const params = {
+    id: state.recordingId,
+    start: viewportStart,
+    duration: viewportDuration,
+    montage: requestedMontage,
+    montages: requestedMontages.join(","),
+    tc: els.tcSelect.value,
+    hf: els.hfSelect.value,
+    ac: FIXED_AC_FILTER,
+    ecg: els.ecgToggle.checked ? "1" : "0",
+    maxPoints: windowMaxPoints(),
+    strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
+    compactActive: options.activeMontageOnly ? "1" : "0",
+  };
+  const cacheKey = windowCacheKey(params);
+  const cached = cachedWindowForParams(params);
+  if (cached) {
+    applyWindowData(cached, requestedMontage, { viewportStart });
+    setStatus("Ready");
+    return cached;
+  }
+
   const controller = new AbortController();
   const requestId = state.windowLoadRequestId + 1;
   state.windowLoadRequestId = requestId;
   state.windowLoadController = controller;
   setWaveLoading(true);
   const promise = (async () => {
-    // Promiseをstateへ登録してから処理を始め、同期キャッシュ時の競合を避ける。
-    await Promise.resolve();
     const endpoint = "/api/window";
     try {
       setStatus("Loading waveform...", { busy: true, progress: 75 });
-      const requestedMontage = activeMontageValue();
-      const requestedDuration = Number(els.durationSelect?.value || 10) || 10;
-      const requestedMontages = options.activeMontageOnly
-        ? [requestedMontage]
-        : TEST_ONLY_DISTRIBUTION
-          ? preferredResearchWindowMontages(requestedMontage)
-          : preferredWindowMontages(requestedMontage);
-      const params = {
-        id: state.recordingId,
-        start: state.start,
-        duration: requestedDuration,
-        montage: requestedMontage,
-        montages: requestedMontages.join(","),
-        tc: els.tcSelect.value,
-        hf: els.hfSelect.value,
-        ac: FIXED_AC_FILTER,
-        ecg: els.ecgToggle.checked ? "1" : "0",
-        maxPoints: windowMaxPoints(),
-        strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
-        compactActive: options.activeMontageOnly ? "1" : "0",
-      };
-      const cacheKey = windowCacheKey(params);
-      const cached = state.windowCache.get(cacheKey);
-      if (cached) {
-        if (requestId !== state.windowLoadRequestId || controller.signal.aborted) return undefined;
-        applyWindowData(cached, requestedMontage);
-        setStatus("Ready");
-        return cached;
-      }
       const data = await fetchJson(`${endpoint}?${qs(params)}`, { signal: controller.signal });
       if (requestId !== state.windowLoadRequestId || controller.signal.aborted) return undefined;
       rememberWindowCache(cacheKey, data);
-      applyWindowData(data, requestedMontage);
+      applyWindowData(data, requestedMontage, { viewportStart });
       return data;
     } catch (err) {
       if (!isAbortError(err) && requestId === state.windowLoadRequestId) {
