@@ -86,10 +86,12 @@ def test_research_prefetch_limits_render_load() -> None:
     assert "enqueueResearchPrefetchCases(rest)" not in source
 
 
-def test_reader_display_settings_persist_between_epochs() -> None:
+def test_each_epoch_resets_required_display_defaults() -> None:
     source = app_source()
 
-    assert "researchDisplaySettingsInitialized: false" in source
-    assert "if (!state.researchDisplaySettingsInitialized)" in source
-    assert "state.researchDisplaySettingsInitialized = true" in source
-    assert "options.duration || els.durationSelect?.value || defaultResearchTimebaseSec()" in source
+    assert 'els.sensitivitySelect.value = "10uV"' in source
+    assert 'els.tcSelect.value = "0.3"' in source
+    assert 'els.hfSelect.value = "120"' in source
+    assert "const researchTimebase = defaultResearchTimebaseSec()" in source
+    assert 'const FIXED_AC_FILTER = "60"' in source
+    assert "researchDisplaySettingsInitialized" not in source

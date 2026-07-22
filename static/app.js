@@ -100,7 +100,6 @@ const state = {
   researchPrefetchQueuedKeys: new Set(),
   researchPrefetchControllers: new Set(),
   researchPrefetchResumeTimer: null,
-  researchDisplaySettingsInitialized: false,
   researchTutorialDismissed: false,
   researchSampleCompletedPhases: {},
   researchUsualMontage: "",
@@ -2210,7 +2209,6 @@ async function startValidationWorkflow() {
   state.researchTestStartedMs = 0;
   state.researchTestCompletedAt = "";
   state.researchResultAutoSubmitted = false;
-  state.researchDisplaySettingsInitialized = false;
   resetResearchPrefetch({ clearRecords: true });
   const profile = researchProfile();
   const reviewerId = safeResultFilenamePart(profile.readerName || profile.readerId || "reviewer", "reviewer");
@@ -2390,7 +2388,6 @@ async function startResearchTest() {
   state.researchResultAutoSubmitted = false;
   state.researchDebriefSubmitted = false;
   state.researchUsualMontage = "";
-  state.researchDisplaySettingsInitialized = false;
   resetResearchPrefetch({ clearRecords: true });
   hideResearchTutorial();
   const profile = researchProfile();
@@ -2470,14 +2467,10 @@ async function showResearchCase(index) {
     state.dragSelection = null;
     const profile = researchProfile();
     const usualMontage = isValidationWorkflow() ? "longitudinal" : (isResearchPracticeCase(item) ? "conventional" : (state.researchUsualMontage || profile.usualMontage || item.phase1Montage || activeMontageValue() || "conventional"));
-    if (!state.researchDisplaySettingsInitialized) {
-      if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
-      if (els.tcSelect) els.tcSelect.value = "0.3";
-      if (els.hfSelect) els.hfSelect.value = "120";
-      if (els.durationSelect) els.durationSelect.value = String(defaultResearchTimebaseSec());
-      state.researchDisplaySettingsInitialized = true;
-    }
-    const researchTimebase = Number(els.durationSelect?.value || defaultResearchTimebaseSec()) || defaultResearchTimebaseSec();
+    if (els.sensitivitySelect) els.sensitivitySelect.value = "10uV";
+    if (els.tcSelect) els.tcSelect.value = "0.3";
+    if (els.hfSelect) els.hfSelect.value = "120";
+    const researchTimebase = defaultResearchTimebaseSec();
     if (els.durationSelect) els.durationSelect.value = String(researchTimebase);
     state.start = centeredStartForResearchCase(item, researchTimebase);
     state.viewMode = "single";
