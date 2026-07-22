@@ -2,7 +2,7 @@ services:
   - type: web
     name: eeg-test-viewer
     env: docker
-    plan: starter
+    plan: standard
     autoDeploy: false
     disk:
       name: eeg-test-viewer-data
