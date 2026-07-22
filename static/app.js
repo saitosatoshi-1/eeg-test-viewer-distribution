@@ -61,8 +61,8 @@ const state = {
   cursorTime: null,
   dragSelection: null,
   rightPanelVisible: false,
-  windowLoadInFlight: false,
-  windowLoadPending: false,
+  windowLoadController: null,
+  windowLoadRequestId: 0,
   windowLoadPromise: null,
   windowCache: new Map(),
   suppressNextClick: false,
@@ -73,7 +73,6 @@ const state = {
   controlWatchTimer: null,
   durationRefreshTimer: null,
   filterRefreshTimer: null,
-  durationSelectFocusedAt: 0,
   panelResizeDrag: null,
   researchTutorialDrag: null,
   researchTutorialMoved: false,
@@ -198,8 +197,32 @@ function qs(params) {
   return new URLSearchParams(params).toString();
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+function abortError() {
+  const error = new Error("Request aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function sleep(ms, signal = null) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(abortError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function cloneFetchOptions(options = {}) {
@@ -209,6 +232,7 @@ function cloneFetchOptions(options = {}) {
 }
 
 function shouldRetryFetchError(err, response = null) {
+  if (isAbortError(err)) return false;
   if (!navigator.onLine) return true;
   if (!response) return true;
   return response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
@@ -234,7 +258,7 @@ async function fetchWithRetry(url, options = {}) {
       if (!shouldRetryFetchError(err) || attempt === attempts) throw err;
     }
     setStatus(`通信が不安定です。再試行中 ${attempt}/${attempts - 1}...`, { busy: true });
-    await sleep(retryDelayMs * attempt);
+    await sleep(retryDelayMs * attempt, options.signal);
   }
   throw lastError || new Error("Network request failed");
 }
@@ -494,25 +518,7 @@ function startControlValueWatcher() {
       state.lastFilterControlKey = filterKey;
       handleFilterControlChange("watcher");
     }
-  }, 150);
-}
-
-function checkDeferredControlValues(source = "deferred") {
-  const montageValue = els.montageSelect?.value || "";
-  const durationValue = els.durationSelect?.value || "";
-  const filterKey = filterControlKey();
-  if (montageValue && montageValue !== state.lastMontageSelectValue) {
-    state.lastMontageSelectValue = montageValue;
-    handleMontageControlChange(source);
-  }
-  if (durationValue && durationValue !== state.lastDurationSelectValue) {
-    state.lastDurationSelectValue = durationValue;
-    handleDurationControlChange(source);
-  }
-  if (filterKey !== state.lastFilterControlKey) {
-    state.lastFilterControlKey = filterKey;
-    handleFilterControlChange(source);
-  }
+  }, 250);
 }
 
 function scheduleDurationRefresh(source = "duration", options = {}) {
@@ -521,29 +527,15 @@ function scheduleDurationRefresh(source = "duration", options = {}) {
   state.durationRefreshTimer = window.setTimeout(() => {
     state.durationRefreshTimer = null;
     const value = els.durationSelect?.value || "";
-    const currentDuration = Number(state.windowData?.duration || 0);
-    const selectedDuration = Number(value || 0);
     const changed = value && value !== state.lastDurationSelectValue;
-    const dataMismatch = Number.isFinite(selectedDuration) && selectedDuration > 0 && Math.abs(currentDuration - selectedDuration) > 0.001;
-    if (changed || dataMismatch || options.force) {
+    if (changed) {
       handleDurationControlChange(source);
     }
   }, options.delayMs ?? 40);
 }
 
 function commitDurationSelection(source = "duration") {
-  const select = els.durationSelect;
-  if (!select) return;
-  const focusedMs = Date.now() - Number(state.durationSelectFocusedAt || 0);
-  const shouldBlur = document.activeElement === select && (source.includes("change") || source.includes("input") || focusedMs > 250);
-  if (shouldBlur) {
-    window.setTimeout(() => {
-      if (document.activeElement === select) select.blur();
-      scheduleDurationRefresh(`${source}-commit`, { force: true, delayMs: 30 });
-    }, 0);
-  }
-  scheduleDurationRefresh(source, { force: true, delayMs: 80 });
-  window.setTimeout(() => scheduleDurationRefresh(`${source}-late`, { force: true, delayMs: 0 }), 260);
+  scheduleDurationRefresh(source, { delayMs: 20 });
 }
 
 function filterControlKey() {
@@ -580,38 +572,81 @@ function windowMaxPoints() {
   return isMultiMontageMode() ? MOBILE_MULTI_MONTAGE_MAX_POINTS : MOBILE_WINDOW_MAX_POINTS;
 }
 
+function cancelActiveWindowLoad(options = {}) {
+  const controller = state.windowLoadController;
+  if (!controller) return false;
+  state.windowLoadRequestId += 1;
+  state.windowLoadController = null;
+  state.windowLoadPromise = null;
+  controller.abort();
+  if (options.hideLoading !== false) setWaveLoading(false);
+  return true;
+}
+
 async function handleMontageControlChange(source = "change") {
   if (!els.montageSelect) return;
   state.lastMontageSelectValue = els.montageSelect.value || "";
   state.activeMontage = state.lastMontageSelectValue || state.activeMontage;
   updateResearchMontageTiming();
   renderStatus();
-  if (syncActiveMontageData({ requireExact: true })) {
+  const synced = syncActiveMontageData({ requireExact: true });
+  if (synced && loadedWindowMatchesCurrentDisplay(state.start, visibleDuration())) {
+    cancelActiveWindowLoad();
     draw();
     setStatus("Ready");
     return;
   }
   setStatus(`Loading montage ${state.activeMontage} / ${labelForMontage()}...`, { busy: true, progress: 70 });
-  await loadWindow();
+  await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
+  scheduleCurrentResearchWindowPrefetch();
   draw();
+}
+
+function loadedWindowMatchesCurrentDisplay(start, duration) {
+  const data = state.windowData;
+  if (!data || data.id !== state.recordingId || !(data.traces || []).length) return false;
+  const filters = data.displayFilters || {};
+  if (String(filters.tc || "").toUpperCase() !== String(els.tcSelect?.value || "").toUpperCase()) return false;
+  if (String(filters.hf || "").toUpperCase() !== String(els.hfSelect?.value || "").toUpperCase()) return false;
+  if (String(filters.ac || "").toUpperCase() !== FIXED_AC_FILTER) return false;
+  const activeMontage = activeMontageValue();
+  if (Array.isArray(data.montageViews)) {
+    const activeView = data.montageViews.find((view) => view.montage === activeMontage);
+    if (!activeView || activeView.available === false || !(activeView.traces || []).length) return false;
+  } else if (data.montage && data.montage !== activeMontage) {
+    return false;
+  }
+  const loadedStart = Number(data.start);
+  const loadedDuration = Number(data.duration);
+  const targetStart = Number(start);
+  const targetDuration = Number(duration);
+  if (![loadedStart, loadedDuration, targetStart, targetDuration].every(Number.isFinite)) return false;
+  const tolerance = 0.002;
+  return targetStart >= loadedStart - tolerance
+    && targetStart + targetDuration <= loadedStart + loadedDuration + tolerance;
 }
 
 async function handleDurationControlChange(source = "change") {
   if (!els.durationSelect) return;
   state.lastDurationSelectValue = els.durationSelect.value || "";
   const nextDuration = Number(state.lastDurationSelectValue || 10) || 10;
-  if (state.windowData) {
-    state.windowData.duration = nextDuration;
-  }
   const researchCase = currentResearchCase();
-  state.start = TEST_ONLY_DISTRIBUTION && isMobileViewport() && researchCase
+  const nextStart = TEST_ONLY_DISTRIBUTION && isMobileViewport() && researchCase
     ? centeredStartForResearchCase(researchCase, nextDuration)
     : clampStart(state.start, nextDuration);
+  state.start = nextStart;
   updateWaveScrollbar();
   renderStatus();
   forceViewerRepaint();
+  if (loadedWindowMatchesCurrentDisplay(nextStart, nextDuration)) {
+    cancelActiveWindowLoad();
+    syncActiveMontageData({ requireExact: true });
+    setStatus("Ready");
+    return;
+  }
   setStatus(`Loading timebase ${state.lastDurationSelectValue}s...`, { busy: true, progress: 70 });
-  await loadWindow();
+  await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
+  scheduleCurrentResearchWindowPrefetch();
   forceViewerRepaint();
 }
 
@@ -655,36 +690,16 @@ function bindControls() {
     els.recordingSelect,
     els.montageSelect,
     els.sensitivitySelect,
-    els.tcSelect,
-    els.hfSelect,
-    els.durationSelect,
     els.paperSelect,
     els.ecgToggle,
   ].filter(Boolean).forEach((el) => el.addEventListener("change", onControlChange));
-  [
-    els.montageSelect,
-    els.sensitivitySelect,
-    els.durationSelect,
-    els.tcSelect,
-    els.hfSelect,
-    els.ecgToggle,
-  ].filter(Boolean).forEach((el) => {
-    const check = () => window.setTimeout(() => checkDeferredControlValues("deferred"), 0);
-    el.addEventListener("blur", check);
-    el.addEventListener("click", check);
-    el.addEventListener("input", check);
-    el.addEventListener("keyup", check);
-    el.addEventListener("mouseup", check);
-  });
   [els.tcSelect, els.hfSelect].filter(Boolean).forEach((el) => {
     const schedule = (ev) => {
       saveSettings();
-      scheduleFilterRefresh(ev.type, { delayMs: ev.type === "blur" ? 0 : 80 });
+      scheduleFilterRefresh(ev.type, { delayMs: 20 });
     };
     el.addEventListener("input", schedule);
-    el.addEventListener("blur", schedule);
-    el.addEventListener("pointerup", schedule);
-    el.addEventListener("touchend", schedule);
+    el.addEventListener("change", schedule);
   });
   els.sensitivitySelect?.addEventListener("input", () => {
     saveSettings();
@@ -692,14 +707,8 @@ function bindControls() {
     draw();
   });
   if (els.durationSelect) {
-    els.durationSelect.addEventListener("focus", () => {
-      state.durationSelectFocusedAt = Date.now();
-    });
     els.durationSelect.addEventListener("input", () => commitDurationSelection("duration-input"));
     els.durationSelect.addEventListener("change", () => commitDurationSelection("duration-change"));
-    els.durationSelect.addEventListener("pointerup", () => commitDurationSelection("duration-pointerup"));
-    els.durationSelect.addEventListener("keyup", () => commitDurationSelection("duration-keyup"));
-    window.addEventListener("focus", () => scheduleDurationRefresh("duration-window-focus", { delayMs: 80 }));
   }
   els.prevBtn?.addEventListener("click", () => {
     pageWaveform(-1);
@@ -3717,63 +3726,66 @@ function updateMontageAvailabilityFromWindow(data = state.windowData) {
 
 async function loadWindow(options = {}) {
   if (!state.recordingId) return;
-  if (state.windowLoadInFlight) {
-    state.windowLoadPending = true;
-    setStatus("Loading waveform...", { busy: true, progress: 75 });
-    setWaveLoading(true);
-    return state.windowLoadPromise || undefined;
-  }
-  state.windowLoadInFlight = true;
+  cancelActiveWindowLoad({ hideLoading: false });
+  const controller = new AbortController();
+  const requestId = state.windowLoadRequestId + 1;
+  state.windowLoadRequestId = requestId;
+  state.windowLoadController = controller;
   setWaveLoading(true);
-  state.windowLoadPromise = (async () => {
+  const promise = (async () => {
+    // Promiseをstateへ登録してから処理を始め、同期キャッシュ時の競合を避ける。
+    await Promise.resolve();
     const endpoint = "/api/window";
     try {
-      do {
-        state.windowLoadPending = false;
-        setStatus("Loading waveform...", { busy: true, progress: 75 });
-        const requestedMontage = activeMontageValue();
-        const requestedDuration = Number(els.durationSelect?.value || 10) || 10;
-        const requestedMontages = options.activeMontageOnly
-          ? [requestedMontage]
-          : TEST_ONLY_DISTRIBUTION
-            ? preferredResearchWindowMontages(requestedMontage)
-            : preferredWindowMontages(requestedMontage);
-        const params = {
-          id: state.recordingId,
-          start: state.start,
-          duration: requestedDuration,
-          montage: requestedMontage,
-          montages: requestedMontages.join(","),
-          tc: els.tcSelect.value,
-          hf: els.hfSelect.value,
-          ac: FIXED_AC_FILTER,
-          ecg: els.ecgToggle.checked ? "1" : "0",
-          maxPoints: windowMaxPoints(),
-          strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
-        };
-        const cacheKey = windowCacheKey(params);
-        const cached = state.windowCache.get(cacheKey);
-        if (cached) {
-          applyWindowData(cached, requestedMontage);
-          setStatus("Ready");
-          setWaveLoading(false);
-          return cached;
-        }
-        const data = await fetchJson(`${endpoint}?${qs(params)}`);
-        if (state.windowLoadPending) continue;
-        rememberWindowCache(cacheKey, data);
-        applyWindowData(data, requestedMontage);
-      } while (state.windowLoadPending);
+      setStatus("Loading waveform...", { busy: true, progress: 75 });
+      const requestedMontage = activeMontageValue();
+      const requestedDuration = Number(els.durationSelect?.value || 10) || 10;
+      const requestedMontages = options.activeMontageOnly
+        ? [requestedMontage]
+        : TEST_ONLY_DISTRIBUTION
+          ? preferredResearchWindowMontages(requestedMontage)
+          : preferredWindowMontages(requestedMontage);
+      const params = {
+        id: state.recordingId,
+        start: state.start,
+        duration: requestedDuration,
+        montage: requestedMontage,
+        montages: requestedMontages.join(","),
+        tc: els.tcSelect.value,
+        hf: els.hfSelect.value,
+        ac: FIXED_AC_FILTER,
+        ecg: els.ecgToggle.checked ? "1" : "0",
+        maxPoints: windowMaxPoints(),
+        strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
+      };
+      const cacheKey = windowCacheKey(params);
+      const cached = state.windowCache.get(cacheKey);
+      if (cached) {
+        if (requestId !== state.windowLoadRequestId || controller.signal.aborted) return undefined;
+        applyWindowData(cached, requestedMontage);
+        setStatus("Ready");
+        return cached;
+      }
+      const data = await fetchJson(`${endpoint}?${qs(params)}`, { signal: controller.signal });
+      if (requestId !== state.windowLoadRequestId || controller.signal.aborted) return undefined;
+      rememberWindowCache(cacheKey, data);
+      applyWindowData(data, requestedMontage);
+      return data;
     } catch (err) {
-      if (!state.windowLoadPending) setStatus(`Waveform failed: ${err.message}`, { error: true });
+      if (!isAbortError(err) && requestId === state.windowLoadRequestId) {
+        setStatus(`Waveform failed: ${err.message}`, { error: true });
+      }
+      return undefined;
     } finally {
-      state.windowLoadInFlight = false;
-      state.windowLoadPending = false;
-      state.windowLoadPromise = null;
-      setWaveLoading(false);
+      if (requestId === state.windowLoadRequestId) {
+        state.windowLoadController = null;
+        state.windowLoadPromise = null;
+        setWaveLoading(false);
+      }
     }
   })();
-  return state.windowLoadPromise;
+  state.windowLoadPromise = promise;
+  return promise;
 }
 
 function renderMetadata() {
