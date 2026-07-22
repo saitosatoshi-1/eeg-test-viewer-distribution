@@ -462,7 +462,7 @@ function applyWorkflowChrome() {
   if (tab) tab.textContent = validation ? "Validation" : "Test";
   const panelTitle = document.querySelector('[data-right-tab-panel="test"] .panel-title');
   if (panelTitle) panelTitle.textContent = validation ? "Validation" : "Test";
-  if (els.researchUndoBtn) els.researchUndoBtn.title = "前の回答を取り消して、その問題に戻ります";
+  if (els.researchUndoBtn) els.researchUndoBtn.title = "前の回答を保持したまま、その問題に戻ります";
 }
 
 function scheduleLayoutRefresh() {
@@ -772,7 +772,7 @@ function bindResearchControls() {
   window.addEventListener("pointermove", onResearchTutorialPointerMove);
   window.addEventListener("pointerup", finishResearchTutorialDrag);
   window.addEventListener("pointercancel", finishResearchTutorialDrag);
-  els.researchUndoBtn?.addEventListener("click", undoLastResearchAction);
+  els.researchUndoBtn?.addEventListener("click", revisitLastAnsweredCase);
   [
     els.researchMedicalYearsInput,
     els.researchSetupReaderIdInput,
@@ -2308,7 +2308,7 @@ async function saveValidationDecision(decision) {
     state.lastValidationResponse = data.response;
     state.lastValidationResponseCaseIndex = state.researchCaseIndex;
     renderRightResearchPanels();
-    showResearchToast(`保存しました: ${VALIDATION_DECISION_LABELS[decision] || decision} · やり直す場合は「前の問題をやり直す」`, { undo: true });
+    showResearchToast(`保存しました: ${VALIDATION_DECISION_LABELS[decision] || decision} · 確認・変更する場合は「前の問題に戻る」`, { undo: true });
     const nextIndex = firstUnansweredResearchCaseIndex();
     if (nextIndex >= 0) {
       await showResearchCase(nextIndex);
@@ -2321,33 +2321,6 @@ async function saveValidationDecision(decision) {
     showResearchToast(`保存できませんでした: ${err.message}`);
   } finally {
     state.researchSaving = false;
-  }
-}
-
-async function undoValidationResponse() {
-  if (!state.lastValidationResponse || !state.validationSession) return;
-  try {
-    const data = await fetchJson("/api/research/validation/response/undo", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        datasetPath: state.researchDatasetPath,
-        reviewerId: state.validationSession.reviewerId,
-        validationSet: state.validationSession.validationSet || selectedValidationDatasetKind(),
-        responseId: state.lastValidationResponse.responseId,
-      }),
-    });
-    state.validationSession = data.session;
-    setValidationResponsesFromSession(data.session);
-    const cases = activeResearchCases();
-    const caseId = data.undone?.caseId;
-    const index = cases.findIndex((row) => row.caseId === caseId);
-    state.lastValidationResponse = null;
-    hideResearchToast();
-    await showResearchCase(index >= 0 ? index : Math.max(0, state.lastValidationResponseCaseIndex));
-    setStatus("Validation undo complete");
-  } catch (err) {
-    setStatus(`Validation undo failed: ${err.message}`, { error: true });
   }
 }
 
@@ -2620,7 +2593,7 @@ async function saveResearchRating(rating) {
     state.lastResearchResponse = data.response;
     state.lastResearchResponseCaseIndex = state.researchCaseIndex;
     renderRightResearchPanels();
-    showResearchToast(`保存しました: ${researchRatingLabel(rating)} · やり直す場合は「前の問題をやりなおす」`, { undo: true });
+    showResearchToast(`保存しました: ${researchRatingLabel(rating)} · 確認・変更する場合は「前の問題に戻る」`, { undo: true });
     const cases = activeResearchCases();
     const nextIndex = firstUnansweredResearchCaseIndex();
     if (nextIndex >= 0) await showResearchCase(nextIndex);
@@ -2692,36 +2665,37 @@ function hideResearchToast() {
   els.researchToast?.classList.add("hidden");
 }
 
-async function undoResearchResponse() {
-  if (!state.lastResearchResponse || !state.researchSession) return;
-  try {
-    const data = await fetchJson("/api/research/test/response/undo", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        datasetPath: state.researchDatasetPath,
-        readerId: state.researchSession.readerId,
-        responseId: state.lastResearchResponse.responseId,
-        sessionToken: state.researchSession.sessionToken || "",
-      }),
-    });
-    state.researchSession = data.session;
-    setResearchResponsesFromSession(data.session);
-    const cases = activeResearchCases();
-    const caseId = data.undone?.caseId;
-    const index = cases.findIndex((row) => row.caseId === caseId);
-    state.lastResearchResponse = null;
-    hideResearchToast();
-    await showResearchCase(index >= 0 ? index : Math.max(0, state.lastResearchResponseCaseIndex));
-    setStatus("Undo complete");
-  } catch (err) {
-    setStatus(`Undo failed: ${err.message}`, { error: true });
-  }
+function lastAnsweredResponse(rows) {
+  return [...(rows || [])].filter((row) => row && !row.superseded && !row.undoneAt).sort((a, b) => {
+    const orderDiff = Number(a?.answerOrder || 0) - Number(b?.answerOrder || 0);
+    if (orderDiff) return orderDiff;
+    return String(a?.answeredAt || "").localeCompare(String(b?.answeredAt || ""));
+  }).pop() || null;
 }
 
-function undoLastResearchAction() {
-  if (isValidationWorkflow()) return undoValidationResponse();
-  undoResearchResponse();
+async function revisitLastAnsweredCase() {
+  const validation = isValidationWorkflow();
+  const response = lastAnsweredResponse(validation ? activeValidationResponses() : activeResearchResponses());
+  if (!response) return;
+  const cases = activeResearchCases();
+  const index = cases.findIndex((row) => String(row.caseId || "") === String(response.caseId || ""));
+  if (index < 0) {
+    setStatus("前の問題を現在の問題一覧から見つけられませんでした。", { error: true });
+    return;
+  }
+  hideResearchCompletion();
+  hideResearchDebriefing();
+  hideResearchToast();
+  state.researchResultAutoSubmitted = false;
+  if (validation) {
+    state.lastValidationResponse = response;
+    state.lastValidationResponseCaseIndex = index;
+  } else {
+    state.lastResearchResponse = response;
+    state.lastResearchResponseCaseIndex = index;
+  }
+  await showResearchCase(index);
+  setStatus("前の回答を保持したまま問題へ戻りました。回答を変更する場合は新しい選択肢を選んでください。");
 }
 
 async function exportResearchJson() {

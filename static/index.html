@@ -74,7 +74,7 @@
             <option value="30">30s</option>
           </select>
         </label>
-        <button class="tool-button research-top-undo" id="researchUndoBtn" type="button" disabled title="前の回答を取り消して、その問題に戻ります">前の問題をやり直す</button>
+        <button class="tool-button research-top-undo" id="researchUndoBtn" type="button" disabled title="前の回答を保持したまま、その問題に戻ります">前の問題に戻る</button>
         <span class="research-inline-progress primary-progress" id="researchInlineProgress" hidden></span>
         <label class="nk-select paper-select">
           <select id="paperSelect">
@@ -236,7 +236,7 @@
 
     <div id="contextMenu" class="context-menu hidden"></div>
 
-    <script src="/static/viewer_utils.js?v=20260722-epoch-defaults"></script>
-    <script src="/static/app.js?v=20260722-epoch-defaults"></script>
+    <script src="/static/viewer_utils.js?v=20260722-nondestructive-back"></script>
+    <script src="/static/app.js?v=20260722-nondestructive-back"></script>
   </body>
 </html>

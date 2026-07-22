@@ -95,3 +95,15 @@ def test_each_epoch_resets_required_display_defaults() -> None:
     assert "const researchTimebase = defaultResearchTimebaseSec()" in source
     assert 'const FIXED_AC_FILTER = "60"' in source
     assert "researchDisplaySettingsInitialized" not in source
+
+
+def test_back_button_revisits_without_deleting_saved_response() -> None:
+    source = app_source()
+
+    assert 'addEventListener("click", revisitLastAnsweredCase)' in source
+    assert "async function revisitLastAnsweredCase()" in source
+    handler = source.split("async function revisitLastAnsweredCase()", 1)[1].split("\n}\n", 1)[0]
+    assert "/response/undo" not in handler
+    assert "hideResearchDebriefing();" in handler
+    assert "await showResearchCase(index);" in handler
+    assert "前の回答を保持したまま" in source
