@@ -2673,13 +2673,34 @@ function lastAnsweredResponse(rows) {
   }).pop() || null;
 }
 
+function ensureAnsweredCaseIsAvailable(response, validation) {
+  const caseId = String(response?.caseId || "");
+  if (!caseId) return null;
+  const session = validation ? state.validationSession : state.researchSession;
+  const sessionCases = Array.isArray(session?.cases) ? session.cases : [];
+  let caseRow = sessionCases.find((row) => String(row?.caseId || "") === caseId) || null;
+  if (!caseRow && !validation) {
+    const assignedIds = new Set((state.researchSession?.assignment?.caseIds || []).map((value) => String(value || "")));
+    const assigned = !assignedIds.size || assignedIds.has(caseId);
+    if (assigned) {
+      caseRow = (state.researchDataset?.cases || []).find((row) => String(row?.caseId || "") === caseId) || null;
+    }
+    if (caseRow && state.researchSession) {
+      // 回答済み症例は軽量セッション一覧から外れるため、再表示する1件だけ一時的に戻す。
+      state.researchSession.cases = [...sessionCases, caseRow];
+    }
+  }
+  return caseRow;
+}
+
 async function revisitLastAnsweredCase() {
   const validation = isValidationWorkflow();
   const response = lastAnsweredResponse(validation ? activeValidationResponses() : activeResearchResponses());
   if (!response) return;
+  const caseRow = ensureAnsweredCaseIsAvailable(response, validation);
   const cases = activeResearchCases();
   const index = cases.findIndex((row) => String(row.caseId || "") === String(response.caseId || ""));
-  if (index < 0) {
+  if (!caseRow || index < 0) {
     setStatus("前の問題を現在の問題一覧から見つけられませんでした。", { error: true });
     return;
   }

@@ -107,3 +107,6 @@ def test_back_button_revisits_without_deleting_saved_response() -> None:
     assert "hideResearchDebriefing();" in handler
     assert "await showResearchCase(index);" in handler
     assert "前の回答を保持したまま" in source
+    assert "function ensureAnsweredCaseIsAvailable(response, validation)" in source
+    assert "state.researchSession.cases = [...sessionCases, caseRow]" in source
+    assert "state.researchDataset?.cases" in source
