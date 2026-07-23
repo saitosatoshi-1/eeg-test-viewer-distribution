@@ -10,7 +10,8 @@ function nkLabel(label) {
     .replaceAll("T7", "T3")
     .replaceAll("T8", "T4")
     .replaceAll("P7", "T5")
-    .replaceAll("P8", "T6");
+    .replaceAll("P8", "T6")
+    .replace(/-AVG$/i, "-AV");
 }
 
 function traceColor(trace, rowIndex, montage = activeMontageValue()) {

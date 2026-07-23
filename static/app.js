@@ -3840,7 +3840,7 @@ function renderStatus() {
     ? (state.windowData.montageViews || []).map((view) => (view.traces || []).length).join("/")
     : String((state.windowData?.traces || []).length);
   const traceText = traceCount && traceCount !== "0" ? ` · ${traceCount} traces` : "";
-  const firstTrace = state.windowData?.traces?.[0]?.label ? ` · ${state.windowData.traces[0].label}` : "";
+  const firstTrace = state.windowData?.traces?.[0]?.label ? ` · ${nkLabel(state.windowData.traces[0].label)}` : "";
   const loadedDuration = Number(state.windowData?.duration || 0);
   const durationText = loadedDuration ? ` · loaded ${loadedDuration.toFixed(2)}s` : "";
   setStatus(`${state.recordingId} · ${labelForMontage()} · ${sensitivity}uV/mm · TC ${tc} · HF ${hfText()}${traceText}${firstTrace}${durationText} · ${formatSec(state.start)}-${formatSec(end)}`);

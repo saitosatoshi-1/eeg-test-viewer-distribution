@@ -362,7 +362,7 @@ def montage_trace_requirements(montage: str) -> tuple[list[str], set[str]]:
         pairs = [
             ("Fp1", "A1"), ("Fp2", "A2"), ("F3", "A1"), ("F4", "A2"), ("C3", "A1"), ("C4", "A2"),
             ("P3", "A1"), ("P4", "A2"), ("O1", "A1"), ("O2", "A2"), ("F7", "A1"), ("F8", "A2"),
-            ("T7", "A1"), ("T8", "A2"), ("P7", "A1"), ("P8", "A2"), ("Fz", "A1"), ("Cz", "A2"), ("Pz", "A2"),
+            ("T7", "A1"), ("T8", "A2"), ("P7", "A1"), ("P8", "A2"), ("Fz", "A1"), ("Cz", "A2"), ("Pz", "A1"),
         ]
         return [f"{a}-{b}" for a, b in pairs], {item for pair in pairs for item in pair}
     if montage == "a1a2":
@@ -578,7 +578,7 @@ def build_montage_traces(
             ("P8", "A2", "right_temporal"),
             ("Fz", "A1", "midline"),
             ("Cz", "A2", "midline"),
-            ("Pz", "A2", "midline"),
+            ("Pz", "A1", "midline"),
         ]
         if montage == "conventional_average":
             scalp = [ch for ch in SCALP_ORDER if ch in index]

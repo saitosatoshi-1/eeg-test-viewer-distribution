@@ -78,7 +78,7 @@ def test_pz_is_in_reference_montages() -> None:
     for montage, expected in [
         ("average", "Pz-AVG"),
         ("conventional_average", "Pz-AVG"),
-        ("conventional", "Pz-A2"),
+        ("conventional", "Pz-A1"),
         ("a1a2", "Pz-A2"),
     ]:
         warnings: list[str] = []
