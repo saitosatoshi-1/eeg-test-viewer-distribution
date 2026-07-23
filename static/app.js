@@ -1415,11 +1415,16 @@ function defaultResearchTimebaseSec() {
 function researchCaseCenterTime(item) {
   const event = Number(item?.eventTime);
   if (Number.isFinite(event)) return event;
-  const total = recordingDuration();
-  if (Number.isFinite(total) && total > 0) return total / 2;
   const epochStart = Number(item?.epochStart);
   const duration = Number(item?.durationSec);
   if (Number.isFinite(epochStart) && Number.isFinite(duration) && duration > 0) return epochStart + duration / 2;
+  const datasetDuration = Number(state.researchDataset?.settings?.epochDurationSec);
+  if (Number.isFinite(epochStart) && Number.isFinite(datasetDuration) && datasetDuration > 0) {
+    return epochStart + datasetDuration / 2;
+  }
+  const total = recordingDuration();
+  if (Number.isFinite(total) && total > 0) return total / 2;
+  if (Number.isFinite(datasetDuration) && datasetDuration > 0) return datasetDuration / 2;
   return Number.isFinite(epochStart) ? epochStart : 0;
 }
 
@@ -1498,6 +1503,7 @@ function showResearchDebriefing() {
   els.researchDebriefScreen.setAttribute("aria-hidden", "false");
   if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "";
   hideResearchWaveProgress();
+  renderResearchInlineProgress();
 }
 
 function hideResearchDebriefing() {

@@ -97,6 +97,31 @@ def test_each_epoch_resets_required_display_defaults() -> None:
     assert "researchDisplaySettingsInitialized" not in source
 
 
+def test_mobile_research_epoch_uses_dataset_duration_for_centering() -> None:
+    source = app_source()
+    helper = source[
+        source.index("function researchCaseCenterTime")
+        : source.index("function centeredStartForResearchCase")
+    ]
+
+    assert "state.researchDataset?.settings?.epochDurationSec" in helper
+    assert "return datasetDuration / 2;" in helper
+
+
+def test_debriefing_immediately_replaces_stale_remaining_count() -> None:
+    source = app_source()
+    handler = source[
+        source.index("function showResearchDebriefing()")
+        : source.index("function hideResearchDebriefing()")
+    ]
+
+    assert 'els.researchDebriefScreen.setAttribute("aria-hidden", "false");' in handler
+    assert "renderResearchInlineProgress();" in handler
+    assert handler.index('els.researchDebriefScreen.setAttribute("aria-hidden", "false");') < handler.index(
+        "renderResearchInlineProgress();"
+    )
+
+
 def test_back_button_revisits_without_deleting_saved_response() -> None:
     source = app_source()
 
