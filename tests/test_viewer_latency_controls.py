@@ -101,11 +101,12 @@ def test_mobile_research_epoch_uses_dataset_duration_for_centering() -> None:
     source = app_source()
     helper = source[
         source.index("function researchCaseCenterTime")
-        : source.index("function centeredStartForResearchCase")
+        : source.index("async function requestMobileFullscreen")
     ]
 
     assert "state.researchDataset?.settings?.epochDurationSec" in helper
     assert "return datasetDuration / 2;" in helper
+    assert "TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 5 : researchCaseCenterTime(item)" in helper
 
 
 def test_debriefing_immediately_replaces_stale_remaining_count() -> None:

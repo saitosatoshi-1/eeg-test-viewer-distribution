@@ -1431,7 +1431,8 @@ function researchCaseCenterTime(item) {
 function centeredStartForResearchCase(item, timebaseSec = visibleDuration()) {
   const duration = Number(timebaseSec);
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : defaultResearchTimebaseSec();
-  return clampStart(researchCaseCenterTime(item) - safeDuration / 2, safeDuration);
+  const centerTime = TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 5 : researchCaseCenterTime(item);
+  return clampStart(centerTime - safeDuration / 2, safeDuration);
 }
 
 async function requestMobileFullscreen() {
