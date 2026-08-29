@@ -50,6 +50,18 @@ def test_timebase_can_reuse_loaded_filtered_window() -> None:
     assert "loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION })" in handler
 
 
+def test_timebase_change_keeps_research_target_centered_on_desktop_and_mobile() -> None:
+    source = app_source()
+    handler = source[
+        source.index("async function handleDurationControlChange")
+        : source.index("function scheduleFilterRefresh")
+    ]
+
+    assert "TEST_ONLY_DISTRIBUTION && researchCase" in handler
+    assert "centeredStartForResearchCase(researchCase, nextDuration)" in handler
+    assert "TEST_ONLY_DISTRIBUTION && isMobileViewport() && researchCase" not in handler
+
+
 def test_active_only_window_requests_compact_payload_and_avoid_forced_repaints() -> None:
     source = app_source()
 
@@ -97,7 +109,7 @@ def test_each_epoch_resets_required_display_defaults() -> None:
     assert "researchDisplaySettingsInitialized" not in source
 
 
-def test_mobile_research_epoch_uses_dataset_duration_for_centering() -> None:
+def test_research_epoch_centers_five_seconds_on_desktop_and_mobile() -> None:
     source = app_source()
     helper = source[
         source.index("function researchCaseCenterTime")
@@ -106,7 +118,8 @@ def test_mobile_research_epoch_uses_dataset_duration_for_centering() -> None:
 
     assert "state.researchDataset?.settings?.epochDurationSec" in helper
     assert "return datasetDuration / 2;" in helper
-    assert "TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 5 : researchCaseCenterTime(item)" in helper
+    assert "TEST_ONLY_DISTRIBUTION ? 5 : researchCaseCenterTime(item)" in helper
+    assert "TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 5" not in helper
 
 
 def test_debriefing_immediately_replaces_stale_remaining_count() -> None:

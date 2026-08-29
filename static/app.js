@@ -623,7 +623,9 @@ async function handleDurationControlChange(source = "change") {
   state.lastDurationSelectValue = els.durationSelect.value || "";
   const nextDuration = Number(state.lastDurationSelectValue || 10) || 10;
   const researchCase = currentResearchCase();
-  const nextStart = TEST_ONLY_DISTRIBUTION && isMobileViewport() && researchCase
+  // 研究症例ではTimebase変更後も、注目波形の時刻を画面中央に保つ。
+  // Keep the target waveform centered after Timebase changes in both desktop and mobile viewers.
+  const nextStart = TEST_ONLY_DISTRIBUTION && researchCase
     ? centeredStartForResearchCase(researchCase, nextDuration)
     : clampStart(state.start, nextDuration);
   state.start = nextStart;
@@ -1431,7 +1433,7 @@ function researchCaseCenterTime(item) {
 function centeredStartForResearchCase(item, timebaseSec = visibleDuration()) {
   const duration = Number(timebaseSec);
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : defaultResearchTimebaseSec();
-  const centerTime = TEST_ONLY_DISTRIBUTION && isMobileViewport() ? 5 : researchCaseCenterTime(item);
+  const centerTime = TEST_ONLY_DISTRIBUTION ? 5 : researchCaseCenterTime(item);
   return clampStart(centerTime - safeDuration / 2, safeDuration);
 }
 
