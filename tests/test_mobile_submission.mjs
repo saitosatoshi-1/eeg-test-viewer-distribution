@@ -72,9 +72,8 @@ test("mobile completion submits to server without export, share or email", async
   for (const id of ["researchMailBox", "researchCompleteSaveDesktopBtn", "researchCopyEmailBtn", "researchRetrySubmitBtn"]) {
     assert.equal(f.elements[id].hidden, true, id);
   }
-  assert.match(f.elements.researchCompleteMessage.textContent, /提出が完了しました/);
-  assert.match(f.elements.researchCompleteMessage.textContent, /ダウンロードやメール送付は不要/);
-  assert.match(f.statuses.at(-1).message, /メール送付は不要/);
+  assert.equal(f.elements.researchCompleteMessage.textContent, "結果はサーバーに保存され、提出が完了しました。この画面を閉じて構いません。");
+  assert.equal(f.statuses.at(-1).message, "提出が完了しました。");
   await f.context.completeResearchTest();
   assert.equal(f.calls.length, 1, "completed result must not submit again");
 });

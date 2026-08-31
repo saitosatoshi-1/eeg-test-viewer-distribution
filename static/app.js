@@ -1447,7 +1447,7 @@ function renderMobileResearchSubmission() {
   }
   if (els.researchCompleteMessage) {
     els.researchCompleteMessage.textContent = saved
-      ? "結果はサーバーに保存され、提出が完了しました。JSONのダウンロードやメール送付は不要です。この画面を閉じて構いません。"
+      ? "結果はサーバーに保存され、提出が完了しました。この画面を閉じて構いません。"
       : (failed
         ? "提出はまだ完了していません。画面を閉じず、通信環境を確認して「結果の保存を再試行」を押してください。"
         : "結果をサーバーに保存しています。この画面を閉じずにお待ちください。");
@@ -2791,7 +2791,7 @@ async function submitResearchJson(options = {}) {
     if (result?.ok !== true) throw new Error("サーバーでの保存を確認できませんでした。");
     const label = result.submissionId || result.filename || jsonFilename;
     const automaticMessage = isMobileViewport()
-      ? "提出が完了しました。JSONのダウンロードやメール送付は不要です。"
+      ? "提出が完了しました。"
       : "テスト完了。JSONファイルをダウンロードしてメールに添付してください。";
     if (els.researchSavedCsvName) {
       els.researchSavedCsvName.textContent = options.automatic
