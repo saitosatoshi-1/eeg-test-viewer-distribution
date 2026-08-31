@@ -1741,6 +1741,10 @@ body.test-only-distribution.validation-workflow:not(.right-panel-hidden) .right-
   gap: 8px;
 }
 
+.research-complete-panel [hidden] {
+  display: none !important;
+}
+
 .research-complete-panel .research-complete-actions button {
   grid-column: auto;
   min-height: 40px;
@@ -2457,11 +2461,6 @@ body.test-only-distribution.mobile-viewport .context-menu button {
 
   body.test-only-distribution.mobile-viewport .research-complete-actions {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  body.test-only-distribution.mobile-viewport #researchShareJsonBtn {
-    display: block;
-    width: 100%;
   }
 
   body.test-only-distribution.mobile-viewport #researchCompleteSaveDesktopBtn,

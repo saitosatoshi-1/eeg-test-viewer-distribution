@@ -15,6 +15,13 @@ $EEG_VIEWER_DATA_DIR/research/submitted_results/
 
 For Docker/Render, `EEG_VIEWER_DATA_DIR` is `/data`.
 
+### Participant completion / 参加者の提出
+
+- スマホ版の本番課題は、事後アンケート送信後に結果JSONをサーバーへ自動保存します。保存成功を確認した時点で提出完了となり、参加者によるJSONダウンロードやメール送付は不要です。
+- 保存中は画面を閉じないでください。保存失敗時は画面を閉じず、通信環境を確認して「結果の保存を再試行」を押してください。参加者IDや課題割付は変わりません。
+- PC版とValidationの提出手順は従来どおりです。管理者は従来の管理APIで保存済みJSONを取得できます。
+- `render.yaml`は`autoDeploy: false`です。GitHubへのpush後、Render DashboardでManual Deployを実施してください。
+
 ## Render Deployment
 
 1. Push this repository to GitHub.

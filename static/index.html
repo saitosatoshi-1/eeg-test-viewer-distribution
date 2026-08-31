@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260721-tutorial-center-emphasis" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260831-mobile-auto-submit" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -175,7 +175,7 @@
           <div class="research-complete-screen" id="researchCompleteScreen" hidden>
             <div class="research-complete-panel">
               <div class="research-complete-title" id="researchCompleteTitle">お疲れ様でした!</div>
-              <div class="research-complete-message" id="researchCompleteMessage">JSONファイルをダウンロードし、メールに添付して提出してください。</div>
+              <div class="research-complete-message" id="researchCompleteMessage" role="status" aria-live="polite">結果を確認中...</div>
               <div class="research-mail-box" id="researchMailBox">
                 <div class="research-mail-row"><span>宛先</span><strong>satoshi.saito@ncnp.go.jp</strong></div>
                 <textarea id="researchEmailBody" readonly>斉藤先生
@@ -190,7 +190,7 @@
                 <div class="research-saved-file" id="researchSavedCsvName">結果ファイルはまだ保存されていません。</div>
               </div>
               <div class="research-complete-actions">
-                <button class="export-button mobile-share" id="researchShareJsonBtn" type="button" hidden>JSONファイルをメールで送る</button>
+                <button class="export-button" id="researchRetrySubmitBtn" type="button" hidden>結果の保存を再試行</button>
                 <button class="export-button" id="researchCompleteSaveDesktopBtn" type="button">JSONファイルをダウンロード</button>
                 <button class="export-button secondary" id="researchCopyEmailBtn" type="button">メール例文をコピー</button>
               </div>
@@ -237,6 +237,6 @@
     <div id="contextMenu" class="context-menu hidden"></div>
 
     <script src="/static/viewer_utils.js?v=20260723-pz-a1-av"></script>
-    <script src="/static/app.js?v=20260723-mobile-center-5s"></script>
+    <script src="/static/app.js?v=20260831-mobile-auto-submit"></script>
   </body>
 </html>
