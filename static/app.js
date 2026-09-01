@@ -4,6 +4,8 @@ const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
 const RESEARCH_PENDING_RESPONSES_KEY = "eegViewerPendingResearchResponses.v1";
 const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
+const RESEARCH_ACTIVE_RUN_KEY = "eegViewerActiveResearchRun.v1";
+const RESEARCH_ACTIVE_RUN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const PUBLIC_WEB_MODE = !["", "localhost", "127.0.0.1", "::1"].includes(window.location.hostname || "");
 const TEST_ONLY_DISTRIBUTION = document.body.classList.contains("test-only-distribution");
 const PUBLIC_TEST_QUESTION_COUNT = 20;
@@ -400,6 +402,7 @@ async function init() {
   rememberControlValues();
   startControlValueWatcher();
   await loadRecordings();
+  await resumeActiveResearchRun();
 }
 
 function fixedResearchQuestionCount() {
@@ -828,6 +831,7 @@ function resetResearchProfileForm() {
   } catch {
     // Ignore private-mode storage failures.
   }
+  clearActiveResearchRun();
   updateEpilepsyCenterDurationRequirement();
   setResearchSetupMessage("テスト者情報を初期化しました。");
   setStatus("Test profile reset");
@@ -938,12 +942,61 @@ function annualEegReadingCountValue(value = eegReadingCountValue(), unit = eegRe
 }
 
 function storedResearchProfile() {
-  if (PUBLIC_WEB_MODE) return {};
+  if (PUBLIC_WEB_MODE) return readActiveResearchRun()?.profile || {};
   try {
     const profile = JSON.parse(localStorage.getItem(RESEARCH_PROFILE_KEY) || "{}");
     return profile && typeof profile === "object" ? profile : {};
   } catch {
     return {};
+  }
+}
+
+function readActiveResearchRun() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(RESEARCH_ACTIVE_RUN_KEY) || "{}");
+    if (!saved || typeof saved !== "object" || !saved.readerId || !saved.datasetPath) return null;
+    const savedAtMs = Date.parse(saved.savedAt || "");
+    if (!Number.isFinite(savedAtMs) || Date.now() - savedAtMs > RESEARCH_ACTIVE_RUN_MAX_AGE_MS) {
+      sessionStorage.removeItem(RESEARCH_ACTIVE_RUN_KEY);
+      return null;
+    }
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+function saveActiveResearchRun(overrides = {}) {
+  if (isValidationWorkflow()) return;
+  const previous = readActiveResearchRun() || {};
+  const readerId = overrides.readerId || state.researchSession?.readerId || previous.readerId || "";
+  const datasetPath = overrides.datasetPath || previous.datasetPath || state.researchDatasetPath || "";
+  if (!readerId || !datasetPath) return;
+  const payload = {
+    ...previous,
+    readerId,
+    datasetPath,
+    profile: overrides.profile || researchProfile(),
+    sampleCompletedPhases: overrides.sampleCompletedPhases || state.researchSampleCompletedPhases || {},
+    usualMontage: overrides.usualMontage ?? state.researchUsualMontage ?? previous.usualMontage ?? "",
+    testStartedAt: overrides.testStartedAt ?? state.researchTestStartedAt ?? previous.testStartedAt ?? "",
+    testStartedMs: overrides.testStartedMs ?? state.researchTestStartedMs ?? previous.testStartedMs ?? 0,
+    testCompletedAt: overrides.testCompletedAt ?? state.researchTestCompletedAt ?? previous.testCompletedAt ?? "",
+    debriefSubmitted: overrides.debriefSubmitted ?? state.researchDebriefSubmitted ?? previous.debriefSubmitted ?? false,
+    savedAt: new Date().toISOString(),
+  };
+  try {
+    sessionStorage.setItem(RESEARCH_ACTIVE_RUN_KEY, JSON.stringify(payload));
+  } catch {
+    // The server remains authoritative when tab storage is unavailable.
+  }
+}
+
+function clearActiveResearchRun() {
+  try {
+    sessionStorage.removeItem(RESEARCH_ACTIVE_RUN_KEY);
+  } catch {
+    // Ignore storage failures.
   }
 }
 
@@ -1790,6 +1843,7 @@ async function submitResearchDebriefing() {
       body: JSON.stringify(payload),
     });
     state.researchDebriefSubmitted = true;
+    saveActiveResearchRun({ debriefSubmitted: true });
     await completeResearchTest();
   } catch (err) {
     if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = `保存できませんでした: ${err.message}`;
@@ -1823,11 +1877,15 @@ async function completeResearchTest() {
     state.researchResultSubmitError = "";
     renderMobileResearchSubmission();
     try {
-      await submitResearchJson({ automatic: true });
+      const result = await submitResearchJson({ automatic: true });
+      if (result?.ok !== true) throw new Error("サーバー保存の完了を確認できませんでした。");
       // サーバーの保存成功応答を確認してから提出済みにする。
       state.researchResultAutoSubmitted = true;
+      clearActiveResearchRun();
     } catch (err) {
+      state.researchResultAutoSubmitted = false;
       state.researchResultSubmitError = err.message || "保存に失敗しました";
+      saveActiveResearchRun();
       if (els.researchSavedCsvName) {
         els.researchSavedCsvName.textContent = isMobileViewport()
           ? "提出はまだ完了していません。結果の保存を再試行してください。"
@@ -2344,6 +2402,57 @@ async function submitValidationJson(options = {}) {
   return result;
 }
 
+async function resumeActiveResearchRun() {
+  if (isValidationWorkflow()) return false;
+  const activeRun = readActiveResearchRun();
+  if (!activeRun) return false;
+  setResearchSetupMessage("中断したテストを再開しています...");
+  setResearchStartBusy(true);
+  setStatus("中断したテストを再開しています...", { busy: true });
+  try {
+    const dataset = await loadResearchDatasetFromPath(activeRun.datasetPath);
+    const datasetPath = dataset.datasetPath || activeRun.datasetPath;
+    const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId: activeRun.readerId, phase: "1" })}`);
+    if (!Array.isArray(session.cases) || !session.cases.length) throw new Error("再開対象の問題を取得できませんでした。");
+    state.researchSession = session;
+    setResearchResponsesFromSession(session);
+    state.researchDatasetPath = session.datasetPath || datasetPath;
+    state.researchDataset = dataset;
+    state.researchSampleCompletedPhases = activeRun.sampleCompletedPhases || {};
+    state.researchUsualMontage = activeRun.usualMontage || "";
+    state.researchTestStartedAt = activeRun.testStartedAt || "";
+    state.researchTestStartedMs = Number(activeRun.testStartedMs || (activeRun.testStartedAt ? Date.parse(activeRun.testStartedAt) : 0)) || 0;
+    state.researchTestCompletedAt = activeRun.testCompletedAt || "";
+    state.researchDebriefSubmitted = Boolean(activeRun.debriefSubmitted);
+    state.researchResultAutoSubmitted = false;
+    setResearchMode("test");
+    updateResearchSetupScreen();
+    refreshResearchDisplay();
+    const practiceIndex = activeResearchCases().findIndex((row) => row.sampleEpoch);
+    const unansweredIndex = firstUnansweredResearchCaseIndex();
+    if (practiceIndex < 0 && unansweredIndex < 0) {
+      await completeResearchTest();
+    } else {
+      state.researchCaseIndex = practiceIndex >= 0 ? practiceIndex : unansweredIndex;
+      const shown = await showResearchCase(state.researchCaseIndex);
+      if (!shown) throw new Error("再開位置の波形を表示できませんでした。");
+      setStatus(`中断したテストを再開しました。回答済み ${Number(session.answeredCount || 0)}/${Number(session.totalCount || 0)} 問`);
+    }
+    setResearchSetupMessage("");
+    saveActiveResearchRun();
+    return true;
+  } catch (err) {
+    state.researchSession = null;
+    setResearchMode("test");
+    const message = `テストの自動再開に失敗しました: ${err.message}`;
+    setResearchSetupMessage(message, true);
+    setStatus(message, { error: true });
+    return false;
+  } finally {
+    setResearchStartBusy(false);
+  }
+}
+
 
 
 async function startResearchTest() {
@@ -2366,12 +2475,17 @@ async function startResearchTest() {
   hideResearchTutorial();
   const profile = researchProfile();
   const baseReaderId = researchReaderDisplayId(profile);
-  const readerId = researchRunReaderId(baseReaderId);
+  const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
+  const activeRun = readActiveResearchRun();
+  const sameActiveParticipant = activeRun
+    && activeRun.datasetPath === setupDatasetPath
+    && String(activeRun.profile?.email || "") === String(profile.email || "")
+    && String(activeRun.profile?.readerName || "") === String(profile.readerName || "");
+  const readerId = sameActiveParticipant ? activeRun.readerId : researchRunReaderId(baseReaderId);
   profile.baseReaderId = baseReaderId;
   profile.testRunReaderId = readerId;
-  profile.testRunStartedAt = new Date().toISOString();
+  profile.testRunStartedAt = sameActiveParticipant ? (activeRun.profile?.testRunStartedAt || new Date().toISOString()) : new Date().toISOString();
   const phase = "1";
-  const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
   applyFixedResearchQuestionCount();
   if (!setupDatasetPath) {
     const existingDatasetPath = profile.datasetPath || state.researchDatasetPath || "";
@@ -2399,15 +2513,27 @@ async function startResearchTest() {
     state.researchSession = session;
     setResearchResponsesFromSession(session);
     state.researchDatasetPath = session.datasetPath || datasetPath;
+    if (sameActiveParticipant) {
+      state.researchSampleCompletedPhases = activeRun.sampleCompletedPhases || {};
+      state.researchUsualMontage = activeRun.usualMontage || "";
+      state.researchTestStartedAt = activeRun.testStartedAt || "";
+      state.researchTestStartedMs = Number(activeRun.testStartedMs || (activeRun.testStartedAt ? Date.parse(activeRun.testStartedAt) : 0)) || 0;
+      state.researchTestCompletedAt = activeRun.testCompletedAt || "";
+      state.researchDebriefSubmitted = Boolean(activeRun.debriefSubmitted);
+    }
     if (!state.researchDataset || state.researchDataset.datasetPath !== state.researchDatasetPath) {
       state.researchDataset = await fetchJson(`/api/research/dataset?${qs({ path: state.researchDatasetPath })}`);
     }
-    state.researchCaseIndex = 0;
+    const practiceIndex = activeResearchCases().findIndex((row) => row.sampleEpoch);
+    const unansweredIndex = firstUnansweredResearchCaseIndex();
+    state.researchCaseIndex = practiceIndex >= 0 ? practiceIndex : Math.max(0, unansweredIndex);
+    saveActiveResearchRun({ readerId, datasetPath: state.researchDatasetPath, profile });
     setResearchSetupMessage("");
     setResearchMode("test");
     updateResearchSetupScreen();
     refreshResearchDisplay();
-    await showResearchCase(0);
+    if (unansweredIndex < 0 && practiceIndex < 0) await completeResearchTest();
+    else await showResearchCase(state.researchCaseIndex);
   } catch (err) {
     const message = `Test start failed: ${err.message}`;
     setResearchSetupMessage(message, true);
@@ -2470,9 +2596,11 @@ async function showResearchCase(index) {
     renderRightResearchPanels();
     scheduleCurrentResearchWindowPrefetch();
     scheduleResearchPrefetch(state.researchCaseIndex);
+    return true;
   } catch (err) {
     hideResearchTutorial();
     setStatus(`Test epoch load failed: ${err.message}`, { error: true });
+    return false;
   }
 }
 
@@ -2537,10 +2665,15 @@ async function saveResearchRating(rating) {
     if (item.sampleEpoch) {
       hideResearchTutorial();
       const phase = String(state.researchSession.phase || "");
+      const completedCaseId = String(item.caseId || "");
+      const previousCaseIndex = state.researchCaseIndex;
+      const previousUsualMontage = state.researchUsualMontage;
+      const previousTestStartedAt = state.researchTestStartedAt;
+      const previousTestStartedMs = state.researchTestStartedMs;
       if (!state.researchSampleCompletedPhases[phase] || typeof state.researchSampleCompletedPhases[phase] !== "object") {
         state.researchSampleCompletedPhases[phase] = {};
       }
-      state.researchSampleCompletedPhases[phase][String(item.caseId || "")] = true;
+      state.researchSampleCompletedPhases[phase][completedCaseId] = true;
       state.researchTutorialDismissed = false;
       if (isResearchMontageSetupPractice(item)) {
         const usualMontage = saveUsualResearchMontage(activeMontageValue());
@@ -2555,8 +2688,30 @@ async function saveResearchRating(rating) {
       const remainingCases = activeResearchCases();
       const nextPracticeIndex = remainingCases.findIndex((row) => row.sampleEpoch);
       const nextIndex = nextPracticeIndex >= 0 ? nextPracticeIndex : firstUnansweredResearchCaseIndex();
-      if (nextIndex >= 0) await showResearchCase(nextIndex);
-      else {
+      if (nextIndex >= 0) {
+        const advanced = await showResearchCase(nextIndex);
+        if (!advanced) {
+          delete state.researchSampleCompletedPhases[phase][completedCaseId];
+          state.researchUsualMontage = previousUsualMontage;
+          state.researchTestStartedAt = previousTestStartedAt;
+          state.researchTestStartedMs = previousTestStartedMs;
+          const restoredCases = activeResearchCases();
+          const restoredIndex = restoredCases.findIndex((row) => String(row.caseId || "") === completedCaseId);
+          state.researchCaseIndex = restoredIndex >= 0 ? restoredIndex : previousCaseIndex;
+          state.researchTutorialDismissed = false;
+          const restored = await showResearchCase(state.researchCaseIndex);
+          if (!restored) {
+            setStatus("練習問題を再表示できませんでした。通信状態を確認してページを再読み込みしてください。自動的に同じ参加者の続きから再開します。", { error: true });
+            saveActiveResearchRun();
+            return;
+          }
+          saveActiveResearchRun();
+          setStatus("次の練習問題を読み込めませんでした。通信状態を確認して、同じ回答をもう一度選択してください。", { error: true });
+          return;
+        }
+        saveActiveResearchRun();
+      } else {
+        saveActiveResearchRun();
         await completeResearchTest();
       }
       return;
@@ -2589,6 +2744,7 @@ async function saveResearchRating(rating) {
     state.researchSession = data.session;
     state.researchTestCompletedAt = answeredAt;
     setResearchResponsesFromSession(data.session);
+    saveActiveResearchRun();
     state.lastResearchResponse = data.response;
     state.lastResearchResponseCaseIndex = state.researchCaseIndex;
     renderRightResearchPanels();
@@ -2631,6 +2787,7 @@ async function saveResearchRating(rating) {
       state.researchSession.responses = [...(state.researchSession.responses || []), localResponse];
       state.researchSession.answeredCount = Number(state.researchSession.answeredCount || 0) + 1;
       setResearchResponsesFromSession(state.researchSession);
+      saveActiveResearchRun();
       state.lastResearchResponse = localResponse;
       state.lastResearchResponseCaseIndex = state.researchCaseIndex;
       renderRightResearchPanels();
