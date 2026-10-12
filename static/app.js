@@ -852,7 +852,7 @@ function bindResearchConsentControls() {
   });
   els.researchDebriefRefuseBtn?.addEventListener("click", () => {
     if (els.researchDebriefContinueConsentInput) els.researchDebriefContinueConsentInput.checked = false;
-    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "同意を撤回する場合は、結果JSONを提出せず、このまま画面を閉じて終了してください。研究責任者への連絡は不要です。";
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "同意を撤回する場合は、このまま画面を閉じて終了してください。研究責任者への連絡は不要です。";
     els.researchDebriefMessage?.scrollIntoView({ block: "center" });
   });
   update();
