@@ -1,7 +1,7 @@
 const REQUEST_TOKEN = document.querySelector('meta[name="eeg-viewer-token"]')?.content || "";
 const SETTINGS_KEY = "eegViewerSettings.v1";
 const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
-const RESEARCH_IC_VERSION = "2026-10-12-v6";
+const RESEARCH_IC_VERSION = "2026-10-12-v7";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
 const RESEARCH_PENDING_RESPONSES_KEY = "eegViewerPendingResearchResponses.v1";
 const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
