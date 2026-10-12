@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EEG Test Viewer</title>
     <meta name="eeg-viewer-token" content="__EEG_VIEWER_TOKEN__" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260831-mobile-auto-submit" />
+    <link rel="stylesheet" href="/static/styles.css?v=20261012-electronic-consent-v1" />
   </head>
   <body class="test-only-distribution">
     <div class="app-shell">
@@ -106,6 +106,12 @@
         </div>
       </header>
 
+      <button class="research-explanation-open" id="researchExplanationOpenBtn" type="button" hidden>研究説明を読む</button>
+      <dialog id="researchExplanationDialog" class="research-explanation-dialog" aria-label="研究説明">
+        <button id="researchExplanationCloseBtn" type="button">閉じる</button>
+        <button id="researchExplanationSaveBtn" type="button">説明文を保存する</button>
+        <div id="researchExplanationCopy" class="research-explanation"></div>
+      </dialog>
       <main class="workspace">
         <section class="wave-panel">
           <div class="event-strip" id="eventStrip"></div>
@@ -115,6 +121,44 @@
           <div class="wave-scrollbar-row">
             <input id="waveScrollbar" class="wave-scrollbar" type="range" min="0" max="0" step="0.1" value="0" aria-label="Waveform time position" disabled />
           </div>
+          <section class="research-ic-screen" id="researchIcScreen" aria-labelledby="researchIcTitle">
+            <div class="research-ic-panel">
+              <h1 id="researchIcTitle">研究説明・電磁的同意</h1>
+              <div id="researchIcExplanation" class="research-explanation"><h2>脳波判読に関する研究の説明</h2>
+<p>本研究は、脳波判読経験のある成人の脳神経内科・脳神経外科・精神科の医師を対象に、脳波の判読行動と発作間欠期てんかん性放電（IED）の判定結果との関連を探索的に調べ、将来の脳波判読教育や判読支援に役立つ基礎資料を得ることを目的とします。個々の医師の能力・成績や人事の評価には使用しません。</p>
+<h3>参加方法と研究期間</h3>
+<p>Temple University Hospital EEG Corpusの既存の匿名化脳波を用い、Web viewerで20問の判読課題に回答していただきます。あわせて、診療科、資格、診療経験年数、脳波判読件数、ビデオ脳波判読歴等の背景情報と事後アンケートを取得します。患者の診療情報は新たに取得せず、実際の患者診療には影響しません。</p>
+<p>研究期間は研究実施許可受領後から2030年11月1日まで、研究対象者登録締切日は2027年11月1日です。参加者募集と判読データ収集は原則として倫理審査承認後1年以内に完了する計画です。</p>
+<h3>負担・リスクと利益</h3>
+<p>判読課題と背景情報・事後アンケートへの回答に時間を要します。侵襲はありませんが、判読結果に関する心理的負担や個人情報漏えいのリスクがあります。個人が特定される形で結果は公表せず、情報へのアクセスを制限します。参加による直接の利益はありません。</p>
+<h3>参加は任意です</h3>
+<p>参加するかどうかはご自身の自由意思で決められます。参加しない場合や途中で中止した場合にも不利益はありません。テスト終了後の事後説明を受けてから、研究への同意を撤回し、取得したデータの利用を拒否することもできます。判読は普段どおりに行ってください。</p>
+<p>同意撤回・データ利用拒否は、下記の問い合わせ窓口へ氏名、所属、メールアドレスを添えてメール等でお申し出ください。該当データを特定し、利用停止・削除等の対応を行います。</p>
+<h3>個人情報の管理と保管・廃棄</h3>
+<p>氏名・所属施設・メールアドレスを取得し、研究用IDとの対応表を作成します。対応表は斉藤聡志が作成し、谷口豪が管理します。暗号化したUSBメモリに保存し、NCNP病院てんかん診療部医長室の施錠キャビネットで保管します。アクセスできるのは谷口豪と斉藤聡志に限り、研究解析用データと分離して管理します。</p>
+<p>氏名・所属施設・メールアドレスと対応表は、同意撤回・利用拒否に対応するため研究終了時まで保管し、研究終了後に復元困難な方法で消去します。研究解析用データは、研究終了日から5年または研究結果最終公表日から3年のいずれか遅い日まで、アクセスを制限した保存媒体・保存領域に保管し、期間終了後に復元困難な方法で消去します。結果は個人を特定できない形で学会・論文等で公表することがあります。</p>
+<h3>米国Temple Universityへの情報提供</h3>
+<p>TUH EEG Corpusの利用者登録・管理のため、全参加医師の判読データ収集終了後に、氏名・所属施設・メールアドレスのみを米国Temple Universityのデータ管理担当者へ暗号化通信を用いて一括提供する予定です。判読結果や操作ログは同大学へ提供しません。</p>
+<p>同大学では利用者登録記録を保持する必要があります。一方、NCNPから提供する参加医師名簿について同大学が別途管理責任を引き受けることはできないとの回答を受けています。具体的な保存システム、保存期間、削除方法、安全管理措置の詳細は現時点で確認できていません。この点を理解したうえで参加をご判断ください。</p>
+<h3>Web viewerと研究データの取扱い</h3>
+<p>Web viewerは米国オレゴン州のRender社Web Serviceで運用し、斉藤聡志が設定・運用を管理します。共通パスワードで認証し、公開サイトの通信はHTTPSで暗号化します。IPアドレスを研究データとして取得・保存する設計にはしていません。</p>
+<p>現在のviewerでは研究データがサーバーへ送信・保存されます。テスト終了後は結果JSONを端末にダウンロードして、斉藤聡志（satoshi.saito@ncnp.go.jp）へメールで提出してください。データ利用を拒否する場合はメール提出を行わず、問い合わせ窓口へ利用停止・削除をお申し出ください。</p>
+<h3>質問・相談の窓口</h3>
+<p>研究責任者・個人情報管理責任者：国立精神・神経医療研究センター病院 てんかん診療部 部長 谷口豪<br>電話：042-341-2712（内線3241）<br>メール：<a href="mailto:gtaniguchi@ncnp.go.jp">gtaniguchi@ncnp.go.jp</a><br>viewer・結果提出の連絡先：<a href="mailto:satoshi.saito@ncnp.go.jp">satoshi.saito@ncnp.go.jp</a>（斉藤聡志）</p>
+<p>不明な点は、同意する前に問い合わせてください。質問への回答を受け、説明内容を理解してから同意してください。同意後も「研究説明を読む」からこの説明を閲覧・保存できます。</p>
+<p>説明文の版：2026-10-12 v1</p></div>
+              <fieldset class="research-ic-identity"><legend>参加者本人の情報</legend>
+                <p>研究協力の案内を受けたご本人が入力してください。入力した情報はテスト設定にも引き継がれ、同意記録と対応付けられます。</p>
+                <label>氏名 (English)<input id="researchIcNameInput" autocomplete="name" required /></label>
+                <label>メールアドレス<input id="researchIcEmailInput" type="email" autocomplete="email" required /></label>
+                <label>所属施設 (English)<input id="researchIcAffiliationInput" autocomplete="organization" required /></label>
+              </fieldset>
+              <label class="research-debrief-check"><input id="researchIcConsentInput" type="checkbox" /><span>上記の研究説明を理解し、質問する機会があること、参加が任意であり同意撤回・データ利用拒否ができること、およびTemple Universityへの個人情報の提供と同大学の情報管理に関する未確認事項を理解したうえで、私本人の自由意思により本研究への参加に同意します。</span></label>
+              <p id="researchIcMessage" role="status" aria-live="polite"></p>
+              <button class="export-button" id="researchIcAgreeBtn" type="button" disabled>研究参加に同意してテスト設定へ進む</button>
+              <button class="export-button secondary" id="researchIcDeclineBtn" type="button">同意せず終了する</button>
+            </div>
+          </section>
           <div class="research-setup-screen" id="researchSetupScreen" hidden>
             <div class="research-setup-panel">
               <div class="research-setup-title">テスト設定</div>
@@ -141,20 +185,23 @@
               <label>ビデオ脳波判読歴期間<input id="researchEpilepsyCenterTrainingDurationInput" placeholder="例: 6か月、2年" /></label>
               <input id="researchSetupEpochCountInput" type="hidden" value="20" />
               <div class="research-fixed-count" aria-label="テスト問題数">テスト問題数: <strong>20問</strong></div>
-              <div class="research-consent-box">
-                <div>本研究は個々の判読者の能力や成績を評価するものではなく, どのような脳波波形で判定が難しくなるか, また判読時の操作状況が判定とどのように関連するかを調査する研究です.</div>
-                <div>入力いただいた個人情報は、論文化にあたり必要な連絡を行う場合にのみ使用します。研究計画終了後、速やかに破棄します。</div>
-                <div>取得した情報は個人が特定されない形で解析し, 学会・論文等で公表することがあります.</div>
-                <div>データ流出予防のため, 脳波データ提供元である米国の大学, Temple Universityへ回答者名, 所属, メールアドレスを提供する必要があります.</div>
-                <label class="research-consent-check"><input id="researchConsentConfirmInput" type="checkbox" />上記を確認しました.</label>
-              </div>
               <button class="export-button" id="researchSetupStartBtn" type="button">開始</button>
             </div>
           </div>
           <div class="research-debrief-screen" id="researchDebriefScreen" hidden>
             <div class="research-debrief-panel">
-              <div class="research-complete-title">事後アンケート</div>
-              <label class="research-debrief-check"><input id="researchDebriefContinueConsentInput" type="checkbox" /><span>本テストでは, 回答内容に加えて, 判読中のモンタージュ切り替え, 表示時間, 判読時間などの操作ログが記録されます. 私は, これらの情報が研究目的で集計・解析されることを理解し, 本研究への参加に同意します。</span></label>
+              <div class="research-complete-title">事後説明・アンケート</div>
+              <div class="research-explanation">
+                <h2>取得した情報と研究の主要仮説</h2>
+                <p>本テストでは、判読結果に加え、モンタージュの切替回数・各モンタージュの表示時間、感度・時定数等の設定変更、総判読時間などの操作ログを記録しました。これらは研究目的に限定して利用し、個々の医師の能力・成績や人事の評価には使用しません。</p>
+                <p>本研究の主要仮説は「複数のモンタージュを確認する行動がIED判定エラーの減少と関連する」というものです。具体的には、1エポック内で双極誘導と参照基準導出の両方をそれぞれ1秒以上表示した行動と、IEDの正判定・誤判定との関連を探索的に検討します。因果関係を直接検証する研究ではありません。</p>
+                <h3>事前に詳しく説明しなかった理由</h3>
+                <p>操作ログの具体的な取得項目や主要仮説を先に知ることで、モンタージュ切替を意識するなど、通常と異なる判読行動が生じる可能性（ホーソン効果）があります。この影響を避けるため、IC手続の一部簡略化として、これらの具体的内容の事前説明を省略する計画としています。</p>
+                <h3>説明を受けた後の選択</h3>
+                <p>この説明を受けてから、同意を撤回し、判読結果・操作ログ等の利用を拒否できます。拒否による不利益はありません。現在のviewerでは回答時にデータがサーバーへ保存されています。利用を拒否する場合は結果JSONをメール提出せず、下記へ氏名・所属・メールアドレスを添えてお申し出ください。該当データを特定し、利用停止・削除等の対応を行います。提出後の撤回・利用拒否も同じ窓口で受け付けます。</p>
+                <p>問い合わせ・撤回窓口：谷口豪 <a href="mailto:gtaniguchi@ncnp.go.jp">gtaniguchi@ncnp.go.jp</a>、042-341-2712（内線3241）<br>結果提出・viewer担当：斉藤聡志 <a href="mailto:satoshi.saito@ncnp.go.jp">satoshi.saito@ncnp.go.jp</a></p>
+              </div>
+              <label class="research-debrief-check"><input id="researchDebriefContinueConsentInput" type="checkbox" /><span>上記の事後説明を理解し、同意撤回・データ利用拒否の機会があることを確認したうえで、取得された判読結果・操作ログ等を研究に利用することに同意します。</span></label>
               <div class="research-debrief-message" id="researchDebriefMessage" role="status" aria-live="polite"></div>
               <fieldset class="research-debrief-field">
                 <legend>普段の判読と比べてモンタージュ切り替えを意識的に増やしましたか</legend>
@@ -169,7 +216,8 @@
               <label class="research-debrief-field">普段の判読と比較して, 本テストで判読行動を変えた点があれば記載して下さい
                 <textarea id="researchDebriefBehaviorChangeInput" rows="4" placeholder="自由記述"></textarea>
               </label>
-              <button class="export-button" id="researchDebriefSubmitBtn" type="button">送信して完了画面へ進む</button>
+              <button class="export-button secondary" id="researchDebriefRefuseBtn" type="button">データ利用を拒否する・撤回方法を確認する</button>
+              <button class="export-button" id="researchDebriefSubmitBtn" type="button">データ利用に同意し、アンケートを保存して完了画面へ進む</button>
             </div>
           </div>
           <div class="research-complete-screen" id="researchCompleteScreen" hidden>
@@ -237,6 +285,6 @@
     <div id="contextMenu" class="context-menu hidden"></div>
 
     <script src="/static/viewer_utils.js?v=20260723-pz-a1-av"></script>
-    <script src="/static/app.js?v=20260901-research-resume-tutorial-retry"></script>
+    <script src="/static/app.js?v=20261012-electronic-consent-v1"></script>
   </body>
 </html>

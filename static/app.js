@@ -1,6 +1,7 @@
 const REQUEST_TOKEN = document.querySelector('meta[name="eeg-viewer-token"]')?.content || "";
 const SETTINGS_KEY = "eegViewerSettings.v1";
 const PANEL_WIDTHS_KEY = "eegViewerPanelWidths.v1";
+const RESEARCH_IC_VERSION = "2026-10-12-v1";
 const RESEARCH_PROFILE_KEY = "eegViewerResearchProfile.v1";
 const RESEARCH_PENDING_RESPONSES_KEY = "eegViewerPendingResearchResponses.v1";
 const RESEARCH_RESULT_BACKUP_KEY = "eegViewerResearchResultBackup.v1";
@@ -91,6 +92,7 @@ const state = {
   researchResultSubmitting: false,
   researchResultSubmitError: "",
   researchDebriefSubmitted: false,
+  researchConsent: null,
   researchSaving: false,
   researchRetryingPending: false,
   researchMontageTiming: null,
@@ -175,7 +177,17 @@ const els = {
   researchSetupReaderNameInput: document.getElementById("researchSetupReaderNameInput"),
   researchSetupReaderEmailInput: document.getElementById("researchSetupReaderEmailInput"),
   researchSetupReaderAffiliationInput: document.getElementById("researchSetupReaderAffiliationInput"),
-  researchConsentConfirmInput: document.getElementById("researchConsentConfirmInput"),
+  researchIcScreen: document.getElementById("researchIcScreen"),
+  researchIcNameInput: document.getElementById("researchIcNameInput"),
+  researchIcEmailInput: document.getElementById("researchIcEmailInput"),
+  researchIcAffiliationInput: document.getElementById("researchIcAffiliationInput"),
+  researchIcConsentInput: document.getElementById("researchIcConsentInput"),
+  researchIcAgreeBtn: document.getElementById("researchIcAgreeBtn"),
+  researchIcDeclineBtn: document.getElementById("researchIcDeclineBtn"),
+  researchIcMessage: document.getElementById("researchIcMessage"),
+  researchExplanationOpenBtn: document.getElementById("researchExplanationOpenBtn"),
+  researchExplanationDialog: document.getElementById("researchExplanationDialog"),
+  researchDebriefRefuseBtn: document.getElementById("researchDebriefRefuseBtn"),
   researchSetupReaderSpecialtySelect: document.getElementById("researchSetupReaderSpecialtySelect"),
   researchPositionSelect: document.getElementById("researchPositionSelect"),
   researchEpilepsySpecialistSelect: document.getElementById("researchEpilepsySpecialistSelect"),
@@ -456,7 +468,6 @@ function applyWorkflowChrome() {
     els.researchEpilepsyCenterTrainingSelect?.closest("label"),
     els.researchEpilepsyCenterTrainingDurationInput?.closest("label"),
     document.querySelector(".research-fixed-count"),
-    document.querySelector(".research-consent-box"),
   ];
   for (const el of validationOnly) if (el) el.hidden = !validation;
   for (const el of testOnly) if (el) el.hidden = validation;
@@ -769,6 +780,7 @@ function bindResearchControls() {
   els.researchRetrySubmitBtn?.addEventListener("click", completeResearchTest);
   els.researchCopyEmailBtn?.addEventListener("click", copyResearchEmailBody);
   els.researchDebriefSubmitBtn?.addEventListener("click", submitResearchDebriefing);
+  bindResearchConsentControls();
   els.researchTutorialDismissBtn?.addEventListener("click", () => {
     state.researchTutorialDismissed = true;
     updateResearchTutorial();
@@ -784,7 +796,6 @@ function bindResearchControls() {
     els.researchSetupReaderNameInput,
     els.researchSetupReaderEmailInput,
     els.researchSetupReaderAffiliationInput,
-    els.researchConsentConfirmInput,
     els.researchSetupReaderSpecialtySelect,
     els.researchPositionSelect,
     els.researchEpilepsySpecialistSelect,
@@ -799,6 +810,54 @@ function bindResearchControls() {
   }));
   updateEpilepsyCenterDurationRequirement();
 }
+// 電磁的同意は本人情報・日時・版と結び付け、設定画面の単なる確認と区別する。
+function hasResearchConsent() {
+  const consent = state.researchConsent;
+  return Boolean(consent?.participationAgreed && consent?.agreedAt && consent?.version === RESEARCH_IC_VERSION
+    && consent?.identity?.readerName === String(els.researchSetupReaderNameInput?.value || "").trim()
+    && consent?.identity?.email === String(els.researchSetupReaderEmailInput?.value || "").trim()
+    && consent?.identity?.affiliation === String(els.researchSetupReaderAffiliationInput?.value || "").trim());
+}
+
+function bindResearchConsentControls() {
+  const inputs = [els.researchIcNameInput, els.researchIcEmailInput, els.researchIcAffiliationInput];
+  const ready = () => inputs.every((input) => input?.value.trim() && input.checkValidity()) && Boolean(els.researchIcConsentInput?.checked);
+  const update = () => { if (els.researchIcAgreeBtn) els.researchIcAgreeBtn.disabled = !ready(); };
+  for (const input of [...inputs, els.researchIcConsentInput].filter(Boolean)) input.addEventListener("input", update);
+  els.researchIcAgreeBtn?.addEventListener("click", () => {
+    if (!ready()) { if (els.researchIcMessage) els.researchIcMessage.textContent = "本人情報と同意チェックを確認してください。"; return; }
+    const identity = { readerName: inputs[0].value.trim(), email: inputs[1].value.trim(), affiliation: inputs[2].value.trim() };
+    els.researchSetupReaderNameInput.value = identity.readerName;
+    els.researchSetupReaderEmailInput.value = identity.email;
+    els.researchSetupReaderAffiliationInput.value = identity.affiliation;
+    state.researchConsent = { version: RESEARCH_IC_VERSION, agreedAt: new Date().toISOString(), participationAgreed: true,
+      identityConfirmationMethod: "invited participant self-declaration", identity,
+      explanationText: document.getElementById("researchIcExplanation")?.innerText || "" };
+    saveResearchProfile();
+    updateResearchSetupScreen();
+    els.researchSetupReaderSpecialtySelect?.focus();
+  });
+  els.researchIcDeclineBtn?.addEventListener("click", () => {
+    if (els.researchIcMessage) els.researchIcMessage.textContent = "研究への参加を見送りました。このページを閉じて終了してください。参加しないことによる不利益はありません。";
+    if (els.researchIcConsentInput) els.researchIcConsentInput.checked = false;
+    update();
+  });
+  els.researchExplanationOpenBtn?.addEventListener("click", () => {
+    document.getElementById("researchExplanationCopy").innerHTML = document.getElementById("researchIcExplanation").innerHTML;
+    els.researchExplanationDialog?.showModal();
+  });
+  document.getElementById("researchExplanationCloseBtn")?.addEventListener("click", () => els.researchExplanationDialog?.close());
+  document.getElementById("researchExplanationSaveBtn")?.addEventListener("click", () => {
+    downloadTextFile(`研究説明_${RESEARCH_IC_VERSION}.txt`, document.getElementById("researchIcExplanation")?.innerText || "");
+  });
+  els.researchDebriefRefuseBtn?.addEventListener("click", () => {
+    if (els.researchDebriefContinueConsentInput) els.researchDebriefContinueConsentInput.checked = false;
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "データ利用を拒否する場合は完了画面へのボタンを押さず、結果JSONをメール提出しないでください。保存済みデータの利用停止・削除は、氏名・所属・メールアドレスを添えて gtaniguchi@ncnp.go.jp または satoshi.saito@ncnp.go.jp へお申し出ください。このボタンだけではサーバー上のデータは削除されません。";
+    els.researchDebriefMessage?.scrollIntoView({ block: "center" });
+  });
+  update();
+}
+
 function startWorkflow() {
   if (isValidationWorkflow()) return startValidationWorkflow();
   return startResearchTest();
@@ -817,7 +876,10 @@ function resetResearchProfileForm() {
     els.researchEpilepsyCenterTrainingDurationInput,
   ];
   for (const input of textInputs.filter(Boolean)) input.value = "";
-  if (els.researchConsentConfirmInput) els.researchConsentConfirmInput.checked = false;
+  state.researchConsent = null;
+  if (els.researchIcConsentInput) els.researchIcConsentInput.checked = false;
+  for (const input of [els.researchIcNameInput, els.researchIcEmailInput, els.researchIcAffiliationInput]) if (input) input.value = "";
+  updateResearchSetupScreen();
   for (const select of [
     els.researchSetupReaderSpecialtySelect,
     els.researchPositionSelect,
@@ -876,18 +938,18 @@ function validateResearchProfileForStart() {
   const missing = requiredFields.filter(([el]) => !String(el?.value ?? "").trim());
   const email = String(els.researchSetupReaderEmailInput?.value || "").trim();
   const invalidEmail = email && els.researchSetupReaderEmailInput?.validity?.valid === false;
-  const consentMissing = !els.researchConsentConfirmInput?.checked;
+  const consentMissing = !hasResearchConsent();
   if (!missing.length && !invalidEmail && !consentMissing) return true;
   const labels = missing.map(([, label]) => label);
   if (invalidEmail) labels.push("メール形式");
-  if (consentMissing) labels.push("倫理説明の確認");
+  if (consentMissing) labels.push("研究参加への事前同意");
   const message = `未入力または確認が必要な項目があります: ${labels.join("、")}`;
   setResearchSetupMessage(message, true);
   setStatus(message, { error: true });
   window.alert(message);
   const first = missing[0]?.[0] || (invalidEmail ? els.researchSetupReaderEmailInput : null);
   first?.focus?.();
-  if (!first && consentMissing) els.researchConsentConfirmInput?.focus?.();
+  if (consentMissing) updateResearchSetupScreen();
   return false;
 }
 
@@ -913,11 +975,12 @@ function researchProfile() {
     annualEegReadingCount: annualEegReadingCountValue(readingCount, readingUnit),
     videoEegReadingExperience: els.researchEpilepsyCenterTrainingSelect?.value || "",
     videoEegReadingExperienceDuration: els.researchEpilepsyCenterTrainingDurationInput?.value.trim() || "",
-    ethicsNoticeConfirmed: Boolean(els.researchConsentConfirmInput?.checked),
-    dataProviderSharingAcknowledged: Boolean(els.researchConsentConfirmInput?.checked),
+    ethicsNoticeConfirmed: hasResearchConsent(),
+    dataProviderSharingAcknowledged: hasResearchConsent(),
+    electronicConsent: state.researchConsent,
     dataProviderName: "Temple University, a university in the United States",
     dataProviderSharedFields: ["readerName", "affiliation", "email"],
-    dataProviderSharingPurpose: "prevention of EEG data leakage",
+    dataProviderSharingPurpose: "TUH EEG Corpus user registration and management",
   };
 }
 
@@ -1176,7 +1239,10 @@ function restoreResearchProfile() {
   if (els.researchEpilepsyCenterTrainingDurationInput) {
     els.researchEpilepsyCenterTrainingDurationInput.value = profile.videoEegReadingExperienceDuration || profile.epilepsyCenterTrainingDuration || "";
   }
-  if (els.researchConsentConfirmInput) els.researchConsentConfirmInput.checked = Boolean(profile.ethicsNoticeConfirmed);
+  // 旧画面の「確認しました」だけでは電磁的同意を復元しない。
+  const consent = profile.electronicConsent;
+  state.researchConsent = consent?.version === RESEARCH_IC_VERSION && consent?.agreedAt && consent?.participationAgreed === true
+    ? consent : null;
 }
 
 function currentResearchDisplayedMontages() {
@@ -1339,7 +1405,13 @@ function updateResearchControlsVisibility() {
 function updateResearchSetupScreen() {
   if (!els.researchSetupScreen) return;
   applyWorkflowChrome();
-  const showSetup = state.researchMode === "validation" ? !state.validationSession : (state.researchMode === "test" && !state.researchSession);
+  const needsConsent = !isValidationWorkflow() && !hasResearchConsent();
+  if (els.researchIcScreen) els.researchIcScreen.hidden = !needsConsent;
+  if (els.researchExplanationOpenBtn) els.researchExplanationOpenBtn.hidden = isValidationWorkflow() || needsConsent;
+  const showSetup = state.researchMode === "validation" ? !state.validationSession : (!needsConsent && state.researchMode === "test" && !state.researchSession);
+  for (const input of [els.researchSetupReaderNameInput, els.researchSetupReaderEmailInput, els.researchSetupReaderAffiliationInput]) {
+    if (input) input.readOnly = !isValidationWorkflow();
+  }
   document.body.classList.toggle("research-setup-active", showSetup);
   els.researchSetupScreen.hidden = !showSetup;
   els.researchSetupScreen.setAttribute("aria-hidden", showSetup ? "false" : "true");
@@ -1813,8 +1885,10 @@ function researchDebriefingPayload() {
     readerId: state.researchSession?.readerId || activeResearchReaderId(researchProfile()),
     sessionToken: state.researchSession?.sessionToken || "",
     completedAt: new Date().toISOString(),
-    primaryEndpointDisclosure: "",
-    operationLogDisclosure: "回答内容に加えて, 判読中のモンタージュ切り替え, 表示時間, 判読時間などの操作ログを記録",
+    primaryEndpointDisclosure: "複数のモンタージュを確認する行動がIED判定エラーの減少と関連する",
+    explanationVersion: RESEARCH_IC_VERSION,
+    omittedExplanationReason: "操作行動が変化するホーソン効果による研究結果のバイアスを避けるため",
+    operationLogDisclosure: "モンタージュ切替回数・各モンタージュの表示時間、感度・時定数等の設定変更、総判読時間",
     montageSwitchIncreaseLikert: selected ? Number(selected.value) : null,
     behaviorChangeFreeText: els.researchDebriefBehaviorChangeInput?.value.trim() || "",
     continuedDataUseConsent: Boolean(els.researchDebriefContinueConsentInput?.checked),
@@ -1831,7 +1905,7 @@ async function submitResearchDebriefing() {
     return;
   }
   if (!payload.continuedDataUseConsent) {
-    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "研究参加への同意を確認してください。";
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "事後説明を読んで、取得データの研究利用への同意を確認してください。";
     return;
   }
   if (els.researchDebriefSubmitBtn) els.researchDebriefSubmitBtn.disabled = true;
@@ -1867,7 +1941,7 @@ async function completeResearchTest() {
   }
   if (!state.researchDebriefSubmitted && els.researchDebriefScreen) {
     showResearchDebriefing();
-    setStatus("事後アンケートに回答してください");
+    setStatus("事後説明を確認し、データ利用の可否を判断してください");
     return;
   }
   showResearchCompletion();
@@ -2405,7 +2479,7 @@ async function submitValidationJson(options = {}) {
 async function resumeActiveResearchRun() {
   if (isValidationWorkflow()) return false;
   const activeRun = readActiveResearchRun();
-  if (!activeRun) return false;
+  if (!activeRun || !hasResearchConsent()) return false;
   setResearchSetupMessage("中断したテストを再開しています...");
   setResearchStartBusy(true);
   setStatus("中断したテストを再開しています...", { busy: true });

@@ -954,36 +954,6 @@ dd {
   text-align: left;
 }
 
-.research-consent-box {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 6px;
-  border: 1px solid #aeb8c5;
-  border-radius: 6px;
-  padding: 10px;
-  background: #fff;
-  color: #1f2a37;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.55;
-  text-align: left;
-}
-
-.research-consent-check {
-  display: flex !important;
-  grid-template-columns: none !important;
-  align-items: center;
-  gap: 7px !important;
-  margin-top: 2px;
-  color: #111827 !important;
-}
-
-.research-consent-check input {
-  width: auto;
-  min-width: 0;
-  margin: 0;
-}
-
 .research-debrief-screen {
   position: absolute;
   inset: 27px 0 24px 0;
@@ -1928,18 +1898,13 @@ body.test-only-distribution.validation-workflow:not(.right-panel-hidden) .right-
     font-size: 16px;
   }
 
-  body.test-only-distribution .research-consent-box,
   body.test-only-distribution .research-privacy-note {
     font-size: 12px;
     line-height: 1.45;
     padding: 9px;
   }
 
-  body.test-only-distribution .research-consent-check input {
-    width: 18px;
-    height: 18px;
-    flex: 0 0 auto;
-  }
+
 
   body.test-only-distribution .research-fixed-count {
     padding: 9px 10px;
@@ -2086,7 +2051,6 @@ body.test-only-distribution.validation-workflow:not(.right-panel-hidden) .right-
   body.test-only-distribution .research-setup-title,
   body.test-only-distribution .research-setup-message,
   body.test-only-distribution .research-fixed-count,
-  body.test-only-distribution .research-consent-box,
   body.test-only-distribution #researchSetupStartBtn {
     grid-column: 1 / -1;
   }
@@ -2662,4 +2626,32 @@ body.validation-workflow .validation-revisit-button:hover {
 body.validation-workflow .validation-revisit-button:focus-visible {
   outline: 3px solid #2f6f9f;
   outline-offset: 2px;
+}
+
+/* 電磁的ICは初期表示と再閲覧の両方で全文を読み進められるようにする。 */
+.research-ic-screen { position: fixed; inset: 0; z-index: 30; overflow: auto; padding: 24px 16px; background: #f5f7fa; }
+.research-ic-screen[hidden] { display: none !important; }
+.research-ic-panel { width: min(800px, 100%); margin: 0 auto; padding: 24px; border: 1px solid #c7d2df; border-radius: 8px; background: white; color: #1f2a37; display: grid; gap: 16px; }
+.research-ic-panel h1 { font-size: 22px; margin: 0; }
+.research-explanation { font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.research-explanation h2 { font-size: 18px; margin: 12px 0; }
+.research-explanation h3 { font-size: 15px; margin: 22px 0 8px; }
+.research-explanation p { margin: 8px 0; }
+.research-ic-identity { display: grid; gap: 12px; padding: 16px; border: 1px solid #c7d2df; }
+.research-ic-identity label { display: grid; gap: 6px; }
+.research-ic-identity input { width: 100%; min-height: 40px; }
+.research-ic-panel .research-debrief-check { align-items: start; line-height: 1.8; }
+.research-ic-panel input[type="checkbox"] { flex: 0 0 auto; width: 20px; height: 20px; }
+.research-ic-panel .export-button { white-space: normal; min-height: 44px; }
+.research-explanation-open { position: fixed; right: 12px; bottom: 4px; z-index: 20; font-size: 12px; padding: 5px 10px; }
+.research-explanation-dialog { width: min(800px, calc(100% - 24px)); max-height: 85dvh; overflow: auto; padding: 20px; border: 1px solid #c7d2df; border-radius: 8px; }
+.research-explanation-dialog::backdrop { background: rgb(0 0 0 / 40%); }
+.research-debrief-panel { max-height: 100%; overflow: auto; grid-template-columns: minmax(0, 1fr); }
+.research-debrief-panel > * { min-width: 0; }
+.research-debrief-panel .export-button { white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
+@media (max-width: 600px) {
+  .research-ic-screen { padding: 12px 8px; }
+  .research-ic-panel { padding: 16px; }
+  .research-ic-panel h1 { font-size: 20px; }
+  .research-ic-identity { padding: 12px; }
 }

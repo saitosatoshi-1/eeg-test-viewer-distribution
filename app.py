@@ -2597,6 +2597,8 @@ def save_research_debriefing(payload: dict[str, Any]) -> dict[str, Any]:
     debriefing = {
         "completedAt": str(payload.get("completedAt") or utc_now_iso()),
         "primaryEndpointDisclosure": str(payload.get("primaryEndpointDisclosure") or ""),
+        "explanationVersion": str(payload.get("explanationVersion") or ""),
+        "omittedExplanationReason": str(payload.get("omittedExplanationReason") or ""),
         "operationLogDisclosure": str(payload.get("operationLogDisclosure") or "回答内容に加えて, 判読中のモンタージュ切り替え, 表示時間, 判読時間などの操作ログを記録"),
         "montageSwitchIncreaseLikert": likert_value,
         "behaviorChangeFreeText": str(payload.get("behaviorChangeFreeText") or "").strip()[:4000],
@@ -2756,7 +2758,7 @@ def research_compact_reader_profile(profile: dict[str, Any]) -> dict[str, Any]:
             "medicalPracticeYears", "eegReadingCount", "eegReadingCountUnit",
             "monthlyEegReadingCount", "annualEegReadingCount",
             "videoEegReadingExperience", "videoEegReadingExperienceDuration",
-            "usualMontage", "ethicsNoticeConfirmed",
+            "usualMontage", "ethicsNoticeConfirmed", "electronicConsent",
         )
     }
 
@@ -3032,6 +3034,11 @@ def research_export_debriefing_payload(debriefing: Any) -> dict[str, Any]:
         return {}
     keys = (
         "completedAt",
+        "primaryEndpointDisclosure",
+        "operationLogDisclosure",
+        "explanationVersion",
+        "omittedExplanationReason",
+        "withdrawalOpportunityProvided",
         "montageSwitchIncreaseLikert",
         "behaviorChangeFreeText",
         "continuedDataUseConsent",
