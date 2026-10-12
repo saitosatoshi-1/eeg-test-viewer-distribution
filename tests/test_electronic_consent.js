@@ -50,5 +50,5 @@ assert.equal(context.hasResearchConsent(), false);
 els.researchDebriefContinueConsentInput.checked = true;
 els.researchDebriefRefuseBtn.listeners.click();
 assert.equal(els.researchDebriefContinueConsentInput.checked, false);
-assert.match(els.researchDebriefMessage.textContent, /このボタンだけではサーバー上のデータは削除されません/);
+assert.match(els.researchDebriefMessage.textContent, /このまま画面を閉じて終了してください/);
 console.log('PASS: consent gate, identity binding, timestamp/version, stale consent, refusal guidance');

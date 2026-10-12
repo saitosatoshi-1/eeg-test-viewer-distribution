@@ -852,7 +852,7 @@ function bindResearchConsentControls() {
   });
   els.researchDebriefRefuseBtn?.addEventListener("click", () => {
     if (els.researchDebriefContinueConsentInput) els.researchDebriefContinueConsentInput.checked = false;
-    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "データ利用を拒否する場合は完了画面へのボタンを押さず、結果JSONをメール提出しないでください。保存済みデータの利用停止・削除は、氏名・所属・メールアドレスを添えて gtaniguchi@ncnp.go.jp または satoshi.saito@ncnp.go.jp へお申し出ください。このボタンだけではサーバー上のデータは削除されません。";
+    if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "同意を撤回する場合は、結果JSONを提出せず、このまま画面を閉じて終了してください。研究責任者への連絡は不要です。";
     els.researchDebriefMessage?.scrollIntoView({ block: "center" });
   });
   update();
