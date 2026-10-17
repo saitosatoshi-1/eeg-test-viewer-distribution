@@ -2643,9 +2643,6 @@ body.validation-workflow .validation-revisit-button:focus-visible {
 .research-ic-panel .research-debrief-check { align-items: start; line-height: 1.8; }
 .research-ic-panel input[type="checkbox"] { flex: 0 0 auto; width: 20px; height: 20px; }
 .research-ic-panel .export-button { white-space: normal; min-height: 44px; }
-.research-explanation-open { position: fixed; right: 12px; bottom: 4px; z-index: 20; font-size: 12px; padding: 5px 10px; }
-.research-explanation-dialog { width: min(800px, calc(100% - 24px)); max-height: 85dvh; overflow: auto; padding: 20px; border: 1px solid #c7d2df; border-radius: 8px; }
-.research-explanation-dialog::backdrop { background: rgb(0 0 0 / 40%); }
 .research-debrief-panel { max-height: 100%; overflow: auto; grid-template-columns: minmax(0, 1fr); }
 .research-debrief-panel > * { min-width: 0; }
 .research-debrief-panel .export-button { white-space: normal; overflow-wrap: anywhere; min-height: 44px; }

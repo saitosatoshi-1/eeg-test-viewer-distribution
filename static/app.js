@@ -185,8 +185,6 @@ const els = {
   researchIcAgreeBtn: document.getElementById("researchIcAgreeBtn"),
   researchIcDeclineBtn: document.getElementById("researchIcDeclineBtn"),
   researchIcMessage: document.getElementById("researchIcMessage"),
-  researchExplanationOpenBtn: document.getElementById("researchExplanationOpenBtn"),
-  researchExplanationDialog: document.getElementById("researchExplanationDialog"),
   researchDebriefRefuseBtn: document.getElementById("researchDebriefRefuseBtn"),
   researchSetupReaderSpecialtySelect: document.getElementById("researchSetupReaderSpecialtySelect"),
   researchPositionSelect: document.getElementById("researchPositionSelect"),
@@ -791,14 +789,6 @@ function bindResearchConsentControls() {
     if (els.researchIcConsentInput) els.researchIcConsentInput.checked = false;
     update();
   });
-  els.researchExplanationOpenBtn?.addEventListener("click", () => {
-    document.getElementById("researchExplanationCopy").innerHTML = document.getElementById("researchIcExplanation").innerHTML;
-    els.researchExplanationDialog?.showModal();
-  });
-  document.getElementById("researchExplanationCloseBtn")?.addEventListener("click", () => els.researchExplanationDialog?.close());
-  document.getElementById("researchExplanationSaveBtn")?.addEventListener("click", () => {
-    downloadTextFile(`研究説明_${RESEARCH_IC_VERSION}.txt`, document.getElementById("researchIcExplanation")?.innerText || "");
-  });
   els.researchDebriefRefuseBtn?.addEventListener("click", () => {
     if (els.researchDebriefContinueConsentInput) els.researchDebriefContinueConsentInput.checked = false;
     if (els.researchDebriefMessage) els.researchDebriefMessage.textContent = "同意を撤回する場合は、このまま画面を閉じて終了してください。研究責任者への連絡は不要です。";
@@ -1373,7 +1363,6 @@ function updateResearchSetupScreen() {
   applyWorkflowChrome();
   const needsConsent = !isValidationWorkflow() && !hasResearchConsent();
   if (els.researchIcScreen) els.researchIcScreen.hidden = !needsConsent;
-  if (els.researchExplanationOpenBtn) els.researchExplanationOpenBtn.hidden = isValidationWorkflow() || needsConsent;
   const showSetup = state.researchMode === "validation" ? !state.validationSession : (!needsConsent && state.researchMode === "test" && !state.researchSession);
   for (const input of [els.researchSetupReaderNameInput, els.researchSetupReaderEmailInput, els.researchSetupReaderAffiliationInput]) {
     if (input) input.readOnly = !isValidationWorkflow();
