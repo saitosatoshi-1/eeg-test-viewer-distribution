@@ -28,14 +28,14 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 
 ## テスト手順の仕様
 
-- 判読者背景を入力します。
-- 同意チェック後にテストへ進みます。
+- 開始前に研究説明を読み、本人情報を入力して同意します。
+- 続いて判読者背景を入力し、練習へ進みます。
 - チュートリアル/練習エポックを2回提示します。
 - 2回目の練習で普段使用するモンタージュを設定します。
 - 本番20エポックは、そのモンタージュを初期表示として開始します。
 - 各エポックで「てんかん性異常あり」「てんかん性異常なし」「判断困難」を選びます。
-- 感度、時定数、HF、ACフィルタ、表示スケール、モンタージュは変更可能です。
-- ACフィルタは `OFF`、`50 Hz`、`60 Hz` です。
+- 感度、時定数、HF、表示スケール、モンタージュは変更可能です。
+- ACフィルタは60 Hz固定で、操作UIには表示しません。
 
 ## サンプリング仕様
 
@@ -53,7 +53,9 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 
 ## JSON保存仕様
 
-結果JSONは参加者側でダウンロードできます。完了時にはRenderにも自動保存します。ただしネットワーク不安定時に備え、参加者側のダウンロード/メール送付もバックアップとして残します。
+各回答はサーバーへ送信します。一時的な通信障害では同じタブ内に保存し再送します。
+最終結果の提出は、スマホのtestモードではサーバー自動提出、PCではJSONダウンロード・メール案内です。
+回答保存と最終結果提出を区別して確認してください。Validationは専用の提出処理です。
 
 Render保存先:
 
@@ -105,7 +107,7 @@ Main request in English: please review and refactor the waveform rendering path 
 
 - 波形データ取得から描画までの流れ。
   - `static/app.js`: `loadWindow`, `applyWindowData`, `draw`, `drawWaveColumn`, `drawViewerWaveformPath`
-  - `app.py`: `EEGStore.window`, `EEGStore.window_multi`
+  - `app.py`: `RecordingStore.window`, `RecordingStore.window_multi`
 - モンタージュ構成とチャンネル名処理。
   - `eeg_montage.py`: `build_montage_traces`, `channel_validation_payload`, `channel_configuration_payload`
   - 特に横双極誘導はACNS TB-18.2相当の構成を期待しています。
@@ -127,7 +129,7 @@ Main request in English: please review and refactor the waveform rendering path 
 
 歓迎する整理:
 
-- `static/app.js` の波形描画関数を小さなファイルに分ける提案。
+- 波形関連の再分割は、同端末・同症例で操作速度を測定してから検討します。2026-10-17の分割は実機の遅延報告を受け取り消しました。
 - モンタージュ定義、表示フィルター、canvas描画の責務境界を明確にする提案。
 - 変更前後で同じケース・同じ設定なら同じ波形が出ることを確認できる簡単なテスト方針。
 - 研究者が確認すべき点と、エンジニア側だけで判断できる点の切り分け。
@@ -144,6 +146,7 @@ Main request in English: please review and refactor the waveform rendering path 
 ## 主要ファイル
 
 - `app.py`: API、private dataset、サンプリング、JSON保存/出力
+- `research_export_format.py`: ファイルアクセスや認証を含まない結果JSONの整形
 - `static/app.js`: 研究テストUI、波形表示、ログ収集、スマホ対応
 - `static/index.html`: テスト用HTML
 - `static/styles.css`: UI/CSS
@@ -151,3 +154,9 @@ Main request in English: please review and refactor the waveform rendering path 
 - `tools/upload_private_dataset.py`: Renderへのprivate dataset upload
 - `tools/download_submitted_results.py`: Render保存済みJSONのダウンロード
 - `DATASET_SWAP.md`: データセット差し替え手順
+
+## 確認の入口 / Verification
+
+整形処理の互換性は`tests/test_export_format.py`、実際の提出経路は`tests/test_result_submission.py`で確認します。
+認証・保存先・署名検証は`app.py`に残しています。整形モジュールへ移さないでください。
+過去の作業ログは履歴であり、現行仕様はコード・テストと照合してください。
