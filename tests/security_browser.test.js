@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
-const source = fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../static/request_errors.js"), "utf8") + "\n" + fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
 function storage() {
   const data = new Map();
   return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value), removeItem: (key) => data.delete(key) };

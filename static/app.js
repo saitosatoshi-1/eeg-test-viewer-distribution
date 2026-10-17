@@ -241,63 +241,6 @@ function sleep(ms, signal = null) {
   });
 }
 
-function cloneFetchOptions(options = {}) {
-  const init = { ...options };
-  if (options.headers) init.headers = new Headers(options.headers);
-  return init;
-}
-
-function shouldRetryFetchError(err, response = null) {
-  if (isAbortError(err)) return false;
-  if (!navigator.onLine) return true;
-  if (!response) return true;
-  return response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500;
-}
-
-async function fetchWithRetry(url, options = {}) {
-  const attempts = Math.max(1, Number(options.retryAttempts || 3));
-  const retryDelayMs = Math.max(100, Number(options.retryDelayMs || 650));
-  let lastError = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      const init = cloneFetchOptions(options);
-      delete init.retryAttempts;
-      delete init.retryDelayMs;
-      const headers = new Headers(init.headers || {});
-      const target = new URL(url, window.location.href);
-      if (target.origin !== window.location.origin) throw new Error("External API requests are not allowed.");
-      if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
-      const validationRequest = target.pathname.startsWith("/api/research/validation/") || (isValidationWorkflow() && !target.pathname.startsWith("/api/research/test/"));
-      const session = validationRequest ? state.validationSession : state.researchSession;
-      if (session?.sessionToken) headers.set("X-EEG-Research-Session", session.sessionToken);
-      init.headers = headers;
-      const res = await fetch(url, init);
-      if (res.ok || !shouldRetryFetchError(null, res) || attempt === attempts) return res;
-      lastError = new Error(res.statusText || `HTTP ${res.status}`);
-    } catch (err) {
-      lastError = err;
-      if (!shouldRetryFetchError(err) || attempt === attempts) throw err;
-    }
-    setStatus(`通信が不安定です。再試行中 ${attempt}/${attempts - 1}...`, { busy: true });
-    await sleep(retryDelayMs * attempt, options.signal);
-  }
-  throw lastError || new Error("Network request failed");
-}
-
-async function fetchJson(url, options = {}) {
-  const res = await fetchWithRetry(url, options);
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || res.statusText);
-  return data;
-}
-
-async function fetchText(url, options = {}) {
-  const res = await fetchWithRetry(url, options);
-  const text = await res.text();
-  if (!res.ok) throw new Error(text || res.statusText);
-  return text;
-}
-
 function setStatus(message, options = {}) {
   if (!els.statusReadout) return;
   let textEl = els.statusReadout.querySelector(".status-text");
@@ -1090,8 +1033,9 @@ function readPendingResearchResponses() {
 function writePendingResearchResponses(rows) {
   try {
     sessionStorage.setItem(RESEARCH_PENDING_RESPONSES_KEY, JSON.stringify(rows.slice(-100)));
+    return true;
   } catch {
-    // Ignore storage failures; the server remains the primary store.
+    return false;
   }
 }
 
@@ -1108,7 +1052,7 @@ function queuePendingResearchResponse(payload, reason = "") {
   const index = rows.findIndex((row) => row.key === key);
   if (index >= 0) rows[index] = next;
   else rows.push(next);
-  writePendingResearchResponses(rows);
+  return writePendingResearchResponses(rows);
 }
 
 async function retryPendingResearchResponses() {
@@ -1126,8 +1070,15 @@ async function retryPendingResearchResponses() {
           body: JSON.stringify(row.payload),
           retryAttempts: 2,
         });
-      } catch {
+      } catch (err) {
         remaining.push(row);
+        if (!isRecoverableRequestError(err)) {
+          remaining.push(...rows.slice(rows.indexOf(row) + 1));
+          const message = researchSaveFailureMessage(err);
+          setStatus(message, { error: true });
+          writePendingResearchResponses(remaining);
+          return;
+        }
       }
     }
     writePendingResearchResponses(remaining);
@@ -2787,6 +2738,7 @@ async function saveResearchRating(rating) {
   if (!item || !state.researchSession) return;
   if (state.researchSaving) return;
   state.researchSaving = true;
+  let answerSaved = false;
   const answeredAt = new Date().toISOString();
   const elapsedMs = state.researchCaseStartedAt ? Date.now() - Date.parse(state.researchCaseStartedAt) : 0;
   try {
@@ -2868,6 +2820,7 @@ async function saveResearchRating(rating) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(responsePayload),
     });
+    answerSaved = true;
     writePendingResearchResponses(readPendingResearchResponses().filter((row) => row.key !== `${responsePayload.readerId || ""}|${responsePayload.phase || "1"}|${responsePayload.caseId || ""}`));
     state.researchSession = data.session;
     state.researchTestCompletedAt = answeredAt;
@@ -2886,6 +2839,17 @@ async function saveResearchRating(rating) {
     }
   } catch (err) {
     if (!item.sampleEpoch) {
+      // 保存後の画面遷移失敗を、回答送信失敗として二重登録しない。
+      if (answerSaved) {
+        setStatus("回答は保存済みですが、次の画面を表示できません。このタブを再読み込みして再開してください。", { error: true });
+        return;
+      }
+      if (!isRecoverableRequestError(err)) {
+        const message = researchSaveFailureMessage(err);
+        setStatus(message, { error: true });
+        window.alert(message);
+        return;
+      }
       const fallbackPayload = {
         datasetPath: state.researchDatasetPath,
         readerId: state.researchSession.readerId,
@@ -2905,7 +2869,12 @@ async function saveResearchRating(rating) {
         ...researchSpikeSelectionPayload(),
         ...researchMontageTimingPayload(),
       };
-      queuePendingResearchResponse(fallbackPayload, err.message || "save failed");
+      if (!queuePendingResearchResponse(fallbackPayload, err.message || "save failed")) {
+        const message = "回答をサーバーにも端末にも保存できませんでした。この画面を閉じず、通信状態を確認して同じ回答を選び直してください。";
+        setStatus(message, { error: true });
+        window.alert(message);
+        return;
+      }
       const localResponse = {
         ...fallbackPayload,
         responseId: `local-pending-${Date.now()}`,
