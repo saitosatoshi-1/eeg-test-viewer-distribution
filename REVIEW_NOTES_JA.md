@@ -153,6 +153,8 @@ Main request in English: please review and refactor the waveform rendering path 
 - `tools/build_private_dataset_zip.py`: private dataset zip作成
 - `tools/upload_private_dataset.py`: Renderへのprivate dataset upload
 - `tools/download_submitted_results.py`: Render保存済みJSONのダウンロード
+- `tools/download_validation_results.py`: Validation結果のダウンロード
+- `tools/result_download_client.py`: 上記2ツールの共通ログイン・管理ヘッダー・GET取得。アップロード・削除は含まない
 - `DATASET_SWAP.md`: データセット差し替え手順
 
 ## 確認の入口 / Verification

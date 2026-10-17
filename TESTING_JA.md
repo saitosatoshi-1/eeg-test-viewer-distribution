@@ -12,11 +12,13 @@ APIの認証・保存先・研究進行・波形表示・操作処理は変更�
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_export_format.py' -v
+python3 -m unittest discover -s tests -p 'test_result_download_client.py' -v
 python3 -m unittest discover -s tests -p 'test_security_access.py' -v
 node --test tests/test_mobile_submission.mjs tests/security_browser.test.js tests/request_errors.test.js tests/test_electronic_consent.js
 ```
 
 - JSON整形: 回答時設定、usage、空値、false、同意情報、入力データの不変性。
+- 管理ツール: 偽の通信応答と一時フォルダーのみで、ログイン・ヘッダー・接続先・保存バイト列を確認する。本番には接続しない。
 - 認証: 合成データとloopback HTTPを使用し、実EDFや参加者情報は使わない。ローカルポートの利用許可が必要。
 - ブラウザー模擬: 同意、提出、タブ内回復、通信失敗。実ブラウザー性能の保証ではない。
 - その他のPythonテストにはpytest形式の関数もある。unittest discoverだけで全件を実行したと判断しない。

@@ -4,46 +4,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import urllib.parse
-import urllib.request
 from pathlib import Path
 
 if __package__:
-    from .viewer_transport import access_code as read_access_code, secure_opener, secure_viewer_url
+    from .viewer_transport import access_code as read_access_code, secure_viewer_url
+    from .result_download_client import viewer_opener, admin_headers, get_json, get_text
 else:
-    from viewer_transport import access_code as read_access_code, secure_opener, secure_viewer_url
-
-
-def viewer_opener(base: str, access_code: str) -> tuple[urllib.request.OpenerDirector, str]:
-    base = secure_viewer_url(base)
-    opener = secure_opener(base)
-    login_body = urllib.parse.urlencode({"password": access_code, "next": "/"}).encode("utf-8")
-    login_request = urllib.request.Request(
-        f"{base}/login",
-        data=login_body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    opener.open(login_request).read()
-    html = opener.open(f"{base}/").read().decode("utf-8")
-    match = re.search(r'name="eeg-viewer-token" content="([^"]+)"', html)
-    if not match:
-        raise SystemExit("Could not find viewer token. Check access code and viewer URL.")
-    return opener, match.group(1)
-
-
-def admin_headers(token: str, admin_code: str) -> dict[str, str]:
-    return {"X-EEG-Viewer-Token": token, "X-EEG-Viewer-Admin-Code": admin_code}
-
-
-def get_json(opener: urllib.request.OpenerDirector, url: str, token: str, admin_code: str) -> dict:
-    request = urllib.request.Request(url, headers=admin_headers(token, admin_code))
-    return json.loads(opener.open(request).read().decode("utf-8"))
-
-
-def get_text(opener: urllib.request.OpenerDirector, url: str, token: str, admin_code: str) -> str:
-    request = urllib.request.Request(url, headers=admin_headers(token, admin_code))
-    return opener.open(request).read().decode("utf-8")
+    from viewer_transport import access_code as read_access_code, secure_viewer_url
+    from result_download_client import viewer_opener, admin_headers, get_json, get_text
 
 
 def safe_local_path(output_dir: Path, submission_id: str) -> Path:
