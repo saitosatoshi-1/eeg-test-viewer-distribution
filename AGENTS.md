@@ -38,7 +38,7 @@ Do not reintroduce old Windows/macOS distribution bundles, launchers, installer 
 
 - Keep access-code protection enabled for shared Render use.
 - Do not set `EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC=1` on the shared Render service.
-- Shared links should not include the password. Users enter `ncnp` on the password screen.
+- Shared links should not include the password. Supply participant/reviewer codes separately; never commit their values. / 参加者・検証者コードは個別案内し、値をコミットしない。
 - Do not commit Temple University-derived or otherwise redistribution-restricted EDF files.
 - Do not commit private EDF datasets to GitHub. Use the private dataset upload workflow.
 - Never commit `EEG_VIEWER_ADMIN_CODE`; use it only as an environment variable or one-time command value for private dataset upload.

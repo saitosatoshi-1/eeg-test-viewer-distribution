@@ -71,13 +71,16 @@ Example:
 ```bash
 EEG_VIEWER_ADMIN_CODE='<actual Render admin code>' python3 tools/upload_private_dataset.py \
   --viewer-url "https://eeg-test-viewer.onrender.com" \
-  --access-code ncnp \
   --dataset-id validation_v1 \
   --name "Validation v1" \
   --zip /tmp/validation_v1_private.zip
 ```
 
+The participant code is read from EEG_VIEWER_ACCESS_CODE or a hidden terminal prompt. / 参加者コードは環境変数または非表示の対話入力で渡します。実際のコードを文書・チャットに貼らないでください。
+
 If the command shows a Japanese placeholder error, replace `<管理コード>` or `<actual Render admin code>` with the real value from the Render Dashboard environment variables.
+
+For a new dataset ID, update EEG_VIEWER_PUBLIC_DATASET_IDS in Render as well. / 新しいIDを使う場合はRenderの公開データセット許可リストも更新します。既存IDへの差し替えなら変更不要です。
 
 ## Verify Render Dataset
 

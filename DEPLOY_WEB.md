@@ -27,9 +27,9 @@ For Docker/Render, `EEG_VIEWER_DATA_DIR` is `/data`.
 1. Push this repository to GitHub.
 2. In Render, create a new Blueprint from the repository.
 3. Render will use `render.yaml` and `Dockerfile`.
-4. Confirm `EEG_VIEWER_ACCESS_CODE=ncnp` is set in Render environment variables.
+4. Set `EEG_VIEWER_ACCESS_CODE` to a new random secret in Render; never use a value from source/history.
 5. Keep the persistent disk mounted at `/data`.
-6. Share a test link without the password in the URL. Users enter `ncnp` on the password screen.
+6. Share a test link without its password. Provide the participant code separately. / コードは別途案内してください。
 
 ## Access Control
 
@@ -41,7 +41,9 @@ Required production environment variables:
 EEG_VIEWER_PUBLIC_MODE=1
 EEG_VIEWER_VALIDATION_WORKFLOW=1
 EEG_VIEWER_PRIVATE_DATASET_ADMIN=1
-EEG_VIEWER_ACCESS_CODE=ncnp
+EEG_VIEWER_ACCESS_CODE=<participant-only secret>
+EEG_VIEWER_VALIDATION_CODE=<different reviewer-only secret>
+EEG_VIEWER_PUBLIC_DATASET_IDS=validation_v1
 EEG_VIEWER_ADMIN_CODE=<separate admin-only secret>
 EEG_VIEWER_ALLOWED_REMOTE_HOSTS=raw.githubusercontent.com,github.com
 EEG_VIEWER_MAX_REMOTE_EEG_MB=512
@@ -56,7 +58,7 @@ Share links in this form:
 https://<your-viewer-host>/
 ```
 
-The viewer will show a password screen. Enter `ncnp`.
+The viewer will show a password screen. Use the separately supplied participant code; validation links require the reviewer code.
 
 To start with a dataset already filled in:
 
@@ -101,7 +103,6 @@ Upload it to the deployed viewer:
 ```bash
 python tools/upload_private_dataset.py \
   --viewer-url "https://<your-viewer-host>" \
-  --access-code ncnp \
   --admin-code "<admin-code>" \
   --dataset-id <dataset_id> \
   --name "<Dataset display name>" \

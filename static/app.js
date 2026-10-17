@@ -264,7 +264,12 @@ async function fetchWithRetry(url, options = {}) {
       delete init.retryAttempts;
       delete init.retryDelayMs;
       const headers = new Headers(init.headers || {});
+      const target = new URL(url, window.location.href);
+      if (target.origin !== window.location.origin) throw new Error("External API requests are not allowed.");
       if (REQUEST_TOKEN) headers.set("X-EEG-Viewer-Token", REQUEST_TOKEN);
+      const validationRequest = target.pathname.startsWith("/api/research/validation/") || (isValidationWorkflow() && !target.pathname.startsWith("/api/research/test/"));
+      const session = validationRequest ? state.validationSession : state.researchSession;
+      if (session?.sessionToken) headers.set("X-EEG-Research-Session", session.sessionToken);
       init.headers = headers;
       const res = await fetch(url, init);
       if (res.ok || !shouldRetryFetchError(null, res) || attempt === attempts) return res;
@@ -327,9 +332,10 @@ function setWaveLoading(loading, message = "読み込み中...") {
 }
 
 function clearSharedBrowserResearchState() {
-  if (!PUBLIC_WEB_MODE) return;
   try {
-    localStorage.removeItem(RESEARCH_PROFILE_KEY);
+    const keys = [RESEARCH_PENDING_RESPONSES_KEY, RESEARCH_RESULT_BACKUP_KEY];
+    if (PUBLIC_WEB_MODE) keys.push(RESEARCH_PROFILE_KEY);
+    for (const key of keys) localStorage.removeItem(key);
   } catch {
     // Ignore storage failures.
   }
@@ -866,6 +872,8 @@ function startWorkflow() {
 
 
 function resetResearchProfileForm() {
+  clearResearchRunRecovery();
+  sessionStorage.removeItem(RESEARCH_PENDING_RESPONSES_KEY);
   const textInputs = [
     els.researchSetupReaderIdInput,
     els.researchSetupReaderNameInput,
@@ -1018,6 +1026,10 @@ function readActiveResearchRun() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(RESEARCH_ACTIVE_RUN_KEY) || "{}");
     if (!saved || typeof saved !== "object" || !saved.readerId || !saved.datasetPath) return null;
+    if (PUBLIC_WEB_MODE && !saved.sessionToken) {
+      sessionStorage.removeItem(RESEARCH_ACTIVE_RUN_KEY);
+      return null;
+    }
     const savedAtMs = Date.parse(saved.savedAt || "");
     if (!Number.isFinite(savedAtMs) || Date.now() - savedAtMs > RESEARCH_ACTIVE_RUN_MAX_AGE_MS) {
       sessionStorage.removeItem(RESEARCH_ACTIVE_RUN_KEY);
@@ -1039,6 +1051,7 @@ function saveActiveResearchRun(overrides = {}) {
     ...previous,
     readerId,
     datasetPath,
+    sessionToken: overrides.sessionToken || state.researchSession?.sessionToken || previous.sessionToken || "",
     profile: overrides.profile || researchProfile(),
     sampleCompletedPhases: overrides.sampleCompletedPhases || state.researchSampleCompletedPhases || {},
     usualMontage: overrides.usualMontage ?? state.researchUsualMontage ?? previous.usualMontage ?? "",
@@ -1065,8 +1078,10 @@ function clearActiveResearchRun() {
 
 function readPendingResearchResponses() {
   try {
-    const rows = JSON.parse(localStorage.getItem(RESEARCH_PENDING_RESPONSES_KEY) || "[]");
-    return Array.isArray(rows) ? rows.filter((row) => row && typeof row === "object") : [];
+    const rows = JSON.parse(sessionStorage.getItem(RESEARCH_PENDING_RESPONSES_KEY) || "[]");
+    const active = Array.isArray(rows) ? rows.filter((row) => row?.payload && Date.now() - Date.parse(row.queuedAt) < 86400000) : [];
+    if (!Array.isArray(rows) || active.length !== rows.length) sessionStorage.setItem(RESEARCH_PENDING_RESPONSES_KEY, JSON.stringify(active));
+    return active;
   } catch {
     return [];
   }
@@ -1074,7 +1089,7 @@ function readPendingResearchResponses() {
 
 function writePendingResearchResponses(rows) {
   try {
-    localStorage.setItem(RESEARCH_PENDING_RESPONSES_KEY, JSON.stringify(rows.slice(-100)));
+    sessionStorage.setItem(RESEARCH_PENDING_RESPONSES_KEY, JSON.stringify(rows.slice(-100)));
   } catch {
     // Ignore storage failures; the server remains the primary store.
   }
@@ -1491,9 +1506,10 @@ function downloadTextFile(filename, text, mime = "application/json") {
 
 function saveResearchResultBackup(filename, text) {
   try {
-    localStorage.setItem(RESEARCH_RESULT_BACKUP_KEY, JSON.stringify({
+    sessionStorage.setItem(RESEARCH_RESULT_BACKUP_KEY, JSON.stringify({
       filename,
       text,
+      owner: researchBackupOwner(),
       savedAt: new Date().toISOString(),
     }));
   } catch {
@@ -1503,15 +1519,36 @@ function saveResearchResultBackup(filename, text) {
 
 function downloadResearchResultBackup() {
   try {
-    const backup = JSON.parse(localStorage.getItem(RESEARCH_RESULT_BACKUP_KEY) || "{}");
-    if (backup?.filename && backup?.text) {
+    const backup = JSON.parse(sessionStorage.getItem(RESEARCH_RESULT_BACKUP_KEY) || "{}");
+    const owner = researchBackupOwner();
+    if (owner && backup.owner === owner && Date.now() - Date.parse(backup.savedAt) < 86400000 && backup?.filename && backup?.text) {
       downloadTextFile(backup.filename, backup.text);
       return backup;
     }
+    sessionStorage.removeItem(RESEARCH_RESULT_BACKUP_KEY);
   } catch {
     // Ignore malformed backup.
   }
   return null;
+}
+
+function researchBackupOwner() {
+  const session = isValidationWorkflow() ? state.validationSession : state.researchSession;
+  const reader = isValidationWorkflow() ? session?.reviewerId : session?.readerId;
+  const token = session?.sessionToken || (!PUBLIC_WEB_MODE ? "local" : "");
+  return reader && token ? `${state.researchMode}|${session.datasetPath}|${reader}|${token}` : "";
+}
+
+function clearResearchRunRecovery() {
+  // Never offer a prior participant's result. / 別参加者の結果を回復用に返さない。
+  sessionStorage.removeItem(RESEARCH_RESULT_BACKUP_KEY);
+  state.windowCache.clear();
+  state.windowData = null;
+  state.recordings = [];
+  state.recordingId = "";
+  state.metadata = null;
+  if (els.recordingSelect) els.recordingSelect.innerHTML = "";
+  draw();
 }
 
 function isMobileViewport() {
@@ -2334,6 +2371,11 @@ async function startValidationWorkflow() {
   requestMobileFullscreen();
   setResearchSetupMessage("入力内容を確認中...");
   if (!validateResearchProfileForStart()) return;
+  await retryPendingResearchResponses();
+  if (readPendingResearchResponses().length) {
+    setResearchSetupMessage("未送信の回答が残っています。通信を復旧してから開始してください。", true);
+    return;
+  }
   saveResearchProfile();
   hideResearchCompletion();
   hideResearchDebriefing();
@@ -2343,8 +2385,10 @@ async function startValidationWorkflow() {
   state.researchTestCompletedAt = "";
   state.researchResultAutoSubmitted = false;
   resetResearchPrefetch({ clearRecords: true });
+  clearResearchRunRecovery();
+  state.validationSession = null;
   const profile = researchProfile();
-  const reviewerId = safeResultFilenamePart(profile.readerName || profile.readerId || "reviewer", "reviewer");
+  const reviewerId = researchRunReaderId(profile.readerName || profile.readerId || "reviewer");
   const setupDatasetPath = els.researchSetupDatasetPathInput?.value.trim() || profile.datasetPath || (PUBLIC_WEB_MODE ? DEFAULT_PUBLIC_DATASET_PATH : "");
   if (!setupDatasetPath) {
     const message = "Validation用データセットを読み込めません。管理者に連絡してください。";
@@ -2360,6 +2404,8 @@ async function startValidationWorkflow() {
     const dataset = await loadResearchDatasetFromPath(datasetPath);
     datasetPath = dataset.datasetPath || datasetPath;
     const validationSet = selectedValidationDatasetKind();
+    const initialSession = await fetchJson(`/api/research/validation/session?${qs({ dataset: datasetPath, reviewerId, validationSet })}`);
+    state.validationSession = initialSession;
     const resetResult = await fetchJson("/api/research/validation/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2486,12 +2532,14 @@ async function resumeActiveResearchRun() {
   try {
     const dataset = await loadResearchDatasetFromPath(activeRun.datasetPath);
     const datasetPath = dataset.datasetPath || activeRun.datasetPath;
-    const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId: activeRun.readerId, phase: "1" })}`);
+    const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId: activeRun.readerId, phase: "1" })}`, {
+      headers: { "X-EEG-Research-Session": activeRun.sessionToken || "" },
+    });
     if (!Array.isArray(session.cases) || !session.cases.length) throw new Error("再開対象の問題を取得できませんでした。");
     state.researchSession = session;
     setResearchResponsesFromSession(session);
     state.researchDatasetPath = session.datasetPath || datasetPath;
-    state.researchDataset = dataset;
+    state.researchDataset = await fetchJson(`/api/research/dataset?${qs({ path: state.researchDatasetPath })}`);
     state.researchSampleCompletedPhases = activeRun.sampleCompletedPhases || {};
     state.researchUsualMontage = activeRun.usualMontage || "";
     state.researchTestStartedAt = activeRun.testStartedAt || "";
@@ -2534,7 +2582,13 @@ async function startResearchTest() {
   setResearchSetupMessage("入力内容を確認中...");
   if (!validateResearchProfileForStart()) return;
   saveResearchProfile();
-  retryPendingResearchResponses();
+  await retryPendingResearchResponses();
+  if (readPendingResearchResponses().length) {
+    setResearchSetupMessage("未送信の回答が残っています。通信を復旧してから開始してください。", true);
+    return;
+  }
+  clearResearchRunRecovery();
+  state.researchSession = null;
   hideResearchCompletion();
   hideResearchDebriefing();
   state.researchTutorialDismissed = false;
@@ -2580,7 +2634,9 @@ async function startResearchTest() {
       const dataset = await loadResearchDatasetFromPath(datasetPath);
       datasetPath = dataset.datasetPath || datasetPath;
     }
-    const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId, phase })}`);
+    const session = await fetchJson(`/api/research/test/session?${qs({ dataset: datasetPath, readerId, phase })}`, {
+      headers: { "X-EEG-Research-Session": sameActiveParticipant ? (activeRun.sessionToken || "") : "" },
+    });
     if (!Array.isArray(session.cases) || !session.cases.length) {
       throw new Error("No test cases are available for this run. Check the selected dataset or upload status.");
     }
@@ -2595,9 +2651,7 @@ async function startResearchTest() {
       state.researchTestCompletedAt = activeRun.testCompletedAt || "";
       state.researchDebriefSubmitted = Boolean(activeRun.debriefSubmitted);
     }
-    if (!state.researchDataset || state.researchDataset.datasetPath !== state.researchDatasetPath) {
-      state.researchDataset = await fetchJson(`/api/research/dataset?${qs({ path: state.researchDatasetPath })}`);
-    }
+    state.researchDataset = await fetchJson(`/api/research/dataset?${qs({ path: state.researchDatasetPath })}`);
     const practiceIndex = activeResearchCases().findIndex((row) => row.sampleEpoch);
     const unansweredIndex = firstUnansweredResearchCaseIndex();
     state.researchCaseIndex = practiceIndex >= 0 ? practiceIndex : Math.max(0, unansweredIndex);
@@ -2980,7 +3034,7 @@ async function exportResearchJson() {
     setStatus("結果JSONファイルをダウンロード中...", { busy: true });
     await retryPendingResearchResponses();
     const jsonFilename = researchJsonFilename(readerId, profile);
-    const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId, sessionToken: state.researchSession?.sessionToken || "" })}`);
+    const jsonText = await fetchText(`/api/research/test/export.json?${qs({ dataset: datasetPath, readerId })}`);
     saveResearchResultBackup(jsonFilename, jsonText);
     downloadTextFile(jsonFilename, jsonText);
     if (els.researchSavedCsvName) {

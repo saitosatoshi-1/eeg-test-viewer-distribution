@@ -12,7 +12,6 @@ echo
 
 python3 tools/download_submitted_results.py \
   --viewer-url "https://eeg-test-viewer.onrender.com" \
-  --access-code "ncnp" \
   --output "${OUTPUT_DIR}"
 
 echo

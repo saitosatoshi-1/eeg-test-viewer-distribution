@@ -12,6 +12,11 @@ import urllib.request
 from urllib.error import HTTPError
 from pathlib import Path
 
+if __package__:
+    from .viewer_transport import access_code, secure_opener, secure_viewer_url
+else:
+    from viewer_transport import access_code, secure_opener, secure_viewer_url
+
 
 def validate_admin_code(value: str) -> str:
     code = str(value or "").strip()
@@ -36,7 +41,7 @@ def validate_admin_code(value: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Upload a private EEG dataset zip to the deployed viewer.")
     parser.add_argument("--viewer-url", required=True, help="Example: https://eeg-test-viewer.onrender.com")
-    parser.add_argument("--access-code", default="ncnp")
+    parser.add_argument("--access-code", default=os.environ.get("EEG_VIEWER_ACCESS_CODE", ""))
     parser.add_argument("--admin-code", default=os.environ.get("EEG_VIEWER_ADMIN_CODE", ""))
     parser.add_argument("--dataset-id", required=True)
     parser.add_argument("--name", default="")
@@ -44,9 +49,9 @@ def main() -> None:
     args = parser.parse_args()
 
     admin_code = validate_admin_code(args.admin_code)
-    base = args.viewer_url.rstrip("/")
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
-    login_body = urllib.parse.urlencode({"password": args.access_code, "next": "/"}).encode("utf-8")
+    base = secure_viewer_url(args.viewer_url)
+    opener = secure_opener(base)
+    login_body = urllib.parse.urlencode({"password": access_code(args.access_code), "next": "/"}).encode("utf-8")
     login_request = urllib.request.Request(
         f"{base}/login",
         data=login_body,

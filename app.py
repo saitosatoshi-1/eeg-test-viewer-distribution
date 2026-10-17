@@ -41,6 +41,8 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from viewer_security import RecordingGrants
+
 from eeg_montage import (
     apply_display_filters,
     build_montage_traces,
@@ -143,12 +145,18 @@ USER_FILES_PATH = USER_DATA_DIR / "user_files.json"
 DESKTOP_EXPORT_DIR = Path.home() / "Desktop"
 DEFAULT_FDS_DIR = Path.home() / "Desktop" / "女子医ハンズオン_0606" / "FDS"
 SERVER_TOKEN = secrets.token_urlsafe(32)
+# Browser request tokens must never be signing keys. / 公開する要求tokenと署名鍵は分離する。
+SESSION_SIGNING_KEY = secrets.token_bytes(32)
+COOKIE_SIGNING_KEY = secrets.token_bytes(32)
+RECORDING_GRANTS = RecordingGrants()
 LOCAL_HOSTNAMES = {"127.0.0.1", "localhost", "::1"}
 PUBLIC_MODE = env_flag("EEG_VIEWER_PUBLIC_MODE")
 ACCESS_USER = os.environ.get("EEG_VIEWER_ACCESS_USER", "viewer")
 ACCESS_PASSWORD = os.environ.get("EEG_VIEWER_ACCESS_PASSWORD", "")
 ACCESS_CODE = os.environ.get("EEG_VIEWER_ACCESS_CODE", ACCESS_PASSWORD)
 ADMIN_CODE = os.environ.get("EEG_VIEWER_ADMIN_CODE", "")
+VALIDATION_CODE = os.environ.get("EEG_VIEWER_VALIDATION_CODE", "")
+PUBLIC_DATASET_IDS = tuple(value.strip() for value in os.environ.get("EEG_VIEWER_PUBLIC_DATASET_IDS", "validation_v1").split(",") if value.strip())
 ALLOW_UNPROTECTED_PUBLIC = env_flag("EEG_VIEWER_ALLOW_UNPROTECTED_PUBLIC")
 ACCESS_COOKIE_NAME = "eeg_viewer_access"
 ACCESS_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14
@@ -1577,6 +1585,13 @@ def research_dataset_path(value: str | None) -> Path:
     raw = str(value or "").strip()
     if not raw:
         raise ValueError("Dataset path is required.")
+    if PUBLIC_MODE:
+        candidate = private_dataset_path(raw) or Path(raw).expanduser()
+        for dataset_id in PUBLIC_DATASET_IDS:
+            allowed = (PRIVATE_DATASET_DIR / safe_research_id(dataset_id)).resolve()
+            if raw == dataset_id or candidate.resolve() == allowed:
+                return allowed
+        raise PermissionError("This dataset is not available in the public viewer.")
     if is_http_url(raw):
         return remote_research_dataset_dir(raw)
     path = Path(raw).expanduser()
@@ -1669,6 +1684,14 @@ def load_remote_research_dataset(url: str) -> dict[str, Any]:
 
 
 def load_research_dataset(path_value: str | None) -> dict[str, Any]:
+    if PUBLIC_MODE:
+        dataset_dir = research_dataset_path(path_value)
+        payload = json_read(dataset_dir / "dataset.json", None)
+        if not isinstance(payload, dict):
+            raise FileNotFoundError("The configured dataset is not available.")
+        payload["datasetPath"] = str(dataset_dir)
+        payload.setdefault("cases", [])
+        return payload
     private_path = private_dataset_path(str(path_value or ""))
     if private_path is not None:
         payload = json_read(private_path / "dataset.json", None)
@@ -2069,9 +2092,36 @@ def research_response_cookie_hash(dataset_dir: Path, reader_id: str) -> str:
 
 
 def research_session_signature(dataset_path: str, reader_id: str, phase: str, cookie_hash: str, issued_at: str) -> str:
-    secret = f"{SERVER_TOKEN}|{ACCESS_CODE or ACCESS_PASSWORD}".encode("utf-8")
     message = f"{dataset_path}|{reader_id}|{phase}|{cookie_hash}|{issued_at}".encode("utf-8")
-    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+    return hmac.new(SESSION_SIGNING_KEY, message, hashlib.sha256).hexdigest()
+
+
+def session_owner_path(dataset_dir: Path, reader_id: str, phase: str) -> Path:
+    return dataset_dir / "session_owners" / safe_research_id(phase) / f"{research_reader_id(reader_id)}.json"
+
+
+def verify_session_owner(dataset_dir: Path, reader_id: str, phase: str, cookie_hash: str) -> None:
+    if not PUBLIC_MODE:
+        return
+    owner = str(json_read(session_owner_path(dataset_dir, reader_id, phase), {}).get("accessCookieHash") or "")
+    if not owner or not cookie_hash or not secrets.compare_digest(owner, cookie_hash):
+        raise PermissionError("This result belongs to a different browser session.")
+
+
+def claim_session_owner(dataset_dir: Path, reader_id: str, phase: str, cookie_hash: str, legacy_path: Path, payload: dict[str, Any]) -> None:
+    if not PUBLIC_MODE:
+        return
+    if not cookie_hash:
+        raise PermissionError("A signed browser session is required.")
+    with RESEARCH_RESPONSE_LOCK:
+        path = session_owner_path(dataset_dir, reader_id, phase)
+        if path.exists():
+            verify_research_session_token(payload, str(dataset_dir), reader_id, phase)
+            return
+        # Do not reclaim legacy records without ownership proof. / 所有者不明の旧結果を横取りさせない。
+        if legacy_path.exists():
+            raise PermissionError("An existing result cannot be claimed. Start a new run or contact the administrator.")
+        json_write(path, {"accessCookieHash": cookie_hash, "createdAt": utc_now_iso()})
 
 
 def make_research_session_token(dataset_path: str, reader_id: str, phase: str, cookie_hash: str) -> str:
@@ -2098,6 +2148,7 @@ def verify_research_session_token(payload: dict[str, Any], dataset_path: str, re
     expected = research_session_signature(dataset_path, reader_id, phase, cookie_hash, issued_at)
     if not secrets.compare_digest(signature, expected):
         raise PermissionError("Invalid research session token.")
+    verify_session_owner(Path(dataset_path), reader_id, phase, cookie_hash)
 
 
 def active_response_map(responses: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
@@ -2299,6 +2350,7 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
     phase = "1"
     access_cookie_hash = str(payload.get("accessCookieHash") or "")
     with RESEARCH_RESPONSE_LOCK:
+        claim_session_owner(dataset_dir, reader_id, phase, access_cookie_hash, research_response_path(dataset_dir, reader_id), payload)
         existing_cookie_hash = research_response_cookie_hash(dataset_dir, reader_id)
         if PUBLIC_MODE and existing_cookie_hash and access_cookie_hash and not secrets.compare_digest(existing_cookie_hash, access_cookie_hash):
             raise PermissionError("This readerId is already linked to another browser session.")
@@ -2363,8 +2415,9 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         "name": dataset.get("name"),
         "readerId": reader_id,
         "phase": phase,
-        "sessionToken": make_research_session_token(dataset_path, reader_id, phase, access_cookie_hash) if PUBLIC_MODE and access_cookie_hash else "",
+        "sessionToken": (payload.get("sessionToken") or make_research_session_token(dataset_path, reader_id, phase, access_cookie_hash)) if PUBLIC_MODE and access_cookie_hash else "",
         "cases": cases,
+        "allCases": all_cases,
         "responses": active_rows,
         "answeredCount": sum(1 for row in non_sample_cases if active.get((str(row.get("caseId")), phase))),
         "totalCount": len(non_sample_cases),
@@ -2545,6 +2598,7 @@ def save_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     responses.append(response)
     save_research_responses(dataset_dir, reader_id, responses, reader_profile)
     session = research_session({
+        "sessionToken": payload.get("sessionToken"),
         "datasetPath": str(dataset_dir),
         "readerId": reader_id,
         "phase": phase,
@@ -2575,6 +2629,7 @@ def undo_research_response_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     target["undoneAt"] = utc_now_iso()
     save_research_responses(dataset_dir, reader_id, responses)
     return {"undone": target, "session": research_session({
+        "sessionToken": payload.get("sessionToken"),
         "datasetPath": str(dataset_dir),
         "readerId": reader_id,
         "phase": target.get("phase", "1"),
@@ -3139,10 +3194,13 @@ def save_validation_payload(dataset: dict[str, Any], dataset_dir: Path, reviewer
 
 
 def validation_session(payload: dict[str, Any]) -> dict[str, Any]:
+    require_validation_role(payload)
     dataset = load_research_dataset(payload.get("datasetPath") or payload.get("dataset"))
     dataset_dir = research_dataset_path(dataset.get("datasetPath"))
     dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
     reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+    cookie_hash = str(payload.get("accessCookieHash") or "")
+    claim_session_owner(dataset_dir, reviewer_id, "validation", cookie_hash, validation_result_path(dataset_id, reviewer_id), payload)
     selected = validation_set(payload.get("validationSet"))
     cases = validation_case_rows_for_set(dataset, selected)
     case_ids = {str(row.get("caseId") or "") for row in cases}
@@ -3160,6 +3218,7 @@ def validation_session(payload: dict[str, Any]) -> dict[str, Any]:
         "datasetId": dataset_id,
         "name": dataset.get("name"),
         "reviewerId": reviewer_id,
+        "sessionToken": (payload.get("sessionToken") or make_research_session_token(str(dataset_dir), reviewer_id, "validation", cookie_hash)) if PUBLIC_MODE else "",
         "validationSet": selected,
         "cases": cases,
         "responses": active_rows,
@@ -3180,6 +3239,7 @@ def reset_validation_responses(payload: dict[str, Any]) -> dict[str, Any]:
         dataset = load_research_dataset(str(dataset_dir))
         dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
         reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+        verify_validation_access(payload, dataset_dir, reviewer_id)
         selected = validation_set(payload.get("validationSet"))
         case_ids = {str(row.get("caseId") or "") for row in validation_case_rows_for_set(dataset, selected)}
         result = validation_result_payload(dataset_id, reviewer_id)
@@ -3203,6 +3263,7 @@ def reset_validation_responses(payload: dict[str, Any]) -> dict[str, Any]:
         result["updatedAt"] = now
         json_write(validation_result_path(dataset_id, reviewer_id), result)
     session = validation_session({
+        **validation_auth_context(payload),
         "datasetPath": str(dataset_dir),
         "reviewerId": reviewer_id,
         "validationSet": selected,
@@ -3216,6 +3277,7 @@ def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         dataset = load_research_dataset(str(dataset_dir))
         dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
         reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+        verify_validation_access(payload, dataset_dir, reviewer_id)
         selected = validation_set(payload.get("validationSet"))
         case_id = str(payload.get("caseId") or "")
         raw_decision = str(payload.get("decision") or payload.get("action") or "").strip()
@@ -3294,7 +3356,7 @@ def save_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         result["responses"] = responses
         result["reviewerProfile"] = payload.get("reviewerProfile") if isinstance(payload.get("reviewerProfile"), dict) else {}
         save_validation_payload(dataset, dataset_dir, reviewer_id, result)
-        return {"response": response, "session": validation_session({"datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
+        return {"response": response, "session": validation_session({**validation_auth_context(payload), "datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
 
 
 def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
@@ -3303,6 +3365,7 @@ def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         dataset = load_research_dataset(str(dataset_dir))
         dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
         reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+        verify_validation_access(payload, dataset_dir, reviewer_id)
         selected = validation_set(payload.get("validationSet"))
         response_id = str(payload.get("responseId") or "")
         result = validation_result_payload(dataset_id, reviewer_id)
@@ -3318,7 +3381,7 @@ def undo_validation_response(payload: dict[str, Any]) -> dict[str, Any]:
         target["undoneAt"] = utc_now_iso()
         result["responses"] = responses
         save_validation_payload(dataset, dataset_dir, reviewer_id, result)
-        return {"undone": target, "session": validation_session({"datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
+        return {"undone": target, "session": validation_session({**validation_auth_context(payload), "datasetPath": str(dataset_dir), "reviewerId": reviewer_id, "validationSet": selected})}
 
 
 def validation_file_name(value: Any) -> str:
@@ -3386,7 +3449,24 @@ def validation_export_payload(dataset_dir: Path, reviewer_id: str | None = None,
     }
 
 
-def export_validation_results_json(dataset_dir: Path, reviewer_id: str | None = None, validation_set_filter: str | None = None) -> str:
+def require_validation_role(payload: dict[str, Any]) -> None:
+    if PUBLIC_MODE and payload.get("validationAuthorized") is not True:
+        raise PermissionError("Validation reviewer access is required.")
+
+
+def validation_auth_context(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: payload.get(key) for key in ("validationAuthorized", "accessCookieHash", "sessionToken")}
+
+
+def verify_validation_access(payload: dict[str, Any], dataset_dir: Path, reviewer_id: str | None) -> None:
+    require_validation_role(payload)
+    if PUBLIC_MODE and not reviewer_id:
+        raise PermissionError("A reviewer-owned session is required.")
+    verify_research_session_token(payload, str(dataset_dir), validation_reviewer_id(reviewer_id), "validation")
+
+
+def export_validation_results_json(dataset_dir: Path, reviewer_id: str | None = None, validation_set_filter: str | None = None, auth_payload: dict[str, Any] | None = None) -> str:
+    verify_validation_access(auth_payload or {}, dataset_dir, reviewer_id)
     return json.dumps(validation_export_payload(dataset_dir, reviewer_id, validation_set_filter), ensure_ascii=False, indent=2, default=json_safe) + "\n"
 
 
@@ -3395,6 +3475,7 @@ def save_validation_result_submission(payload: dict[str, Any]) -> dict[str, Any]
     dataset = load_research_dataset(str(dataset_dir))
     dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
     reviewer_id = validation_reviewer_id(payload.get("reviewerId") or payload.get("readerId"))
+    verify_validation_access(payload, dataset_dir, reviewer_id)
     selected = validation_set(payload.get("validationSet"))
     current = validation_result_payload(dataset_id, reviewer_id)
     current["submittedAt"] = utc_now_iso()
@@ -3579,9 +3660,11 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
     store: RecordingStore
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
+        # Do not log reader IDs or session tokens in query strings. / 個人識別子をログに残さない。
+        sys.stderr.write("[%s] %s %s\n" % (self.log_date_time_string(), self.command, urlparse(self.path).path))
 
     def send_security_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header(
@@ -3628,7 +3711,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         parsed_next = urlparse(next_path)
         is_validation = parse_qs(parsed_next.query).get("mode", [""])[0].strip().lower() == "validation"
         viewer_title = "Validation Viewer" if is_validation else "EEG Test Viewer"
-        intro_text = "Validationを開始するにはパスワードを入力してください。" if is_validation else "テストを開始するにはパスワードを入力してください。"
+        intro_text = "Validationを開始するには検証者用コードを入力してください。" if is_validation else "テストを開始するには参加者用コードを入力してください。"
         button_text = "Validationを開始する" if is_validation else "開始する"
         error_html = f"<p class='error'>{message}</p>" if message else ""
         return f"""<!doctype html>
@@ -3683,40 +3766,47 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         return ""
 
     def access_cookie_signature(self, timestamp: str, nonce: str) -> str:
-        secret = f"{SERVER_TOKEN}|{ACCESS_CODE or ACCESS_PASSWORD}".encode("utf-8")
-        message = f"{timestamp}.{nonce}".encode("utf-8")
-        return hmac.new(secret, message, hashlib.sha256).hexdigest()
+        return self.role_cookie_signature(timestamp, nonce, "participant")
 
-    def make_access_cookie_value(self) -> str:
+    def role_cookie_signature(self, timestamp: str, nonce: str, role: str) -> str:
+        message = f"{timestamp}.{nonce}.{role}".encode("utf-8")
+        return hmac.new(COOKIE_SIGNING_KEY, message, hashlib.sha256).hexdigest()
+
+    def make_access_cookie_value(self, role: str = "participant") -> str:
         timestamp = str(int(time.time()))
         nonce = secrets.token_urlsafe(16)
-        signature = self.access_cookie_signature(timestamp, nonce)
-        return f"{timestamp}.{nonce}.{signature}"
+        signature = self.role_cookie_signature(timestamp, nonce, role)
+        return f"{timestamp}.{nonce}.{role}.{signature}"
 
     def access_cookie_valid(self) -> bool:
+        return bool(self.validated_cookie_role())
+
+    def validated_cookie_role(self) -> str:
         raw = self.cookie_value(ACCESS_COOKIE_NAME)
-        timestamp, sep, rest = raw.partition(".")
-        nonce, sep2, signature = rest.partition(".")
-        if not (timestamp and sep and nonce and sep2 and signature):
-            return False
+        parts = raw.split(".")
+        if len(parts) != 4:
+            return ""
+        timestamp, nonce, role, signature = parts
+        if not nonce or role not in {"participant", "reviewer"}:
+            return ""
         try:
             issued_at = int(timestamp)
         except ValueError:
-            return False
+            return ""
         now = int(time.time())
         if issued_at > now + 60 or now - issued_at > ACCESS_COOKIE_MAX_AGE_SEC:
-            return False
-        expected = self.access_cookie_signature(timestamp, nonce)
-        return secrets.compare_digest(signature, expected)
+            return ""
+        expected = self.role_cookie_signature(timestamp, nonce, role)
+        return role if secrets.compare_digest(signature, expected) else ""
 
     def access_cookie_hash(self) -> str:
         raw = self.cookie_value(ACCESS_COOKIE_NAME)
-        if not raw:
+        if not self.access_cookie_valid():
             return ""
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def send_access_cookie_header(self) -> None:
-        value = self.make_access_cookie_value()
+    def send_access_cookie_header(self, role: str = "participant") -> None:
+        value = self.make_access_cookie_value(role)
         attrs = [
             f"{ACCESS_COOKIE_NAME}={value}",
             "Path=/",
@@ -3787,10 +3877,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             return True
         return False
 
-    def send_login_success(self, next_path: str) -> None:
+    def send_login_success(self, next_path: str, role: str = "participant") -> None:
         self.send_response(HTTPStatus.FOUND)
         self.send_header("Location", self.safe_return_path(next_path))
-        self.send_access_cookie_header()
+        self.send_access_cookie_header(role)
         self.send_security_headers()
         self.end_headers()
 
@@ -3800,6 +3890,30 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         if not ADMIN_CODE:
             return False
         return secrets.compare_digest(self.headers.get("X-EEG-Viewer-Admin-Code", ""), ADMIN_CODE)
+
+    def validation_allowed(self) -> bool:
+        return not PUBLIC_MODE or self.validated_cookie_role() == "reviewer" or self.admin_allowed()
+
+    def auth_context(self) -> dict[str, Any]:
+        return {
+            "accessCookieHash": self.access_cookie_hash(),
+            "validationAuthorized": self.validation_allowed(),
+            "sessionToken": self.headers.get("X-EEG-Research-Session", ""),
+        }
+
+    def serve_research_session(self, session: dict[str, Any]) -> None:
+        if PUBLIC_MODE:
+            RECORDING_GRANTS.set(self.recording_identity(session["sessionToken"]), session["datasetPath"], session.get("allCases", session.get("cases", [])))
+        return self.send_json(session)
+
+    def recording_identity(self, token: str = "") -> str:
+        cookie_hash = self.access_cookie_hash()
+        token = token or self.headers.get("X-EEG-Research-Session", "")
+        return f"{cookie_hash}:{token}" if cookie_hash and token else ""
+
+    def require_recording_path(self, path: Path) -> None:
+        if PUBLIC_MODE and not RECORDING_GRANTS.allows(self.recording_identity(), path):
+            raise PermissionError("This recording is not assigned to the current browser session.")
 
     def handle_login_post(self) -> bool:
         parsed = urlparse(self.path)
@@ -3824,9 +3938,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             form = parse_qs(raw, keep_blank_values=True)
             password = form.get("password", [""])[0]
             next_path = self.safe_return_path(form.get("next", ["/"])[0])
-        expected = ACCESS_CODE or ACCESS_PASSWORD
+        validation_login = parse_qs(urlparse(next_path).query).get("mode", [""])[0].strip().lower() == "validation"
+        expected = (VALIDATION_CODE or ADMIN_CODE) if validation_login else (ACCESS_CODE or ACCESS_PASSWORD)
         if expected and secrets.compare_digest(password, expected):
-            self.send_login_success(next_path)
+            self.send_login_success(next_path, "reviewer" if validation_login else "participant")
             return True
         body = self.login_page_html("パスワードが違います。").encode("utf-8")
         self.send_response(HTTPStatus.UNAUTHORIZED)
@@ -3873,6 +3988,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             path = unquote(parsed.path)
             qs = parse_qs(parsed.query)
             if path == "/":
+                if qs.get("mode", [""])[0].lower() == "validation" and not self.validation_allowed():
+                    return self.send_auth_required("Validation reviewer code is required.")
                 return self.serve_static(STATIC_DIR / "index.html")
             if path.startswith("/static/"):
                 return self.serve_static(STATIC_DIR / path.removeprefix("/static/"))
@@ -3887,6 +4004,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     if not secrets.compare_digest(token, SERVER_TOKEN):
                         return self.send_json({"error": "Missing or invalid request token. Reload EEG Viewer and try again."}, status=403)
             if path == "/api/health":
+                if PUBLIC_MODE:
+                    return self.send_json({"ok": True, "buildInfo": app_build_info(), "windowPerformance": {"maxConcurrentRequests": MAX_CONCURRENT_WINDOW_REQUESTS, "sourceCacheBytes": MAX_WINDOW_SOURCE_CACHE_BYTES, "filteredCacheBytes": MAX_FILTERED_WINDOW_CACHE_BYTES}})
                 return self.send_json(
                     {
                         "ok": True,
@@ -3929,14 +4048,18 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                     return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_text(validation_result_text(required(qs, "id")), "application/json; charset=utf-8")
             if path == "/api/recordings":
+                if PUBLIC_MODE:
+                    return self.send_json([recording_payload(rec) for rec in self.store.recordings if RECORDING_GRANTS.allows(self.recording_identity(), rec.eeg_path)])
                 if qs.get("refresh", ["0"])[0] == "1":
                     self.store.refresh()
                 else:
                     self.store.refresh_if_stale()
                 return self.send_json([recording_payload(rec) for rec in self.store.recordings])
             if path == "/api/recording":
+                self.require_recording_path(self.store.get(required(qs, "id")).eeg_path)
                 return self.send_json(self.store.metadata(required(qs, "id")))
             if path == "/api/window":
+                self.require_recording_path(self.store.get(required(qs, "id")).eeg_path)
                 requested_montages = [
                     item.strip()
                     for item in qs.get("montages", [""])[0].split(",")
@@ -3977,9 +4100,13 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 return self.send_json(payload)
             if path == "/api/research/dataset":
                 dataset = load_research_dataset(qs.get("path", qs.get("dataset", [""]))[0])
+                if PUBLIC_MODE:
+                    dataset = {key: dataset.get(key) for key in ("datasetPath", "datasetId", "name", "settings")}
+                    dataset["cases"] = RECORDING_GRANTS.cases(self.recording_identity(), str(dataset["datasetPath"]))
                 return self.send_json(dataset)
             if path == "/api/research/test/session":
-                return self.send_json(research_session({
+                return self.serve_research_session(research_session({
+                    "sessionToken": self.headers.get("X-EEG-Research-Session", ""),
                     "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
                     "readerId": qs.get("readerId", ["reader"])[0],
                     "phase": qs.get("phase", ["1"])[0],
@@ -3989,13 +4116,16 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
                 reader = qs.get("readerId", [""])[0] or None
                 return self.send_text(export_research_responses_json(dataset_dir, reader, {
-                    "sessionToken": qs.get("sessionToken", [""])[0],
+                    "sessionToken": self.headers.get("X-EEG-Research-Session", "") or qs.get("sessionToken", [""])[0],
                     "accessCookieHash": self.access_cookie_hash(),
                 }), "application/json; charset=utf-8")
             if path.startswith("/api/research/validation/") and not VALIDATION_WORKFLOW_ENABLED:
                 return self.send_json({"error": "Validation workflow is disabled in the research test viewer."}, status=404)
+            if path.startswith("/api/research/validation/") and not self.validation_allowed():
+                return self.send_json({"error": "Validation reviewer access is required."}, status=403)
             if path == "/api/research/validation/session":
-                return self.send_json(validation_session({
+                return self.serve_research_session(validation_session({
+                    **self.auth_context(),
                     "datasetPath": qs.get("dataset", qs.get("path", [""]))[0],
                     "reviewerId": qs.get("reviewerId", qs.get("readerId", ["reviewer"]))[0],
                     "validationSet": qs.get("validationSet", ["ied"])[0],
@@ -4004,8 +4134,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 dataset_dir = research_dataset_path(qs.get("dataset", qs.get("path", [""]))[0])
                 reviewer = qs.get("reviewerId", [""])[0] or None
                 selected = qs.get("validationSet", [""])[0] or None
-                return self.send_text(export_validation_results_json(dataset_dir, reviewer, selected), "application/json; charset=utf-8")
+                return self.send_text(export_validation_results_json(dataset_dir, reviewer, selected, self.auth_context()), "application/json; charset=utf-8")
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+        except PermissionError as exc:
+            self.send_json({"error": str(exc)}, status=403)
         except FileNotFoundError as exc:
             self.send_json({"error": str(exc)}, status=404)
         except ValueError as exc:
@@ -4027,6 +4159,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             if parsed.path.startswith("/api/research/validation/") and not VALIDATION_WORKFLOW_ENABLED:
                 return self.send_json({"error": "Validation workflow is disabled in the research test viewer."}, status=404)
+            if parsed.path.startswith("/api/research/validation/") and not self.validation_allowed():
+                return self.send_json({"error": "Validation reviewer access is required."}, status=403)
             if parsed.path.startswith("/api/admin/private-dataset/") and not PRIVATE_DATASET_ADMIN_ENABLED:
                 return self.send_json({"error": "Private dataset administration is disabled in the research test viewer."}, status=404)
             if parsed.path.startswith("/api/"):
@@ -4040,9 +4174,18 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             if length > MAX_POST_BODY_BYTES:
                 return self.send_json({"error": "Request body is too large."}, status=413)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-            payload.setdefault("accessCookieHash", self.access_cookie_hash())
+            payload["accessCookieHash"] = self.access_cookie_hash()
+            payload["validationAuthorized"] = self.validation_allowed()
+            payload["sessionToken"] = payload.get("sessionToken") or self.headers.get("X-EEG-Research-Session", "")
             if parsed.path == "/api/open-file":
-                return self.send_json(self.store.add_path(normalize_path_input(payload.get("path", ""))))
+                path_text = normalize_path_input(payload.get("path", ""))
+                if PUBLIC_MODE:
+                    if not path_text or is_http_url(path_text):
+                        raise PermissionError("Only assigned recordings can be opened.")
+                    self.require_recording_path(Path(path_text))
+                    if not Path(path_text).is_file():
+                        raise PermissionError("Only assigned recording files can be opened.")
+                return self.send_json(self.store.add_path(path_text))
             if parsed.path == "/api/research/test/response":
                 return self.send_json(save_research_response(payload))
             if parsed.path == "/api/research/test/response/undo":
@@ -4066,6 +4209,8 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/research/validation/submit-result":
                 return self.send_json(save_validation_result_submission(payload))
             return self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+        except PermissionError as exc:
+            self.send_json({"error": str(exc)}, status=403)
         except FileNotFoundError as exc:
             self.send_json({"error": str(exc)}, status=404)
         except ValueError as exc:

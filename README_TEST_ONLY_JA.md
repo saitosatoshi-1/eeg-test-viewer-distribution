@@ -8,7 +8,7 @@
 https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 ```
 
-共有時は `access=ncnp` を付けません。リンクを開くとパスワード入力画面が表示され、`ncnp` 入力後にテスト画面へ進みます。
+共有URLにコードは付けません。リンクを開き、別途案内された参加者用コードを入力してテスト画面へ進みます。Validationは別の検証者用コードを使用します。
 
 ## 残しているもの
 

@@ -3,6 +3,17 @@ __pycache__/
 *.pyc
 .DS_Store
 annotations/
+.env
+.env.*
+*.edf
+*.EDF
+*.zip
+exports/
+responses/
+validation/
+submitted_results/
+validation_results/
+session_owners/
 dist/
 *.dmg
 *.pkg

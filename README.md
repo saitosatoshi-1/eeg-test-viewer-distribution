@@ -10,7 +10,9 @@ Use the password-protected link when sharing the viewer:
 https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 ```
 
-The link shows a password screen. Enter `ncnp` to set an HTTP-only access cookie. Do not place the password in the URL.
+The link shows a password screen. Enter the separately supplied participant code to set an HTTP-only access cookie. Validation uses a separate reviewer code. Do not place passwords in URLs or source. / コードは別途案内し、URLやソースへ記載しません。
+
+See [Security deployment notes / セキュリティ反映手順](SECURITY_CHANGES_JA.md) before deploying the privacy fixes.
 
 Use URL parameters to select the workflow:
 

@@ -9,9 +9,15 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+if __package__:
+    from .viewer_transport import access_code as read_access_code, secure_opener, secure_viewer_url
+else:
+    from viewer_transport import access_code as read_access_code, secure_opener, secure_viewer_url
+
 
 def viewer_opener(base: str, access_code: str) -> tuple[urllib.request.OpenerDirector, str]:
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
+    base = secure_viewer_url(base)
+    opener = secure_opener(base)
     login_body = urllib.parse.urlencode({"password": access_code, "next": "/"}).encode("utf-8")
     opener.open(urllib.request.Request(f"{base}/login", data=login_body, headers={"Content-Type": "application/x-www-form-urlencoded"})).read()
     html = opener.open(f"{base}/").read().decode("utf-8")
@@ -45,15 +51,15 @@ def safe_local_path(output_dir: Path, submission_id: str) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="List or download validation result JSON files.")
     parser.add_argument("--viewer-url", default="https://eeg-test-viewer.onrender.com")
-    parser.add_argument("--access-code", default="ncnp")
+    parser.add_argument("--access-code", default=os.environ.get("EEG_VIEWER_ACCESS_CODE", ""))
     parser.add_argument("--admin-code", default=os.environ.get("EEG_VIEWER_ADMIN_CODE", ""))
     parser.add_argument("--output", type=Path, default=Path.home() / "Downloads" / "eeg_validation_results")
     parser.add_argument("--list-only", action="store_true")
     parser.add_argument("--id", dest="submission_id", default="", help="Download one submissionId instead of all results.")
     args = parser.parse_args()
 
-    base = args.viewer_url.rstrip("/")
-    opener, token = viewer_opener(base, args.access_code)
+    base = secure_viewer_url(args.viewer_url)
+    opener, token = viewer_opener(base, read_access_code(args.access_code))
     inventory = get_json(opener, f"{base}/api/admin/validation-results/list", token, args.admin_code)
     results = inventory.get("results") or []
     if args.list_only:

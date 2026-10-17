@@ -14,7 +14,7 @@
 https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 ```
 
-共有時はURLにアクセスコードを含めません。参加者はパスワード画面で `ncnp` を入力します。
+共有時はURLにアクセスコードを含めません。参加者はパスワード画面で別途案内したコードを入力します。Validationには独立した検証者用コードが必要です。
 
 ## 現在のデータセット
 

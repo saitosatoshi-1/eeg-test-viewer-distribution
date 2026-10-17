@@ -18,7 +18,11 @@ services:
       - key: EEG_VIEWER_DATA_DIR
         value: /data
       - key: EEG_VIEWER_ACCESS_CODE
-        value: ncnp
+        sync: false
+      - key: EEG_VIEWER_VALIDATION_CODE
+        sync: false
+      - key: EEG_VIEWER_PUBLIC_DATASET_IDS
+        value: validation_v1
       - key: EEG_VIEWER_ADMIN_CODE
         sync: false
       - key: EEG_VIEWER_ALLOWED_REMOTE_HOSTS

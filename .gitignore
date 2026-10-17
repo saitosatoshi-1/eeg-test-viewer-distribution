@@ -32,3 +32,6 @@ dist/
 exports/
 responses/
 validation/
+submitted_results/
+validation_results/
+session_owners/
