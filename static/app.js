@@ -446,12 +446,187 @@ function scheduleLayoutRefresh() {
   window.setTimeout(refresh, 300);
 }
 
+function rememberControlValues() {
+  state.lastMontageSelectValue = els.montageSelect?.value || "";
+  state.lastDurationSelectValue = els.durationSelect?.value || "";
+  state.lastFilterControlKey = filterControlKey();
+}
+
+function startControlValueWatcher() {
+  if (state.controlWatchTimer) window.clearInterval(state.controlWatchTimer);
+  state.controlWatchTimer = window.setInterval(() => {
+    const montageValue = els.montageSelect?.value || "";
+    const durationValue = els.durationSelect?.value || "";
+    const filterKey = filterControlKey();
+    if (montageValue && montageValue !== state.lastMontageSelectValue) {
+      state.lastMontageSelectValue = montageValue;
+      handleMontageControlChange("watcher");
+    }
+    if (durationValue && durationValue !== state.lastDurationSelectValue) {
+      state.lastDurationSelectValue = durationValue;
+      handleDurationControlChange("watcher");
+    }
+    if (filterKey !== state.lastFilterControlKey) {
+      state.lastFilterControlKey = filterKey;
+      handleFilterControlChange("watcher");
+    }
+  }, 250);
+}
+
+function scheduleDurationRefresh(source = "duration", options = {}) {
+  if (!els.durationSelect) return;
+  if (state.durationRefreshTimer) window.clearTimeout(state.durationRefreshTimer);
+  state.durationRefreshTimer = window.setTimeout(() => {
+    state.durationRefreshTimer = null;
+    const value = els.durationSelect?.value || "";
+    const changed = value && value !== state.lastDurationSelectValue;
+    if (changed) {
+      handleDurationControlChange(source);
+    }
+  }, options.delayMs ?? 40);
+}
+
+function commitDurationSelection(source = "duration") {
+  scheduleDurationRefresh(source, { delayMs: 20 });
+}
+
+function filterControlKey() {
+  return [
+    els.tcSelect?.value || "",
+    els.hfSelect?.value || "",
+    FIXED_AC_FILTER,
+    els.ecgToggle?.checked ? "1" : "0",
+  ].join("|");
+}
+
 function waveformActionText() {
   return isMobileViewport() ? "波形をタッチ" : "波形を左クリック";
 }
 
 function tutorialRatingStepText() {
   return `${isMobileViewport() ? "波形をタッチ" : "波形上を左クリック"}し、表示された三択から てんかん性異常あり / てんかん性異常なし / 判断困難 を選びます。`;
+}
+
+function preferredWindowMontages(activeMontage = activeMontageValue()) {
+  return [...new Set([activeMontage, ...DEFAULT_MULTI_MONTAGES].filter(Boolean))].slice(0, 4);
+}
+
+function preferredResearchWindowMontages(activeMontage = activeMontageValue()) {
+  const candidates = isMobileViewport()
+    ? [activeMontage, "conventional", "longitudinal", "a1a2"]
+    : [activeMontage, ...RESEARCH_PREFETCH_MONTAGES];
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+function windowMaxPoints() {
+  if (!isMobileViewport()) return DESKTOP_WINDOW_MAX_POINTS;
+  if (els.hfSelect?.value === "OFF") return MOBILE_HF_OFF_WINDOW_MAX_POINTS;
+  return isMultiMontageMode() ? MOBILE_MULTI_MONTAGE_MAX_POINTS : MOBILE_WINDOW_MAX_POINTS;
+}
+
+function cancelActiveWindowLoad(options = {}) {
+  const controller = state.windowLoadController;
+  if (!controller) return false;
+  state.windowLoadRequestId += 1;
+  state.windowLoadController = null;
+  state.windowLoadPromise = null;
+  controller.abort();
+  if (options.hideLoading !== false) setWaveLoading(false);
+  return true;
+}
+
+async function handleMontageControlChange(source = "change") {
+  if (!els.montageSelect) return;
+  resetResearchPrefetch();
+  state.lastMontageSelectValue = els.montageSelect.value || "";
+  state.activeMontage = state.lastMontageSelectValue || state.activeMontage;
+  updateResearchMontageTiming();
+  renderStatus();
+  const synced = syncActiveMontageData({ requireExact: true });
+  if (synced && loadedWindowMatchesCurrentDisplay(state.start, visibleDuration())) {
+    cancelActiveWindowLoad();
+    draw();
+    setStatus("Ready");
+    schedulePrefetchAfterControlInteraction();
+    return;
+  }
+  setStatus(`Loading montage ${state.activeMontage} / ${labelForMontage()}...`, { busy: true, progress: 70 });
+  await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
+  schedulePrefetchAfterControlInteraction();
+  draw();
+}
+
+function loadedWindowMatchesCurrentDisplay(start, duration) {
+  const data = state.windowData;
+  if (!data || data.id !== state.recordingId || !(data.traces || []).length) return false;
+  const filters = data.displayFilters || {};
+  if (String(filters.tc || "").toUpperCase() !== String(els.tcSelect?.value || "").toUpperCase()) return false;
+  if (String(filters.hf || "").toUpperCase() !== String(els.hfSelect?.value || "").toUpperCase()) return false;
+  if (String(filters.ac || "").toUpperCase() !== FIXED_AC_FILTER) return false;
+  const activeMontage = activeMontageValue();
+  if (Array.isArray(data.montageViews)) {
+    const activeView = data.montageViews.find((view) => view.montage === activeMontage);
+    if (!activeView || activeView.available === false || !(activeView.traces || []).length) return false;
+  } else if (data.montage && data.montage !== activeMontage) {
+    return false;
+  }
+  const loadedStart = Number(data.start);
+  const loadedDuration = Number(data.duration);
+  const targetStart = Number(start);
+  const targetDuration = Number(duration);
+  if (![loadedStart, loadedDuration, targetStart, targetDuration].every(Number.isFinite)) return false;
+  const tolerance = 0.002;
+  return targetStart >= loadedStart - tolerance
+    && targetStart + targetDuration <= loadedStart + loadedDuration + tolerance;
+}
+
+async function handleDurationControlChange(source = "change") {
+  if (!els.durationSelect) return;
+  resetResearchPrefetch();
+  state.lastDurationSelectValue = els.durationSelect.value || "";
+  const nextDuration = Number(state.lastDurationSelectValue || 10) || 10;
+  const researchCase = currentResearchCase();
+  // 研究症例ではTimebase変更後も、注目波形の時刻を画面中央に保つ。
+  // Keep the target waveform centered after Timebase changes in both desktop and mobile viewers.
+  const nextStart = TEST_ONLY_DISTRIBUTION && researchCase
+    ? centeredStartForResearchCase(researchCase, nextDuration)
+    : clampStart(state.start, nextDuration);
+  state.start = nextStart;
+  updateWaveScrollbar();
+  renderStatus();
+  if (loadedWindowMatchesCurrentDisplay(nextStart, nextDuration)) {
+    cancelActiveWindowLoad();
+    syncActiveMontageData({ requireExact: true });
+    draw();
+    setStatus("Ready");
+    schedulePrefetchAfterControlInteraction();
+    return;
+  }
+  setStatus(`Loading timebase ${state.lastDurationSelectValue}s...`, { busy: true, progress: 70 });
+  await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
+  schedulePrefetchAfterControlInteraction();
+}
+
+function scheduleFilterRefresh(source = "filter", options = {}) {
+  if (state.filterRefreshTimer) window.clearTimeout(state.filterRefreshTimer);
+  state.filterRefreshTimer = window.setTimeout(() => {
+    state.filterRefreshTimer = null;
+    const filterKey = filterControlKey();
+    const changed = filterKey !== state.lastFilterControlKey;
+    if (changed || options.force) {
+      handleFilterControlChange(source);
+    }
+  }, options.delayMs ?? 60);
+}
+
+async function handleFilterControlChange(source = "change") {
+  state.lastFilterControlKey = filterControlKey();
+  resetResearchPrefetch();
+  renderStatus();
+  setStatus(`Loading filters TC ${tcText()} / HF ${hfText()}...`, { busy: true, progress: 70 });
+  // 現在表示中のモンタージュを先に更新し、残りは裏で再取得する。
+  await loadWindow({ activeMontageOnly: TEST_ONLY_DISTRIBUTION });
+  schedulePrefetchAfterControlInteraction();
 }
 
 function resizeCanvas() {
@@ -3418,10 +3593,378 @@ async function loadRecordings(preferredId = "", options = {}) {
   }
 }
 
+async function onControlChange(ev) {
+  saveSettings();
+  if (ev.target === els.montageSelect) {
+    await handleMontageControlChange("change");
+    return;
+  }
+  if (ev.target === els.sensitivitySelect) {
+    renderStatus();
+    draw();
+    return;
+  }
+  if (ev.target === els.durationSelect) {
+    await handleDurationControlChange("change");
+    return;
+  }
+  if (ev.target === els.recordingSelect) {
+    state.recordingId = els.recordingSelect.value;
+    state.start = 0;
+    state.cursorTime = null;
+    state.dragSelection = null;
+    await loadMetadata();
+  } else if ([els.tcSelect, els.hfSelect, els.ecgToggle].includes(ev.target)) {
+    await handleFilterControlChange("change");
+    return;
+  }
+  await loadWindow();
+  scheduleLayoutRefresh();
+}
+
+
 async function loadMetadata() {
   setStatus("Loading metadata...", { busy: true, progress: 60 });
   state.metadata = await fetchJson(`/api/recording?${qs({ id: state.recordingId })}`);
   renderMetadata();
+}
+
+function windowCacheKey(params) {
+  return [
+    params.id,
+    Number(params.start || 0).toFixed(3),
+    Number(params.duration || 0).toFixed(3),
+    params.montage,
+    params.montages || "",
+    params.tc,
+    params.hf,
+    params.ac,
+    params.ecg,
+    params.maxPoints || "",
+    params.strictMontage || "",
+    params.compactActive || "",
+  ].join("|");
+}
+
+function rememberWindowCache(key, data) {
+  if (!key || !data) return;
+  state.windowCache.set(key, data);
+  while (state.windowCache.size > MAX_WINDOW_CACHE_ENTRIES) {
+    const firstKey = state.windowCache.keys().next().value;
+    state.windowCache.delete(firstKey);
+  }
+}
+
+function cachedWindowForParams(params) {
+  const exact = state.windowCache.get(windowCacheKey(params));
+  if (exact || params.compactActive !== "1") return exact;
+  // 現在モンタージュを含む全モンタージュ応答も、同じ表示条件なら再利用できる。
+  const fullParams = {
+    ...params,
+    montages: preferredResearchWindowMontages(params.montage).join(","),
+    compactActive: "0",
+  };
+  return state.windowCache.get(windowCacheKey(fullParams));
+}
+
+function clearWindowCacheForCurrentRecording() {
+  const recordId = String(state.recordingId || "");
+  if (!recordId) {
+    state.windowCache.clear();
+    return;
+  }
+  for (const key of Array.from(state.windowCache.keys())) {
+    if (String(key).startsWith(`${recordId}|`)) state.windowCache.delete(key);
+  }
+}
+
+function researchCasePrefetchCenterTime(item) {
+  const event = Number(item?.eventTime);
+  if (Number.isFinite(event)) return event;
+  const epochStart = Number(item?.epochStart);
+  const duration = Number(item?.durationSec);
+  if (Number.isFinite(epochStart) && Number.isFinite(duration) && duration > 0) return epochStart + duration / 2;
+  return Number.isFinite(epochStart) ? epochStart : 0;
+}
+
+function researchCasePrefetchStart(item, duration) {
+  const safeDuration = Number.isFinite(Number(duration)) && Number(duration) > 0 ? Number(duration) : defaultResearchTimebaseSec();
+  return Math.max(0, Number((researchCasePrefetchCenterTime(item) - safeDuration / 2).toFixed(3)));
+}
+
+function researchCasePrefetchMontage(item) {
+  const profile = researchProfile();
+  if (isValidationWorkflow()) return "longitudinal";
+  if (isResearchPracticeCase(item)) return "conventional";
+  return profile.usualMontage || item?.phase1Montage || activeMontageValue() || "conventional";
+}
+
+function researchWindowPrefetchParams(recordId, item, options = {}) {
+  const duration = Number(options.duration || els.durationSelect?.value || defaultResearchTimebaseSec()) || defaultResearchTimebaseSec();
+  const montage = options.montage || researchCasePrefetchMontage(item);
+  const montages = options.montages || montage;
+  return {
+    id: recordId,
+    start: options.start ?? researchCasePrefetchStart(item, duration),
+    duration,
+    montage,
+    montages,
+    tc: options.tc ?? els.tcSelect?.value ?? "0.3",
+    hf: options.hf ?? els.hfSelect?.value ?? "120",
+    ac: FIXED_AC_FILTER,
+    ecg: options.ecg ?? (els.ecgToggle?.checked ? "1" : "0"),
+    maxPoints: options.maxPoints || windowMaxPoints(),
+    strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
+    compactActive: options.compactActive === false ? "0" : "1",
+  };
+}
+
+async function openResearchCaseForPrefetch(item, signal = null) {
+  const path = String(item?.edfPath || "");
+  if (!path) return "";
+  if (state.researchPrefetchRecordIds.has(path)) return state.researchPrefetchRecordIds.get(path);
+  const opened = await fetchJson("/api/open-file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    retryAttempts: 1,
+    signal,
+    body: JSON.stringify({ path }),
+  });
+  const recordId = opened?.id || "";
+  if (recordId) state.researchPrefetchRecordIds.set(path, recordId);
+  return recordId;
+}
+
+async function prefetchResearchWindow(item, options = {}) {
+  if (!TEST_ONLY_DISTRIBUTION || !item?.edfPath) return false;
+  const controller = new AbortController();
+  state.researchPrefetchControllers.add(controller);
+  let cacheKey = "";
+  try {
+    const recordId = options.recordId || await openResearchCaseForPrefetch(item, controller.signal);
+    if (!recordId || controller.signal.aborted) return false;
+    const params = researchWindowPrefetchParams(recordId, item, options);
+    cacheKey = windowCacheKey(params);
+    if (state.windowCache.has(cacheKey) || state.researchPrefetchQueuedKeys.has(cacheKey)) return false;
+    state.researchPrefetchQueuedKeys.add(cacheKey);
+    const data = await fetchJson(`/api/window?${qs(params)}`, { retryAttempts: 1, signal: controller.signal });
+    if (controller.signal.aborted) return false;
+    rememberWindowCache(cacheKey, data);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (cacheKey) state.researchPrefetchQueuedKeys.delete(cacheKey);
+    state.researchPrefetchControllers.delete(controller);
+  }
+}
+
+function researchPrefetchCaseKey(item) {
+  return [
+    item?.caseId || "",
+    item?.edfPath || "",
+    item?.eventTime ?? "",
+    item?.epochStart ?? "",
+    item?.durationSec ?? "",
+  ].join("|");
+}
+
+function enqueueResearchPrefetchCases(items, options = {}) {
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
+  const nextItems = [];
+  for (const item of items || []) {
+    if (!item?.edfPath) continue;
+    const key = researchPrefetchCaseKey(item);
+    if (!key || state.researchPrefetchQueuedCases.has(key)) continue;
+    state.researchPrefetchQueuedCases.add(key);
+    nextItems.push(item);
+  }
+  if (!nextItems.length) return;
+  state.researchPrefetchQueue = options.priority
+    ? [...nextItems, ...state.researchPrefetchQueue]
+    : [...state.researchPrefetchQueue, ...nextItems];
+  drainResearchPrefetchQueue(state.researchPrefetchRunId);
+}
+
+async function drainResearchPrefetchQueue(runId) {
+  if (state.researchPrefetchActive) return;
+  state.researchPrefetchActive = true;
+  try {
+    while (
+      state.researchPrefetchQueue.length &&
+      runId === state.researchPrefetchRunId &&
+      hasActiveResearchPrefetchSession()
+    ) {
+      const item = state.researchPrefetchQueue.shift();
+      state.researchPrefetchQueuedCases.delete(researchPrefetchCaseKey(item));
+      await prefetchResearchWindow(item);
+      await sleep(isMobileViewport() ? 90 : 45);
+    }
+  } finally {
+    state.researchPrefetchActive = false;
+    if (
+      state.researchPrefetchQueue.length &&
+      hasActiveResearchPrefetchSession()
+    ) {
+      drainResearchPrefetchQueue(state.researchPrefetchRunId);
+    }
+  }
+}
+
+function scheduleResearchPrefetch(aroundIndex = state.researchCaseIndex) {
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
+  const cases = activeResearchCases();
+  if (!cases.length) return;
+  const index = Math.max(0, Math.min(cases.length - 1, Number(aroundIndex || 0)));
+  const responseSource = isValidationWorkflow() ? state.validationSession?.responses : state.researchSession?.responses;
+  const answeredIds = new Set((responseSource || []).map((row) => String(row.caseId || "")));
+  const ordered = [
+    ...cases.slice(index + 1),
+    ...cases.slice(0, index),
+  ].filter((item) => item?.sampleEpoch || !answeredIds.has(String(item?.caseId || "")));
+  const ahead = ordered.slice(0, RESEARCH_PREFETCH_LOOKAHEAD);
+  enqueueResearchPrefetchCases(ahead, { priority: true });
+}
+
+function scheduleCurrentResearchWindowPrefetch() {
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
+  const item = currentResearchCase();
+  if (!item?.edfPath || !state.recordingId) return;
+  const montage = activeMontageValue();
+  const duration = Number(els.durationSelect?.value || 10) || 10;
+  window.setTimeout(() => {
+    void prefetchResearchWindow(item, {
+      recordId: state.recordingId,
+      start: state.start,
+      duration,
+      montage,
+      montages: preferredResearchWindowMontages(montage).join(","),
+      tc: els.tcSelect?.value || "0.3",
+      hf: els.hfSelect?.value || "120",
+      ac: FIXED_AC_FILTER,
+      ecg: els.ecgToggle?.checked ? "1" : "0",
+      maxPoints: windowMaxPoints(),
+      compactActive: false,
+    });
+  }, 0);
+}
+
+function schedulePrefetchAfterControlInteraction(delayMs = 400) {
+  if (!TEST_ONLY_DISTRIBUTION || !hasActiveResearchPrefetchSession()) return;
+  if (state.researchPrefetchResumeTimer) window.clearTimeout(state.researchPrefetchResumeTimer);
+  state.researchPrefetchResumeTimer = window.setTimeout(() => {
+    state.researchPrefetchResumeTimer = null;
+    scheduleCurrentResearchWindowPrefetch();
+    scheduleResearchPrefetch(state.researchCaseIndex);
+  }, delayMs);
+}
+
+function resetResearchPrefetch(options = {}) {
+  state.researchPrefetchRunId += 1;
+  if (state.researchPrefetchResumeTimer) window.clearTimeout(state.researchPrefetchResumeTimer);
+  state.researchPrefetchResumeTimer = null;
+  for (const controller of state.researchPrefetchControllers) controller.abort();
+  state.researchPrefetchControllers.clear();
+  state.researchPrefetchQueue = [];
+  state.researchPrefetchQueuedCases.clear();
+  state.researchPrefetchQueuedKeys.clear();
+  if (options.clearRecords) state.researchPrefetchRecordIds.clear();
+}
+
+function applyWindowData(data, requestedMontage, options = {}) {
+  state.windowData = data;
+  updateMontageAvailabilityFromWindow(data);
+  if (TEST_ONLY_DISTRIBUTION && Array.isArray(data?.montageViews)) {
+    const requestedView = data.montageViews.find((view) => view.montage === requestedMontage);
+    if (requestedView?.available === false || !(requestedView?.traces || []).length) {
+      const fallbackView = data.montageViews.find((view) => view.available !== false && (view.traces || []).length);
+      if (fallbackView) {
+        data.montage = fallbackView.montage;
+        data.traces = fallbackView.traces || [];
+        data.times = fallbackView.times || data.times || [];
+        requestedMontage = fallbackView.montage;
+      }
+    }
+  }
+  state.activeMontage = data.montage || requestedMontage;
+  const viewportStart = Number(options.viewportStart);
+  state.start = Number.isFinite(viewportStart) ? viewportStart : (state.windowData.start || 0);
+  renderStatus();
+  updateWaveScrollbar();
+  renderWarnings();
+  draw();
+}
+
+function updateMontageAvailabilityFromWindow(data = state.windowData) {
+  if (!els.montageSelect || !Array.isArray(data?.montageViews)) return;
+  const availability = new Map(data.montageViews.map((view) => [view.montage, view.available !== false && (view.traces || []).length > 0]));
+  for (const option of els.montageSelect.options || []) {
+    option.disabled = TEST_ONLY_DISTRIBUTION && availability.has(option.value) && !availability.get(option.value);
+  }
+}
+
+async function loadWindow(options = {}) {
+  if (!state.recordingId) return;
+  cancelActiveWindowLoad();
+  const requestedMontage = activeMontageValue();
+  const viewportStart = Number(state.start || 0);
+  const viewportDuration = Number(els.durationSelect?.value || 10) || 10;
+  const requestedMontages = options.activeMontageOnly
+    ? [requestedMontage]
+    : TEST_ONLY_DISTRIBUTION
+      ? preferredResearchWindowMontages(requestedMontage)
+      : preferredWindowMontages(requestedMontage);
+  const params = {
+    id: state.recordingId,
+    start: viewportStart,
+    duration: viewportDuration,
+    montage: requestedMontage,
+    montages: requestedMontages.join(","),
+    tc: els.tcSelect.value,
+    hf: els.hfSelect.value,
+    ac: FIXED_AC_FILTER,
+    ecg: els.ecgToggle.checked ? "1" : "0",
+    maxPoints: windowMaxPoints(),
+    strictMontage: TEST_ONLY_DISTRIBUTION ? "1" : "0",
+    compactActive: options.activeMontageOnly ? "1" : "0",
+  };
+  const cacheKey = windowCacheKey(params);
+  const cached = cachedWindowForParams(params);
+  if (cached) {
+    applyWindowData(cached, requestedMontage, { viewportStart });
+    setStatus("Ready");
+    return cached;
+  }
+
+  const controller = new AbortController();
+  const requestId = state.windowLoadRequestId + 1;
+  state.windowLoadRequestId = requestId;
+  state.windowLoadController = controller;
+  setWaveLoading(true);
+  const promise = (async () => {
+    const endpoint = "/api/window";
+    try {
+      setStatus("Loading waveform...", { busy: true, progress: 75 });
+      const data = await fetchJson(`${endpoint}?${qs(params)}`, { signal: controller.signal });
+      if (requestId !== state.windowLoadRequestId || controller.signal.aborted) return undefined;
+      rememberWindowCache(cacheKey, data);
+      applyWindowData(data, requestedMontage, { viewportStart });
+      return data;
+    } catch (err) {
+      if (!isAbortError(err) && requestId === state.windowLoadRequestId) {
+        setStatus(`Waveform failed: ${err.message}`, { error: true });
+      }
+      return undefined;
+    } finally {
+      if (requestId === state.windowLoadRequestId) {
+        state.windowLoadController = null;
+        state.windowLoadPromise = null;
+        setWaveLoading(false);
+      }
+    }
+  })();
+  state.windowLoadPromise = promise;
+  return promise;
 }
 
 function renderMetadata() {
@@ -3467,6 +4010,499 @@ function renderStatus() {
   els.calReadout.textContent = `${sensitivity}uV/mm · TC ${tc} · HF ${hfText()} · ${els.paperSelect.value} mm/s`;
 }
 
+function isMultiWindowData() {
+  return false;
+}
+
+function draw() {
+  resizeCanvas();
+  const canvas = els.waveCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const ratio = window.devicePixelRatio || 1;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const traces = displayTraces(state.windowData?.traces || []);
+  const times = state.windowData?.times || [];
+  const duration = visibleDuration();
+  const start = Number(state.start || 0);
+  if (els.timeReadout) {
+    els.timeReadout.textContent = `${formatSec(start)} - ${formatSec(start + duration)}`;
+  }
+  if (els.calReadout) {
+    els.calReadout.textContent = `${sensitivityValue()} uV/mm · TC ${tcText()} · HF ${hfText()} · ${els.paperSelect?.value || "30"} mm/s`;
+  }
+  if (!traces.length || !times.length) {
+    ctx.fillStyle = "#68707c";
+    ctx.font = `${13 * ratio}px Arial`;
+    ctx.textAlign = "center";
+    ctx.fillText("No waveform data", canvas.width / 2, canvas.height / 2);
+    return;
+  }
+  const { left, right, top, bottom } = plotLayout(canvas);
+  const plotW = canvas.width - left - right;
+  const plotH = canvas.height - top - bottom;
+  const sensitivity = sensitivityValue();
+  const pxPerMm = Math.max(3 * ratio, Number(els.paperSelect?.value || 30) * ratio / 10);
+  if (isMultiWindowData()) {
+    const layouts = multiMontageColumnLayouts(left, top, plotW, plotH, ratio);
+    layouts.forEach((layout) => {
+      const view = layout.view || {};
+      drawWaveColumn(ctx, layout, displayTraces(view.traces || []), view.times || state.windowData?.times || [], {
+        duration,
+        start,
+        pxPerMm,
+        sensitivity,
+        ratio,
+        single: false,
+        active: view.montage === activeMontageValue(),
+        montage: view.montage || activeMontageValue(),
+      });
+    });
+  } else {
+    drawWaveColumn(ctx, { left, top, plotW, plotH }, traces, times, {
+      duration,
+      start,
+      pxPerMm,
+      sensitivity,
+      ratio,
+      single: true,
+      active: true,
+      montage: activeMontageValue(),
+    });
+  }
+  drawCursorLine(ctx, left, top, plotW, plotH, start, duration, ratio);
+}
+
+function multiMontageColumnLayouts(left, top, plotW, plotH, ratio) {
+  const gap = 14 * ratio;
+  const labelGutter = 48 * ratio;
+  const views = multiMontageViews();
+  const count = Math.max(1, views.length);
+  const columnW = Math.max(80 * ratio, (plotW - gap * (count - 1)) / count);
+  return views.map((view, index) => {
+    const columnLeft = left + index * (columnW + gap);
+    const traceLeft = columnLeft + labelGutter;
+    return {
+      left: traceLeft,
+      top,
+      plotW: Math.max(40 * ratio, columnW - labelGutter),
+      plotH,
+      labelLeft: columnLeft + 4 * ratio,
+      labelMaxW: labelGutter - 8 * ratio,
+      numberRight: traceLeft - 4 * ratio,
+      view,
+    };
+  });
+}
+
+function drawViewerWaveformPath(ctx, values, times, options) {
+  const { left, plotW, centerY, start, duration, yScale, strokeStyle, lineWidth } = options;
+  ctx.save();
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  let started = false;
+  (values || []).forEach((value, i) => {
+    const time = Number((times || [])[i]);
+    const voltage = Number(value);
+    if (!Number.isFinite(time) || !Number.isFinite(voltage)) return;
+    const x = left + ((time - start) / duration) * plotW;
+    const y = centerY - voltage * yScale;
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  if (started) ctx.stroke();
+  ctx.restore();
+}
+
+function traceUvPerMm(trace, fallbackSensitivity) {
+  if (trace?.role !== "ecg") return fallbackSensitivity;
+  const values = (trace.values || [])
+    .map((value) => Math.abs(Number(value)))
+    .filter((value) => Number.isFinite(value));
+  if (!values.length) return ECG_UV_PER_MM;
+  values.sort((a, b) => a - b);
+  const p95 = values[Math.max(0, Math.min(values.length - 1, Math.round(values.length * 0.95)))];
+  const target = p95 / ECG_AUTO_TARGET_MM;
+  return Math.max(ECG_AUTO_MIN_UV_PER_MM, Math.min(ECG_AUTO_MAX_UV_PER_MM, target || ECG_UV_PER_MM));
+}
+
+function drawWaveColumn(ctx, layout, traces, times, options) {
+  const { left, top, plotW, plotH } = layout;
+  const { duration, start, pxPerMm, sensitivity, ratio } = options;
+  const rowH = plotH / Math.max(1, traces.length);
+  const labelPx = options.single ? fitFontPx(rowH, ratio) : fitMultiMontageFontPx(rowH, ratio);
+  ctx.save();
+  if (!options.single) {
+    ctx.strokeStyle = options.active ? "rgba(32, 121, 76, .9)" : "rgba(120, 124, 116, .28)";
+    ctx.lineWidth = Math.max(1, (options.active ? 2.2 : 1) * ratio);
+    ctx.strokeRect(left, top, plotW, plotH);
+  }
+  drawGrid(ctx, left, top, plotW, plotH, duration);
+  drawTimeHeader(ctx, left, top, plotW, duration, start, ratio);
+  drawRowBaselines(ctx, left, top, plotW, rowH, traces.length, ratio);
+  drawScalogramSelection(ctx, left, top, plotW, plotH, start, duration, ratio);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, plotW, plotH);
+  ctx.clip();
+  traces.forEach((trace, rowIndex) => {
+    const centerY = top + rowH * (rowIndex + 0.5);
+    const yScale = pxPerMm / Math.max(1e-6, traceUvPerMm(trace, sensitivity));
+    drawViewerWaveformPath(ctx, trace.values, trace.times || times, {
+      left,
+      plotW,
+      centerY,
+      start,
+      duration,
+      yScale,
+      strokeStyle: traceColor(trace, rowIndex, options.montage),
+      lineWidth: trace.role === "ecg" ? 1.25 * ratio : 1.05 * ratio,
+    });
+  });
+  ctx.restore();
+
+  traces.forEach((trace, rowIndex) => {
+    const centerY = top + rowH * (rowIndex + 0.5);
+    ctx.font = `${labelPx}px Arial`;
+    ctx.textAlign = "left";
+    ctx.fillStyle = traceColor(trace, rowIndex, options.montage);
+    const labelX = layout.labelLeft ?? (isMobileViewport() ? 4 * ratio : 45 * ratio);
+    const maxW = layout.labelMaxW ?? (isMobileViewport() ? Math.max(24 * ratio, left - labelX - 4 * ratio) : Math.max(45 * ratio, plotW - (labelX - left) - 3 * ratio));
+    ctx.fillText(nkLabel(trace.label), labelX, centerY + labelPx * 0.35, maxW);
+  });
+
+  drawCursorLine(ctx, left, top, plotW, plotH, start, duration, ratio);
+  if (!options.single) drawMultiMontageHeader(ctx, layout, options, ratio);
+  if (options.single) {
+    drawCalibration(ctx, left, top, plotW, plotH, duration, sensitivity, pxPerMm, ratio);
+    drawMarkerRow(ctx, left, top, plotW, plotH, ratio);
+  } else if (options.active) {
+    drawCalibration(ctx, left, top, plotW, plotH, duration, sensitivity, pxPerMm, ratio);
+  }
+  ctx.restore();
+}
+
+function drawMultiMontageHeader(ctx, layout, options, ratio) {
+  const { left, top, plotW } = layout;
+  const label = options.label || options.montage || "";
+  if (!label) return;
+  const headerH = 16 * ratio;
+  const padX = 5 * ratio;
+  const headerW = Math.min(plotW - 2 * ratio, 78 * ratio);
+  ctx.save();
+  ctx.font = `${11 * ratio}px Arial`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillStyle = options.active ? "#20794c" : "#f7f7f3";
+  ctx.strokeStyle = options.active ? "rgba(20, 94, 56, .95)" : "rgba(120,124,116,.5)";
+  ctx.lineWidth = Math.max(1, ratio);
+  ctx.fillRect(left + 1 * ratio, top + 1 * ratio, headerW, headerH);
+  ctx.strokeRect(left + 1 * ratio, top + 1 * ratio, headerW, headerH);
+  ctx.fillStyle = options.active ? "#fff" : "#374654";
+  ctx.fillText(label, left + padX, top + 1 * ratio + headerH / 2, Math.max(20 * ratio, headerW - 2 * padX));
+  ctx.restore();
+}
+
+function drawGrid(ctx, left, top, plotW, plotH, duration) {
+  ctx.strokeStyle = "rgba(210, 202, 130, .34)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= duration * 5; i++) {
+    const x = left + (i / (duration * 5)) * plotW;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, top + plotH);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(176, 166, 78, .58)";
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i <= duration; i++) {
+    const x = left + (i / duration) * plotW;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, top + plotH);
+    ctx.stroke();
+  }
+}
+
+function drawTimeHeader(ctx, left, top, plotW, duration, start, ratio) {
+  ctx.save();
+  ctx.font = `${12 * ratio}px Arial`;
+  ctx.fillStyle = "rgba(150, 151, 142, .66)";
+  ctx.textAlign = "center";
+  for (let i = 0; i <= duration; i += 2) {
+    const x = left + (i / duration) * plotW;
+    ctx.fillText(`▽ ${formatHeaderTime(start + i)}`, x, top - 8 * ratio);
+  }
+  ctx.restore();
+}
+
+function drawRowBaselines(ctx, left, top, plotW, rowH, count, ratio) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(96, 102, 86, .12)";
+  ctx.lineWidth = 1 * ratio;
+  for (let i = 0; i < count; i++) {
+    const y = top + rowH * (i + 0.5);
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(left + plotW, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawScalogramSelection(ctx, left, top, plotW, plotH, start, duration, ratio) {
+  if (state.researchMode === "test" && state.researchSession) return;
+  const selection = state.dragSelection;
+  if (!selection) return;
+  const selStart = Number(selection.start || 0);
+  const selEnd = selStart + Number(selection.duration || 1);
+  if (selEnd < start || selStart > start + duration) return;
+  const x1 = left + ((Math.max(selStart, start) - start) / duration) * plotW;
+  const x2 = left + ((Math.min(selEnd, start + duration) - start) / duration) * plotW;
+  ctx.save();
+  ctx.fillStyle = "rgba(79, 176, 104, .08)";
+  ctx.strokeStyle = "rgba(79, 176, 104, .52)";
+  ctx.lineWidth = Math.max(0.25, 0.22 * ratio);
+  ctx.fillRect(x1, top, Math.max(2 * ratio, x2 - x1), plotH);
+  ctx.strokeRect(x1, top, Math.max(2 * ratio, x2 - x1), plotH);
+  ctx.restore();
+}
+
+function drawCursorLine(ctx, left, top, plotW, plotH, start, duration, ratio) {
+  if (state.cursorTime === null) return;
+  if (state.cursorTime < start || state.cursorTime > start + duration) return;
+  const x = left + ((state.cursorTime - start) / duration) * plotW;
+  ctx.save();
+  ctx.strokeStyle = "rgba(20, 150, 84, .92)";
+  ctx.lineWidth = Math.max(1.5, 1.4 * ratio);
+  ctx.beginPath();
+  ctx.moveTo(x, top);
+  ctx.lineTo(x, top + plotH);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCalibration(ctx, left, top, plotW, plotH, duration, sensitivity, pxPerMm, ratio) {
+  const x = left + plotW * 0.61;
+  const y = top + plotH * 0.86;
+  const w = plotW / duration;
+  const h = (50 / sensitivity) * pxPerMm;
+  ctx.strokeStyle = "#6f78ba";
+  ctx.fillStyle = "#5665b1";
+  ctx.lineWidth = 1.25 * ratio;
+  ctx.font = `${13 * ratio}px Arial`;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y - h);
+  ctx.stroke();
+  ctx.fillText("1s", x + 5 * ratio, y - 5 * ratio);
+  ctx.fillText("50uV", x + w + 5 * ratio, y - h * 0.45);
+}
+
+function drawMarkerRow(ctx, left, top, plotW, plotH, ratio) {
+  const y = top + plotH - 5 * ratio;
+  ctx.save();
+  ctx.strokeStyle = "rgba(80, 80, 75, .42)";
+  ctx.fillStyle = "#555650";
+  ctx.font = `${12 * ratio}px Arial`;
+  ctx.fillText("M", 35 * ratio, y + 4 * ratio);
+  ctx.beginPath();
+  ctx.moveTo(left, y);
+  ctx.lineTo(left + plotW, y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function onWaveMouseDown(ev) {
+  if (ev.button !== 0 || !state.windowData?.traces?.length) return;
+  if (state.researchMode === "test" && state.researchSession) {
+    state.dragSelection = null;
+    state.suppressNextClick = false;
+    return;
+  }
+  const point = canvasToData(ev);
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
+  const selection = draggedSelection(point.onset, point.onset);
+  state.dragSelection = {
+    ...selection,
+    anchor: point.onset,
+    active: true,
+  };
+  state.suppressNextClick = false;
+}
+
+function onWaveMouseMove(ev) {
+  if (!state.dragSelection?.active) return;
+  const point = canvasToData(ev);
+  state.dragSelection = {
+    ...draggedSelection(state.dragSelection.anchor, point.onset),
+    anchor: state.dragSelection.anchor,
+    active: true,
+    pointer: point.onset,
+  };
+  draw();
+}
+
+function onWaveMouseUp(ev) {
+  if (ev.button !== 0 || !state.dragSelection?.active) return;
+  const point = canvasToData(ev);
+  const moved = Math.abs(point.onset - state.dragSelection.anchor) > 0.03;
+  const selection = draggedSelection(state.dragSelection.anchor, point.onset);
+  state.dragSelection = null;
+  if (!moved) {
+    return;
+  }
+  state.suppressNextClick = true;
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
+  state.cursorTime = selection.start;
+  draw();
+}
+
+function onWaveMouseLeave(ev) {
+  if (!state.dragSelection?.active) return;
+  if (ev?.buttons === 1) return;
+  state.dragSelection = null;
+  draw();
+}
+
+function draggedSelection(anchor, pointer) {
+  const total = recordingDuration();
+  const start = Math.max(0, Math.min(Number(anchor || 0), Number(pointer || 0)));
+  const endLimit = total || state.start + visibleDuration();
+  const end = Math.min(endLimit, Math.max(Number(anchor || 0), Number(pointer || 0)));
+  return {
+    start: preciseNumber(start),
+    duration: preciseNumber(Math.max(0, end - start)),
+  };
+}
+
+function openContextMenu(ev) {
+  ev.preventDefault();
+  if (TEST_ONLY_DISTRIBUTION && !(state.researchMode === "test" && state.researchSession)) {
+    hideContextMenu();
+    return;
+  }
+  const point = canvasToData(ev);
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
+  state.context = { ...point };
+  if (state.researchMode === "test" && state.researchSession) renderResearchRatingContextMenu();
+  else return hideContextMenu();
+  els.contextMenu.style.left = `${ev.clientX}px`;
+  els.contextMenu.style.top = `${ev.clientY}px`;
+  els.contextMenu.classList.remove("hidden");
+}
+
+function openResearchRatingMenu(ev) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  // スマホでは波形の再タッチで三択メニューを閉じる。
+  if (isMobileViewport() && !els.contextMenu.classList.contains("hidden")) {
+    hideContextMenu();
+    return;
+  }
+  const point = canvasToData(ev);
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
+  state.cursorTime = point.onset;
+  state.context = { ...point };
+  draw();
+  renderResearchRatingContextMenu();
+  setStatus(`Selected ${point.channel || point.montageChannel || "waveform"} at ${formatSec(point.onset)}`);
+  els.contextMenu.style.left = `${ev.clientX}px`;
+  els.contextMenu.style.top = `${ev.clientY}px`;
+  els.contextMenu.classList.remove("hidden");
+}
+
+function onWaveClick(ev) {
+  if (ev.button !== 0) return;
+  if (state.suppressNextClick) {
+    state.suppressNextClick = false;
+    return;
+  }
+  if (state.researchMode === "test" && state.researchSession) {
+    openResearchRatingMenu(ev);
+    return;
+  }
+  const point = canvasToData(ev);
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
+  state.cursorTime = point.onset;
+  draw();
+}
+
+function onWaveDoubleClick(ev) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  const point = canvasToData(ev);
+  if (isMultiMontageMode()) setActiveMontage(point.montage, { reload: false });
+  state.dragSelection = null;
+  state.suppressNextClick = true;
+  hideContextMenu();
+  state.cursorTime = point.onset;
+  draw();
+}
+
+function hideContextMenu() {
+  els.contextMenu.classList.add("hidden");
+}
+
+function renderWaveContextMenu() {
+  els.contextMenu.innerHTML = "";
+  hideContextMenu();
+}
+
+function canvasToData(ev) {
+  const rect = els.waveCanvas.getBoundingClientRect();
+  const xCss = ev.clientX - rect.left;
+  const yCss = ev.clientY - rect.top;
+  const ratio = window.devicePixelRatio || 1;
+  const x = xCss * ratio;
+  const y = yCss * ratio;
+  const { left, right, top, bottom } = plotLayout(els.waveCanvas);
+  const plotW = els.waveCanvas.width - left - right;
+  const plotH = els.waveCanvas.height - top - bottom;
+  const duration = visibleDuration();
+  let activeMontage = activeMontageValue();
+  let traces = displayTraces(state.windowData?.traces || []);
+  let columnLeft = left;
+  let columnW = plotW;
+  if (isMultiWindowData()) {
+    const layouts = multiMontageColumnLayouts(left, top, plotW, plotH, ratio);
+    let layoutIndex = layouts.findIndex((layout) => x >= layout.left && x <= layout.left + layout.plotW);
+    if (layoutIndex < 0) {
+      layoutIndex = x < layouts[0].left ? 0 : layouts.length - 1;
+    }
+    const layout = layouts[layoutIndex];
+    const view = state.windowData.montageViews[layoutIndex] || state.windowData.montageViews[0];
+    activeMontage = view?.montage || activeMontage;
+    traces = displayTraces(view?.traces || []);
+    columnLeft = layout.left;
+    columnW = layout.plotW;
+  }
+  const rawTime = state.start + Math.min(1, Math.max(0, (x - columnLeft) / Math.max(1, columnW))) * duration;
+  const { onset, sampleIndex, sfreq } = snapTimeToSample(rawTime);
+  const rowIndex = Math.max(0, Math.min(traces.length - 1, Math.floor((y - top) / (plotH / Math.max(1, traces.length)))));
+  const trace = traces[rowIndex] || {};
+  return {
+    onset,
+    sampleIndex,
+    sfreq,
+    channel: nkLabel(trace.label || ""),
+    montageChannel: nkLabel(trace.label || ""),
+    montage: activeMontage,
+    canvasX: xCss,
+    canvasY: yCss,
+    rowIndex,
+  };
+}
+
 function onContextMenuClick(ev) {
   const button = ev.target.closest("button");
   if (!button || !state.context) return;
@@ -3493,6 +4529,106 @@ function onRightTestPanelClick(ev) {
   if (!target || !els.rightTestPanel?.contains(target)) return;
   ev.preventDefault();
   revisitValidationCase(target.dataset.caseId || "");
+}
+
+function labelForMontage() {
+  return els.montageSelect.options[els.montageSelect.selectedIndex].text;
+}
+
+function displayTraces(traces) {
+  const eegTraces = traces.filter((t) => t.role !== "ecg");
+  const ecgTraces = traces.filter((t) => t.role === "ecg");
+  return [...eegTraces, ...ecgTraces];
+}
+
+function visibleDuration() {
+  const duration = Number(els.durationSelect?.value || state.windowData?.duration);
+  return Number.isFinite(duration) && duration > 0 ? duration : 10;
+}
+
+function recordingDuration() {
+  const candidates = [
+    state.metadata?.raw?.durationSec,
+    state.windowData?.metadata?.raw?.durationSec,
+    state.windowData?.recordingDurationSec,
+    state.windowData?.totalDurationSec,
+    state.windowData?.rawDurationSec,
+  ];
+  for (const value of candidates) {
+    const duration = Number(value);
+    if (Number.isFinite(duration) && duration > 0) return duration;
+  }
+  const times = state.windowData?.times;
+  if (Array.isArray(times) && times.length) {
+    const last = Number(times[times.length - 1]);
+    if (Number.isFinite(last) && last > 0) return Math.max(last, Number(state.start || 0) + last);
+  }
+  return 0;
+}
+
+function clampStart(value, duration = visibleDuration()) {
+  const start = Number(value);
+  const safeStart = Number.isFinite(start) ? start : 0;
+  const total = recordingDuration();
+  const visible = Number(duration);
+  const safeDuration = Number.isFinite(visible) && visible > 0 ? visible : 10;
+  const maxStart = total > 0 ? Math.max(0, total - safeDuration) : Math.max(0, safeStart);
+  return Math.max(0, Math.min(safeStart, maxStart));
+}
+
+function snapTimeToSample(time) {
+  const sfreq = Number(state.windowData?.sfreq || 0);
+  if (Number.isFinite(sfreq) && sfreq > 0) {
+    const sampleIndex = Math.max(0, Math.round(time * sfreq));
+    return { onset: preciseNumber(sampleIndex / sfreq), sampleIndex, sfreq };
+  }
+  return { onset: preciseNumber(time), sampleIndex: null, sfreq: null };
+}
+
+function plotLayout(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  const h = canvas.height;
+  const compact = h < 560 * ratio;
+  if (TEST_ONLY_DISTRIBUTION && isMobileViewport()) {
+    return {
+      left: 62 * ratio,
+      right: 6 * ratio,
+      top: 20 * ratio,
+      bottom: 6 * ratio,
+    };
+  }
+  return {
+    left: 86 * ratio,
+    right: 14 * ratio,
+    top: (compact ? 24 : 31) * ratio,
+    bottom: (compact ? 8 : 17) * ratio,
+  };
+}
+
+function fitFontPx(rowH, ratio) {
+  const maxPx = 12 * ratio;
+  const minPx = 7 * ratio;
+  return Math.max(minPx, Math.min(maxPx, rowH * 0.42));
+}
+
+function fitMultiMontageFontPx(rowH, ratio) {
+  const maxPx = 11 * ratio;
+  const minPx = 9 * ratio;
+  return Math.max(minPx, Math.min(maxPx, rowH * 0.5));
+}
+
+function sensitivityValue() {
+  const raw = String(els.sensitivitySelect.value || "");
+  const value = parseFloat(raw.replace(/[^\d.]/g, ""));
+  return Number.isFinite(value) ? value : 10;
+}
+
+function tcText() {
+  return els.tcSelect.value === "OFF" ? "OFF" : `${els.tcSelect.value}s`;
+}
+
+function hfText() {
+  return els.hfSelect.value === "OFF" ? "OFF" : `${els.hfSelect.value}Hz`;
 }
 
 init().catch((err) => {

@@ -7,9 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def app_source() -> str:
-    return "\n".join((ROOT / "static" / name).read_text(encoding="utf-8") for name in (
-        "app.js", "waveform_controls.js", "waveform_input.js", "waveform_window.js", "waveform_prefetch.js", "waveform_render.js",
-    ))
+    return (ROOT / "static" / "app.js").read_text(encoding="utf-8")
 
 
 def test_window_loading_aborts_superseded_requests() -> None:
