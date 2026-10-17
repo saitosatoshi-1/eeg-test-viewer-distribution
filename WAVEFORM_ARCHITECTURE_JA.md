@@ -4,7 +4,9 @@
 
 | ファイル | 役割 |
 | --- | --- |
-| `static/app.js` | 起動、共有state/els、研究進行、操作イベント、表示設定変更 |
+| `static/app.js` | 起動、共有state/els、研究進行、イベント登録、研究回答への振り分け |
+| `static/waveform_controls.js` | 感度・モンタージュ・TC/HF・表示時間の変更、重複イベント抑制、取得済み波形の再利用判定 |
+| `static/waveform_input.js` | 波形のクリック・タッチ・ドラッグ、三択メニュー開閉、座標からサンプル位置への変換 |
 | `static/request_errors.js` | 同一オリジンのAPI通信、認証ヘッダー、再試行とエラー分類 |
 | `static/waveform_window.js` | 表示条件のキャッシュキー、`loadWindow`、取得結果の適用、モンタージュ利用可否 |
 | `static/waveform_prefetch.js` | 次の2症例と現在症例の全モンタージュの先読み、中止・再開 |
@@ -19,7 +21,9 @@
 操作イベント → `loadWindow` → 応答キャッシュ、または `/api/window`
 → サーバーで読込・フィルター・モンタージュ生成
 → `applyWindowData` → `draw` → `drawWaveColumn` → `drawViewerWaveformPath`。
-感度は取得済みデータの描画倍率を変える。TC/HF/表示時間の操作と再利用判定は `app.js` に残す。
+感度は取得済みデータの描画倍率を変える。TC/HF/表示時間の操作と再利用判定は `waveform_controls.js` にある。
+イベント登録は `app.js` の `bindControls`、波形操作は `waveform_input.js` が担当する。
+三択からの回答保存やValidation決定への振り分けは `app.js` に残す。
 
 ## 読み込みと依存 / Loading and Dependencies
 
@@ -36,5 +40,6 @@
 
 ## 次の整理候補 / Next Boundaries
 
-表示設定コントローラー、マウス・タッチ入力、サーバーの波形ストアを別段階で検討する。
+サーバーの波形ストアと、描画に残る旧複数表示分岐の整理を別段階で検討する。
+今回は操作イベントの登録方法・待機時間・監視タイマー・三択メニュー挙動を変更しない。
 共有状態の完全分離はAPI・操作の回帰試験を整備してから行い、一括置換しない。
