@@ -47,7 +47,9 @@ from research_export_format import (
     research_export_response_payload,
     research_export_debriefing_payload,
 )
-from viewer_security import RecordingGrants
+from viewer_security import CredentialAttemptLimiter, RecordingGrants
+
+CREDENTIAL_ATTEMPTS = CredentialAttemptLimiter()
 
 from eeg_montage import (
     apply_display_filters,
@@ -3712,7 +3714,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         if not ACCESS_CODE:
             return False
         query_code = self.access_code_from_query()
-        if query_code and secrets.compare_digest(query_code, ACCESS_CODE):
+        if query_code and self.credential_matches(query_code, ACCESS_CODE):
             return True
         return self.access_cookie_valid()
 
@@ -3738,7 +3740,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         if not sep:
             return False, "Invalid authentication header."
         username_ok = not ACCESS_USER or secrets.compare_digest(username, ACCESS_USER)
-        if not (username_ok and secrets.compare_digest(password, ACCESS_PASSWORD)):
+        if not (username_ok and self.credential_matches(password, ACCESS_PASSWORD)):
             return False, "Invalid password."
         return True, ""
 
@@ -3746,7 +3748,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         if not PUBLIC_MODE or not ACCESS_CODE:
             return False
         query_code = self.access_code_from_query()
-        if query_code and secrets.compare_digest(query_code, ACCESS_CODE):
+        if query_code and self.credential_matches(query_code, ACCESS_CODE):
             self.redirect_without_access_code()
             return True
         return False
@@ -3763,7 +3765,27 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             return True
         if not ADMIN_CODE:
             return False
-        return secrets.compare_digest(self.headers.get("X-EEG-Viewer-Admin-Code", ""), ADMIN_CODE)
+        return self.credential_matches(self.headers.get("X-EEG-Viewer-Admin-Code", ""), ADMIN_CODE)
+
+    def credential_matches(self, supplied: str, expected: str) -> bool:
+        self.credential_retry_after = 0
+        if not supplied or not expected:
+            return False
+        checks = getattr(self, "_credential_checks", None)
+        if checks is None:
+            checks = self._credential_checks = {}
+        key = hashlib.sha256(json.dumps([supplied, expected]).encode("utf-8")).digest()
+        if key in checks:
+            matched, self.credential_retry_after = checks[key]
+            return matched
+        # Forwarded headers are caller-controlled unless a trusted proxy is configured.
+        # 転送ヘッダーは信用せずsocket接続元を使う。通常のcookie認証は制限しない。
+        peer = str(self.client_address[0]) if self.client_address else "unknown"
+        matched, self.credential_retry_after = CREDENTIAL_ATTEMPTS.attempt(
+            peer, lambda: secrets.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+        )
+        checks[key] = (matched, self.credential_retry_after)
+        return matched
 
     def validation_allowed(self) -> bool:
         return not PUBLIC_MODE or self.validated_cookie_role() == "reviewer" or self.admin_allowed()
@@ -3814,11 +3836,15 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             next_path = self.safe_return_path(form.get("next", ["/"])[0])
         validation_login = parse_qs(urlparse(next_path).query).get("mode", [""])[0].strip().lower() == "validation"
         expected = (VALIDATION_CODE or ADMIN_CODE) if validation_login else (ACCESS_CODE or ACCESS_PASSWORD)
-        if expected and secrets.compare_digest(password, expected):
+        if self.credential_matches(password, expected):
             self.send_login_success(next_path, "reviewer" if validation_login else "participant")
             return True
-        body = self.login_page_html("パスワードが違います。").encode("utf-8")
-        self.send_response(HTTPStatus.UNAUTHORIZED)
+        retry_after = self.credential_retry_after
+        message = "試行回数が上限に達しました。1分ほど待ってから再試行してください。" if retry_after else "パスワードが違います。"
+        body = self.login_page_html(message).encode("utf-8")
+        self.send_response(HTTPStatus.TOO_MANY_REQUESTS if retry_after else HTTPStatus.UNAUTHORIZED)
+        if retry_after:
+            self.send_header("Retry-After", str(retry_after))
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_security_headers()
@@ -3852,6 +3878,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
         return True, ""
 
     def do_GET(self) -> None:
+        self._credential_checks = {}
         try:
             if self.handle_access_link():
                 return
@@ -4021,6 +4048,7 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, status=500)
 
     def do_POST(self) -> None:
+        self._credential_checks = {}
         try:
             if self.handle_access_link():
                 return

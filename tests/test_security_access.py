@@ -42,7 +42,7 @@ class PrivacyAccessTests(unittest.TestCase):
             PRIVATE_DATASET_DIR=self.root / "research/private_datasets",
             VALIDATION_RESULTS_DIR=self.root / "research/validation_results",
             SUBMITTED_RESULTS_DIR=self.root / "research/submitted_results", RECORDING_GRANTS=RecordingGrants(),
-            VALIDATION_WORKFLOW_ENABLED=True)
+            VALIDATION_WORKFLOW_ENABLED=True, CREDENTIAL_ATTEMPTS=app.CredentialAttemptLimiter())
         self.patcher.start()
         store = app.RecordingStore(self.root / "missing")
         # Real request routing/authorization; synthetic waveform responses only. / 描画データは模擬値。
@@ -93,6 +93,45 @@ class PrivacyAccessTests(unittest.TestCase):
             "next": "/?mode=validation" if reviewer else "/"}, form=True)
         self.assertEqual(status, 302)
         return headers["Set-Cookie"].split(";", 1)[0]
+
+    def test_password_budget_does_not_block_existing_cookie_session(self):
+        with patch.object(app, "CREDENTIAL_ATTEMPTS", app.CredentialAttemptLimiter(per_peer=2, total=4)):
+            for form in (False, True):
+                status, _, _ = self.request("/login", {"password": "wrong-synthetic"}, form=form)
+                self.assertEqual(status, 401)
+            status, _, headers = self.request("/login", {"password": "unit-test-access"}, form=True)
+            self.assertEqual(status, 429)
+            self.assertIn("Retry-After", headers)
+            status, _, _ = self.request("/api/admin/submitted-results/list", cookie=self.cookie_a,
+                                        extra={"X-EEG-Viewer-Admin-Code": "unit-test-admin"})
+            self.assertEqual(status, 403)
+            self.assertTrue(self.session().get("sessionToken"))
+
+    def test_basic_and_reviewer_login_share_budget(self):
+        import base64
+        with patch.object(app, "CREDENTIAL_ATTEMPTS", app.CredentialAttemptLimiter(per_peer=1)), patch.object(app, "ACCESS_PASSWORD", "synthetic-basic"), patch.object(app, "ACCESS_USER", ""):
+            encoded = base64.b64encode(b"synthetic:wrong").decode()
+            status, _, _ = self.request("/", extra={"Authorization": "Basic " + encoded})
+            self.assertEqual(status, 401)
+            status, _, _ = self.request("/login", {"accessCode": "unit-test-reviewer", "next": "/?mode=validation"})
+            self.assertEqual(status, 429)
+
+    def test_repeated_checks_count_once_and_block_before_comparison(self):
+        handler = object.__new__(app.EEGRequestHandler)
+        handler.client_address = ("synthetic-peer", 0)
+        with patch.object(app, "CREDENTIAL_ATTEMPTS", app.CredentialAttemptLimiter(per_peer=1)), patch.object(app.secrets, "compare_digest", wraps=app.secrets.compare_digest) as compare:
+            self.assertFalse(handler.credential_matches("wrong", "synthetic"))
+            self.assertFalse(handler.credential_matches("wrong", "synthetic"))
+            self.assertFalse(handler.credential_matches("other", "synthetic"))
+            self.assertEqual(compare.call_count, 1)
+
+    def test_correct_basic_requests_do_not_self_lock(self):
+        import base64
+        encoded = base64.b64encode(b"synthetic:synthetic-basic").decode()
+        with patch.object(app, "CREDENTIAL_ATTEMPTS", app.CredentialAttemptLimiter(per_peer=1)), patch.object(app, "ACCESS_PASSWORD", "synthetic-basic"), patch.object(app, "ACCESS_USER", ""):
+            for _ in range(35):
+                status, _, _ = self.request("/", extra={"Authorization": "Basic " + encoded})
+                self.assertEqual(status, 200)
 
     def session(self, reader="reader-a", cookie=None):
         status, data, _ = self.request("/api/research/test/session?" + urlencode({"dataset": "private:synthetic", "readerId": reader}), cookie=cookie or self.cookie_a)

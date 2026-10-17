@@ -14,6 +14,7 @@ APIの認証・保存先・研究進行・波形表示・操作処理は変更�
 python3 -m unittest discover -s tests -p 'test_export_format.py' -v
 python3 -m unittest discover -s tests -p 'test_result_download_client.py' -v
 python3 -m unittest discover -s tests -p 'test_security_access.py' -v
+python3 -m unittest discover -s tests -p 'test_login_limiter.py' -v
 node --test tests/test_mobile_submission.mjs tests/security_browser.test.js tests/request_errors.test.js tests/test_electronic_consent.js
 ```
 
