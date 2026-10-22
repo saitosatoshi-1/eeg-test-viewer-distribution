@@ -113,6 +113,7 @@ def main() -> None:
 
     print(f"defaultDataset=private:{dataset_id}")
     print(f"sharedTestLink={encoded_link(dataset_id)}")
+    print("Next: run tools/check_dataset_config.py and update the Render allowlist. / 整合性検査とRender許可リストの確認が必要です。")
     if args.cache_tag:
         print(f"cacheTag={args.cache_tag}")
     if changed:

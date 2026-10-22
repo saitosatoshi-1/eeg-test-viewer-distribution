@@ -82,6 +82,11 @@ If the command shows a Japanese placeholder error, replace `<管理コード>` o
 
 For a new dataset ID, update EEG_VIEWER_PUBLIC_DATASET_IDS in Render as well. / 新しいIDを使う場合はRenderの公開データセット許可リストも更新します。既存IDへの差し替えなら変更不要です。
 
+差し替え時は`python3 tools/check_dataset_config.py --expected-id 新しいID`で、JS・HTML・APP_ID・render.yaml・サーバー既定許可リストの整合性を確認します。
+このコマンドは読み取り専用で、設定を自動変更したりRenderへ接続したりしません。
+Renderの実際の公開ID一覧も確認する場合は、秘密情報ではないIDだけを`--public-dataset-ids ID1,ID2`で指定できます。
+ローカル検査の成功だけでは、RenderのEnvironment更新・EDFアップロード・本番反映の完了を意味しません。
+
 ## Verify Render Dataset
 
 After upload, confirm the returned JSON. Expected shape:

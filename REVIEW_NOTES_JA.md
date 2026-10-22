@@ -39,7 +39,17 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 
 ## サンプリング仕様
 
-本番20問は、各master pool内のエポックが可能な限り均等に提示されるように割り付けます。
+本番20問の割付には次の2経路があります。既に割り当てた症例・順序は再開時にも維持します。
+
+### 30＋30症例の場合 / Fixed Forms
+
+採用症例がepileptiform 30件・non_epileptiform 30件で本番20問なら、固定フォーム方式を使います。
+事前生成した6フォームに各群10問ずつを配置し、各症例はフォーム全体で2回登場します。
+フォーム内の患者重複を避け、各フォームに3種類の順序を用意します。同じ群の連続は最大3問です。
+参加者へのフォーム割付は6人単位のブロックで均等化します。
+JSONの`samplingMethod`は`pre_generated_connected_balanced_forms`です。
+
+### 上記以外の場合 / Exposure-balanced Sampling
 
 - epileptiform 10問、non_epileptiform 10問を基本とします。
 - 各エポックの過去の提示回数を数え、提示回数が少ないエポックを優先します。
@@ -49,7 +59,10 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 - 同一テスト者に同じ患者/元記録由来のエポックが複数入らないようにします。
 - ただし、データセットが小さく20問を満たせない場合だけ、最後の補充で重複を許します。
 
-同一患者/元記録キーは、`patientId` や `subjectId` があればそれを使います。なければEDF/recording名の `_start...` より前を同じキーとして扱います。
+JSONの`samplingMethod`は`balanced_random_sampling_with_assignment_exposure_counts`です。
+同一患者の判定は`research_sampling.py`の`research_case_patient_key`に集約しています。
+`patientId`や`subjectId`等があれば利用し、ファイル名の既知形式ではラベル接頭辞やepoch開始位置を除いて患者を正規化します。
+この文書更新で割付アルゴリズム自体は変更していません。
 
 ## JSON保存仕様
 

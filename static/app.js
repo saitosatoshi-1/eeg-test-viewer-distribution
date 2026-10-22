@@ -1050,9 +1050,13 @@ async function retryPendingResearchResponses() {
   const rows = readPendingResearchResponses();
   if (!rows.length) return;
   state.researchRetryingPending = true;
-  const remaining = [];
+  let sent = 0;
   try {
     for (const row of rows) {
+      // Only retry this exact revision; a newer answer must remain queued.
+      // 再送中に追加・更新された回答を古い一覧で上書きしない。
+      const revision = JSON.stringify(row);
+      if (!readPendingResearchResponses().some((current) => JSON.stringify(current) === revision)) continue;
       try {
         await fetchJson("/api/research/test/response", {
           method: "POST",
@@ -1060,20 +1064,23 @@ async function retryPendingResearchResponses() {
           body: JSON.stringify(row.payload),
           retryAttempts: 2,
         });
+        const latest = readPendingResearchResponses();
+        if (!writePendingResearchResponses(latest.filter((current) => JSON.stringify(current) !== revision))) {
+          setStatus("回答はサーバーへ再送しましたが、端末の未送信記録を更新できませんでした。このタブを閉じず管理者に連絡してください。", { error: true });
+          return;
+        }
+        sent += 1;
       } catch (err) {
-        remaining.push(row);
         if (!isRecoverableRequestError(err)) {
-          remaining.push(...rows.slice(rows.indexOf(row) + 1));
           const message = researchSaveFailureMessage(err);
           setStatus(message, { error: true });
-          writePendingResearchResponses(remaining);
           return;
         }
       }
     }
-    writePendingResearchResponses(remaining);
-    if (rows.length !== remaining.length) {
-      setStatus(remaining.length ? `未送信回答を再送しました。一部は未送信です: ${remaining.length}件` : "未送信回答を再送しました");
+    if (sent) {
+      const remaining = readPendingResearchResponses().length;
+      setStatus(remaining ? `未送信回答を再送しました。一部は未送信です: ${remaining}件` : "未送信回答を再送しました");
     }
   } finally {
     state.researchRetryingPending = false;

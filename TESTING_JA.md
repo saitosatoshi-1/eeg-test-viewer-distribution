@@ -8,6 +8,19 @@ APIの認証・保存先・研究進行・波形表示・操作処理は変更�
 
 ## 合成データによる確認 / Synthetic Checks
 
+### 一括実行 / Run All
+
+```bash
+python3 tools/run_checks.py
+```
+
+NodeがPATHにない場合は`--node /absolute/path/to/node`を追加します。
+unittest形式とトップレベル関数形式（tmp_pathを含む）を両方実行し、Nodeテストと公開データセット設定も検査します。
+未知のfixture・Node未導入・一部失敗は終了コード1で停止し、未実行を成功扱いしません。
+認証HTTPテスト用のloopbackポートを利用できる環境で実行してください。
+
+### 個別実行 / Focused Checks
+
 リポジトリ直下で、依存関係を導入済みのPython/Nodeを使う。
 
 ```bash
@@ -16,13 +29,15 @@ python3 -m unittest discover -s tests -p 'test_result_download_client.py' -v
 python3 -m unittest discover -s tests -p 'test_security_access.py' -v
 python3 -m unittest discover -s tests -p 'test_login_limiter.py' -v
 node --test tests/test_mobile_submission.mjs tests/security_browser.test.js tests/request_errors.test.js tests/test_electronic_consent.js
+node tests/pending_queue.test.js
+python3 tools/check_dataset_config.py
 ```
 
 - JSON整形: 回答時設定、usage、空値、false、同意情報、入力データの不変性。
 - 管理ツール: 偽の通信応答と一時フォルダーのみで、ログイン・ヘッダー・接続先・保存バイト列を確認する。本番には接続しない。
 - 認証: 合成データとloopback HTTPを使用し、実EDFや参加者情報は使わない。ローカルポートの利用許可が必要。
 - ブラウザー模擬: 同意、提出、タブ内回復、通信失敗。実ブラウザー性能の保証ではない。
-- その他のPythonテストにはpytest形式の関数もある。unittest discoverだけで全件を実行したと判断しない。
+- その他のPythonテストには関数形式もある。unittest discover単独では全件を実行したことにならないため、全体確認は上の一括コマンドを使う。
 
 ## 実機確認との区別 / Live Verification
 
