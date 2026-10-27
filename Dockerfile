@@ -10,8 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Refresh system TLS trust too. / urllib用のOS証明書も最新化する。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libgomp1 \
+    && apt-get install -y --no-install-recommends build-essential libgomp1 ca-certificates \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

@@ -138,6 +138,19 @@ http://127.0.0.1:8765/
 
 ## Important Notes
 
+### 2026-10-27 CA Update / 証明書更新
+
+Render公式: https://render.com/docs/advisory-emudhra
+
+- Dockerの`ca-certificates`と、Pythonの`certifi>=2026.10.19`を両方更新します。波形・認証・科学計算ライブラリの版は変更しません。
+- Renderでは判読中でない時に`Manual Deploy`から`Clear build cache & deploy`を選び、対象commitとビルド成功を確認します。通常の再起動だけでは更新できません。
+- Dockerのベースイメージcacheも存在するため、デプロイ完了やパッケージ版だけで保護済みと判断しません。
+- デプロイ後のRender Shellで`python tools/check_tls_trust.py --network`を実行し、`verified: true`を確認します。
+- この検査はRender公式案内の固定テスト先と通常のRenderサイトにだけ接続し、研究データ・認証情報・ファイルを送信しません。viewer本体に公開APIは追加しません。
+- system/certifiの両方で、通常サイトは接続成功、問題の証明書2経路は信頼経路・失効関連エラーで拒否される必要があります。旧emSign ECC G3ルートの残存も検査します。DNS失敗・timeout・期限切れ・ホスト名不一致は未確認扱いです。
+- `--network`なしは版と経路の表示だけです。Macでの成功はRender本番の確認を代替しません。
+- Macで実行する管理用ダウンロード/アップロードのPython環境も別途証明書更新が必要です。Renderイメージ更新だけではMac環境は変わりません。
+
 - Only public, fully anonymized EEG data should be referenced from public GitHub URLs.
 - The password screen protects the viewer URL. Do not put the password in shared URLs.
 - The per-page token also protects API calls after login.

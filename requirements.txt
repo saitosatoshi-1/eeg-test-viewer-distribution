@@ -3,3 +3,5 @@ edfio==0.4.13
 numpy==2.2.6
 scipy==1.15.3
 pandas==2.2.3
+# Render eMudhra advisory: bundled CA trust. / 同梱証明書の修正版を必須にする。
+certifi>=2026.10.19
