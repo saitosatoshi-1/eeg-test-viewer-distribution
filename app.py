@@ -1458,9 +1458,9 @@ RESEARCH_INCLUDED_LABELS = {
 }
 RESEARCH_EXCLUDED_LABELS = {"PLED", "GPED"}
 RESEARCH_ALL_LABELS = set(RESEARCH_INCLUDED_LABELS) | RESEARCH_EXCLUDED_LABELS
-RESEARCH_RATING_NEGATIVE = "てんかん性異常なし"
+RESEARCH_RATING_NEGATIVE = "てんかん性放電なし"
 RESEARCH_RATING_UNKNOWN = "判断困難"
-RESEARCH_RATING_POSITIVE = "てんかん性異常あり"
+RESEARCH_RATING_POSITIVE = "てんかん性放電あり"
 RESEARCH_RATINGS = {RESEARCH_RATING_NEGATIVE, RESEARCH_RATING_UNKNOWN, RESEARCH_RATING_POSITIVE}
 RESEARCH_RATING_ALIASES = {
     "epileptiform eventなし": RESEARCH_RATING_NEGATIVE,
@@ -2663,6 +2663,7 @@ def save_research_debriefing(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_rating_correct(rating: str, label_group: str) -> bool | str:
+    rating = RESEARCH_RATING_ALIASES.get(rating.strip().lower(), rating)
     if rating == RESEARCH_RATING_UNKNOWN or not rating:
         return ""
     expected = RESEARCH_RATING_POSITIVE if label_group == "epileptiform" else RESEARCH_RATING_NEGATIVE

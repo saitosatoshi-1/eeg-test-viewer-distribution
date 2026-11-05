@@ -37,7 +37,7 @@ const MONTAGE_LABELS = {
 const DEFAULT_MULTI_MONTAGES = ["conventional", "conventional_average", "longitudinal", "transverse"];
 const RESEARCH_PREFETCH_MONTAGES = ["conventional", "conventional_average", "longitudinal", "a1a2", "average", "cz", "transverse"];
 const RIGHT_PANEL_TABS = ["metadata", "test"];
-const RESEARCH_RATINGS = ["てんかん性異常あり", "てんかん性異常なし", "判断困難"];
+const RESEARCH_RATINGS = ["てんかん性放電あり", "てんかん性放電なし", "判断困難"];
 const LAUNCH_PARAMS = new URLSearchParams(window.location.search || "");
 const WORKFLOW_MODE = String(LAUNCH_PARAMS.get("mode") || "").trim().toLowerCase() === "validation" ? "validation" : "test";
 const DEFAULT_PUBLIC_DATASET_PATH = WORKFLOW_MODE === "validation" ? DEFAULT_PUBLIC_VALIDATION_DATASET_PATH : DEFAULT_PUBLIC_TEST_DATASET_PATH;
@@ -502,7 +502,7 @@ function waveformActionText() {
 }
 
 function tutorialRatingStepText() {
-  return `${isMobileViewport() ? "波形をタッチ" : "波形上を左クリック"}し、表示された三択から てんかん性異常あり / てんかん性異常なし / 判断困難 を選びます。`;
+  return `${isMobileViewport() ? "波形をタッチ" : "波形上を左クリック"}し、表示された三択から てんかん性放電あり / てんかん性放電なし / 判断困難 を選びます。`;
 }
 
 function preferredWindowMontages(activeMontage = activeMontageValue()) {
@@ -2060,22 +2060,22 @@ function renderResearchProgress() {
 
 function researchCaseLabelGroup(caseRow) {
   const group = String(caseRow?.labelGroup || "");
-  if (group === "epileptiform") return "てんかん性異常あり";
-  if (group === "non_epileptiform") return "てんかん性異常なし";
+  if (group === "epileptiform") return "てんかん性放電あり";
+  if (group === "non_epileptiform") return "てんかん性放電なし";
   return group || "-";
 }
 
 function researchExpectedRating(caseRow) {
   const group = String(caseRow?.labelGroup || "");
-  if (group === "epileptiform") return "てんかん性異常あり";
-  if (group === "non_epileptiform") return "てんかん性異常なし";
+  if (group === "epileptiform") return "てんかん性放電あり";
+  if (group === "non_epileptiform") return "てんかん性放電なし";
   return "";
 }
 
 function normalizeResearchRating(rating) {
   const value = String(rating || "").trim().toLowerCase();
-  if (value === "ied present" || value === "ieds present" || value === "てんかん性異常あり") return "てんかん性異常あり";
-  if (value === "ied absent" || value === "ieds absent" || value === "てんかん性異常なし") return "てんかん性異常なし";
+  if (value === "ied present" || value === "ieds present" || value === "てんかん性放電あり" || value === "てんかん性異常あり") return "てんかん性放電あり";
+  if (value === "ied absent" || value === "ieds absent" || value === "てんかん性放電なし" || value === "てんかん性異常なし") return "てんかん性放電なし";
   if (value === "uncertain" || value === "判定困難" || value === "判断困難" || value === "judgment difficult") return "判断困難";
   return String(rating || "");
 }
