@@ -1569,6 +1569,7 @@ function showResearchCompletion() {
   hideResearchDebriefing();
   els.researchCompleteScreen.hidden = false;
   els.researchCompleteScreen.setAttribute("aria-hidden", "false");
+  updateResearchUndoButton();
   const validation = isValidationWorkflow();
   if (els.researchCompleteTitle) els.researchCompleteTitle.textContent = "お疲れ様でした!";
   if (els.researchCompleteMessage) {
@@ -1990,15 +1991,19 @@ function hideResearchInlineProgress() {
   }
 }
 
+function isResearchEndScreenVisible() {
+  return els.researchDebriefScreen?.hidden === false || els.researchCompleteScreen?.hidden === false;
+}
+
 function updateResearchUndoButton() {
   if (!els.researchUndoBtn) return;
-  const hasUndoTarget = isValidationWorkflow() ? activeValidationResponses().length > 0 : activeResearchResponses().length > 0;
-  els.researchUndoBtn.disabled = !hasUndoTarget;
+  els.researchUndoBtn.disabled = isResearchEndScreenVisible() ||
+    !(isValidationWorkflow() ? activeValidationResponses().length : activeResearchResponses().length);
 }
 
 function renderResearchInlineProgress(snapshot = null) {
   updateResearchUndoButton();
-  if ((els.researchCompleteScreen?.hidden === false || els.researchDebriefScreen?.hidden === false) && state.researchMode === "test") {
+  if (isResearchEndScreenVisible() && state.researchMode === "test") {
     const el = els.researchInlineProgress;
     hideResearchInlineProgress();
     if (el) {
@@ -2942,6 +2947,7 @@ function ensureAnsweredCaseIsAvailable(response, validation) {
 }
 
 async function revisitLastAnsweredCase() {
+  if (isResearchEndScreenVisible()) return;
   const validation = isValidationWorkflow();
   const response = lastAnsweredResponse(validation ? activeValidationResponses() : activeResearchResponses());
   if (!response) return;

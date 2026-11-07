@@ -39,6 +39,7 @@ function fixture({ mobile = true, validation = false, fetchResult } = {}) {
     isValidationWorkflow: () => validation,
     hideResearchTutorial() {}, refreshResearchDisplay() {}, hideResearchDebriefing() {},
     hideResearchWaveProgress() {}, updateResearchEmailBody() {}, saveResearchProfile() {},
+    updateResearchUndoButton() {},
     saveActiveResearchRun() {}, clearActiveResearchRun() {},
     researchProfile: () => ({ readerName: "Test" }),
     activeResearchReaderId: () => state.researchSession.readerId,
