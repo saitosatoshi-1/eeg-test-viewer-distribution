@@ -46,7 +46,10 @@ https://eeg-test-viewer.onrender.com/?dataset=private%3Avalidation_v1
 採用症例がepileptiform 30件・non_epileptiform 30件で本番20問なら、固定フォーム方式を使います。
 事前生成した6フォームに各群10問ずつを配置し、各症例はフォーム全体で2回登場します。
 フォーム内の患者重複を避け、各フォームに3種類の順序を用意します。同じ群の連続は最大3問です。
-参加者へのフォーム割付は6人単位のブロックで均等化します。
+次の割付は各セットの「提出完了数＋判読中の予約数」の最小値を優先し、同数時に従来のブロック順を使います。
+中断は管理者が明示確定し、不足分を補充します。未提出だけで自動中断にはしません。
+提出完了は20問・事後同意を含む最終JSONのサーバー保存成功で判定します。
+詳細・管理コマンド・後日再開の扱いは `COMPLETION_ALLOCATION_JA.md` を参照してください。
 JSONの`samplingMethod`は`pre_generated_connected_balanced_forms`です。
 
 ### 上記以外の場合 / Exposure-balanced Sampling
@@ -62,7 +65,7 @@ JSONの`samplingMethod`は`pre_generated_connected_balanced_forms`です。
 JSONの`samplingMethod`は`balanced_random_sampling_with_assignment_exposure_counts`です。
 同一患者の判定は`research_sampling.py`の`research_case_patient_key`に集約しています。
 `patientId`や`subjectId`等があれば利用し、ファイル名の既知形式ではラベル接頭辞やepoch開始位置を除いて患者を正規化します。
-この文書更新で割付アルゴリズム自体は変更していません。
+固定セットの構成・順序生成と、上記以外の均等抽出アルゴリズムは変更していません。
 
 ## JSON保存仕様
 

@@ -73,6 +73,10 @@ from research_sampling import (
     stable_balanced_research_order,
 )
 from research_private_dataset import extract_private_dataset_zip, private_dataset_payload
+from research_allocation import (
+    allocation_counts, allocation_status, completed_submission_reader,
+    fixed_assignments, next_completion_balanced_assignment,
+)
 from research_validation import (
     VALIDATION_DECISION_ADOPT,
     VALIDATION_DECISION_ALIASES,
@@ -1892,6 +1896,7 @@ def save_research_assignment(
         "phase": phase,
         "assignedAt": utc_now_iso(),
         "caseIds": case_ids,
+        "allocationStatus": "active",
     }
     if isinstance(design, dict):
         # 固定問題セットの監査情報を割当記録と結果JSONの両方に残す。
@@ -1910,6 +1915,10 @@ def save_research_assignment(
             "nonEpileptiformCount",
             "caseAppearancesAcrossForms",
             "maxConsecutiveSameLabel",
+            "allocationPolicy",
+            "assignmentKind",
+            "replacesAssignmentId",
+            "allocationCountsBefore",
         ):
             if design.get(key) not in (None, ""):
                 next_row[key] = design[key]
@@ -1921,6 +1930,9 @@ def save_research_assignment(
             break
     if not replaced:
         assignments.append(next_row)
+    for row in assignments:
+        if isinstance(row, dict) and row.get("assignmentId") == next_row.get("replacesAssignmentId"):
+            row["replacementAssignmentId"] = assignment_id
     json_write(research_assignment_path(dataset_dir, phase), {
         "updatedAt": utc_now_iso(),
         "phase": phase,
@@ -1970,6 +1982,8 @@ def research_assignment_design_payload(assignment: Any) -> dict[str, Any]:
         "caseAppearancesAcrossForms",
         "maxConsecutiveSameLabel",
         "caseIds",
+        "allocationPolicy",
+        "assignmentKind",
     )
     return {key: assignment.get(key) for key in keys if assignment.get(key) not in (None, "")}
 
@@ -1987,6 +2001,78 @@ def research_fixed_form_assignment_count(dataset_dir: Path, phase: str = "1") ->
 def research_fixed_forms_path(dataset_dir: Path, phase: str = "1") -> Path:
     filename = f"phase{safe_filename_part(phase, '1')}_{RESEARCH_FIXED_FORM_DESIGN_VERSION}.json"
     return dataset_dir / "assignments" / filename
+
+
+def write_research_assignment_records(dataset_dir: Path, rows: list[dict[str, Any]]) -> None:
+    json_write(research_assignment_path(dataset_dir), {
+        "updatedAt": utc_now_iso(), "phase": "1", "assignments": rows,
+    })
+
+
+def reconcile_research_completions(dataset_dir: Path, dataset_id: str) -> list[dict[str, Any]]:
+    """Recover legacy or interrupted receipt writes. / 旧提出・保存直後の中断にも対応。"""
+    rows = load_research_assignments(dataset_dir).get("assignments", [])
+    if not isinstance(rows, list):
+        rows = []
+    pending = [row for row in fixed_assignments(rows) if not row.get("completionReceipt")]
+    changed = False
+    if pending:
+        for path in sorted((SUBMITTED_RESULTS_DIR / safe_filename_part(dataset_id, "dataset")).glob("*.json")):
+            try:
+                document = json_read(path, {})
+            except (ValueError, UnicodeError):
+                continue
+            for row in list(pending):
+                if completed_submission_reader(document, row, dataset_id, RESEARCH_RATINGS | set(RESEARCH_RATING_ALIASES)):
+                    row["completionReceipt"] = path.relative_to(SUBMITTED_RESULTS_DIR).as_posix()
+                    row["allocationStatus"] = "completed"
+                    row["completionRecordedAt"] = utc_now_iso()
+                    pending.remove(row)
+                    changed = True
+    if changed:
+        write_research_assignment_records(dataset_dir, rows)
+    return rows
+
+
+def research_allocation_overview(dataset_dir: Path, dataset_id: str) -> dict[str, Any]:
+    with RESEARCH_RESPONSE_LOCK:
+        rows = fixed_assignments(reconcile_research_completions(dataset_dir, dataset_id))
+        return {
+            "datasetId": dataset_id, "counts": allocation_counts(rows),
+            "assignments": [{
+                **{key: row.get(key, "") for key in (
+                    "assignmentId", "readerId", "formId", "orderVersion", "assignedAt",
+                    "replacesAssignmentId", "replacementAssignmentId", "completionReceipt",
+                )},
+                "status": allocation_status(row),
+            } for row in rows],
+        }
+
+
+def change_research_reservation(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
+    dataset = load_research_dataset(str(dataset_dir))
+    dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+    status = payload.get("status")
+    if not isinstance(status, str) or status not in {"active", "interrupted"}:
+        raise ValueError("Only active/interrupted reservations can be set.")
+    with RESEARCH_RESPONSE_LOCK:
+        rows = reconcile_research_completions(dataset_dir, dataset_id)
+        target = next((row for row in fixed_assignments(rows)
+                       if row.get("assignmentId") == payload.get("assignmentId")), None)
+        if not target:
+            raise ValueError("Fixed-form assignment not found.")
+        if allocation_status(target) == "completed":
+            raise ValueError("A completed submission cannot be marked interrupted.")
+        if allocation_status(target) != payload.get("expectedStatus"):
+            raise ValueError("Assignment status changed. Refresh the overview before retrying.")
+        target["allocationStatus"] = status
+        target["reservationChangedAt"] = utc_now_iso()
+        target.setdefault("reservationHistory", []).append({
+            "status": status, "at": target["reservationChangedAt"], "source": "admin_confirmation",
+        })
+        write_research_assignment_records(dataset_dir, rows)
+        return research_allocation_overview(dataset_dir, dataset_id)
 
 
 def research_fixed_form_case_fingerprint(rows: list[dict[str, Any]]) -> str:
@@ -2348,6 +2434,16 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
         ]
         if assignment_ids:
             all_cases = research_assigned_case_rows(dataset, reader_id, phase, assignment_ids)
+            if assignment.get("allocationStatus") == "interrupted":
+                rows = load_research_assignments(dataset_dir).get("assignments", [])
+                for row in rows:
+                    if row.get("assignmentId") == assignment.get("assignmentId"):
+                        row["allocationStatus"] = "active"
+                        row["resumedAfterInterruptionAt"] = utc_now_iso()
+                        row.setdefault("reservationHistory", []).append({
+                            "status": "active", "at": row["resumedAfterInterruptionAt"], "source": "session_resume",
+                        })
+                write_research_assignment_records(dataset_dir, rows)
         else:
             included = [row for row in research_case_rows(dataset) if bool(row.get("include", True))]
             group_counts = {
@@ -2360,10 +2456,9 @@ def research_session(payload: dict[str, Any]) -> dict[str, Any]:
             }
             if fixed_forms_available:
                 form_definitions = load_or_create_research_fixed_forms(dataset_dir, dataset, phase)
-                assignment = fixed_research_form_assignment_slot(
-                    str(dataset.get("datasetId") or ""),
-                    research_fixed_form_assignment_count(dataset_dir, phase),
-                )
+                dataset_id = str(dataset.get("datasetId") or dataset_dir.name)
+                rows = reconcile_research_completions(dataset_dir, dataset_id)
+                assignment = next_completion_balanced_assignment(dataset_id, rows)
                 assigned = fixed_research_form_order(
                     form_definitions[str(assignment["formId"])],
                     str(dataset.get("datasetId") or ""),
@@ -3458,6 +3553,11 @@ def unique_submission_path(dataset_id: str, filename: str) -> Path:
 
 
 def save_research_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
+    with RESEARCH_RESPONSE_LOCK:
+        return save_research_result_submission_unlocked(payload)
+
+
+def save_research_result_submission_unlocked(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_dir = research_dataset_path(payload.get("datasetPath") or payload.get("dataset"))
     dataset = load_research_dataset(str(dataset_dir))
     reader_id = str(payload.get("readerId") or "").strip() or None
@@ -3478,6 +3578,9 @@ def save_research_result_submission(payload: dict[str, Any]) -> dict[str, Any]:
         )
     target = unique_submission_path(str(dataset.get("datasetId") or dataset_dir.name), filename)
     target.write_text(json_text, encoding="utf-8")
+    # Record completion only after the final JSON exists and contains all 20 answers.
+    # JSON保存成功後だけ完了扱いにする。途中提出やメール未着とは区別する。
+    reconcile_research_completions(dataset_dir, str(dataset.get("datasetId") or dataset_dir.name))
     return {
         "ok": True,
         "submittedAt": utc_now_iso(),
@@ -3935,6 +4038,12 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_json(submitted_result_inventory())
+            if path == "/api/admin/research-assignments":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
+                dataset_dir = research_dataset_path(required(qs, "dataset"))
+                dataset = load_research_dataset(str(dataset_dir))
+                return self.send_json(research_allocation_overview(dataset_dir, str(dataset.get("datasetId") or dataset_dir.name)))
             if path == "/api/admin/submitted-results/item":
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
@@ -4103,6 +4212,10 @@ class EEGRequestHandler(BaseHTTPRequestHandler):
                 if not self.admin_allowed():
                     return self.send_json({"error": "Admin access is required."}, status=403)
                 return self.send_json(upload_private_dataset(payload))
+            if parsed.path == "/api/admin/research-assignments/status":
+                if not self.admin_allowed():
+                    return self.send_json({"error": "Admin access is required."}, status=403)
+                return self.send_json(change_research_reservation(payload))
             if parsed.path == "/api/research/validation/response":
                 return self.send_json(save_validation_response(payload))
             if parsed.path == "/api/research/validation/response/undo":

@@ -94,6 +94,32 @@ class PrivacyAccessTests(unittest.TestCase):
         self.assertEqual(status, 302)
         return headers["Set-Cookie"].split(";", 1)[0]
 
+    def test_assignment_management_requires_admin_and_keeps_resumption(self):
+        session = self.session()
+        url = "/api/admin/research-assignments?dataset=private%3Asynthetic"
+        status, _, _ = self.request(url, cookie=self.cookie_a)
+        self.assertEqual(status, 403)
+        header = {"X-EEG-Viewer-Admin-Code": "unit-test-admin"}
+        status, overview, _ = self.request(url, cookie=self.cookie_a, extra=header)
+        self.assertEqual(status, 200)
+        assignment = overview["assignments"][0]
+        payload = {"dataset": "private:synthetic", "assignmentId": assignment["assignmentId"],
+                   "expectedStatus": "active", "status": "interrupted"}
+        route = "/api/admin/research-assignments/status"
+        status, _, _ = self.request(route, payload, cookie=self.cookie_a)
+        self.assertEqual(status, 403)
+        status, _, _ = self.request(route, payload, cookie=self.cookie_a, extra={**header, "X-EEG-Viewer-Token": "wrong"})
+        self.assertEqual(status, 403)
+        status, result, _ = self.request(route, payload, cookie=self.cookie_a, extra=header)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["assignments"][0]["status"], "interrupted")
+        status, resumed, _ = self.request("/api/research/test/session?dataset=private%3Asynthetic&readerId=" + session["readerId"],
+                                          cookie=self.cookie_a, session=session["sessionToken"])
+        self.assertEqual(status, 200)
+        self.assertEqual(resumed["formId"], session["formId"])
+        status, result, _ = self.request(url, cookie=self.cookie_a, extra=header)
+        self.assertEqual(result["assignments"][0]["status"], "active")
+
     def test_password_budget_does_not_block_existing_cookie_session(self):
         with patch.object(app, "CREDENTIAL_ATTEMPTS", app.CredentialAttemptLimiter(per_peer=2, total=4)):
             for form in (False, True):
